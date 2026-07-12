@@ -41,7 +41,7 @@ function clientKey(request: Request): string {
 
 export function authorizeAgentRequest(request: Request): Record<string, string> {
   const config = parseDeploymentEnvironment();
-  if (config.agentMode !== "HOSTED_REPLAY" || !config.agentApiKey) {
+  if (config.agentMode === "DISABLED" || !config.agentApiKey) {
     throw new AgentHttpError(
       503,
       "AGENT_SERVICE_NOT_CONFIGURED",
