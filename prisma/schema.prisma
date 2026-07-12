@@ -1,0 +1,323 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../packages/persistence/src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum IncidentStatus {
+  RECEIVED
+  WAITING_FOR_SOURCE
+  ANALYSING
+  PLAN_READY
+  WAITING_FOR_USER
+  SIGNING
+  EXECUTING
+  COMPLETED
+  PARTIAL
+  FAILED
+  CANCELLED
+}
+
+enum ScanStatus {
+  COMPLETE
+  PARTIAL
+  FAILED
+}
+
+enum SupportStatus {
+  DETECTED
+  SUPPORTED
+  UNSUPPORTED
+  UNKNOWN
+}
+
+enum AssetType {
+  NATIVE
+  ERC20
+  ERC721
+  ERC1155
+}
+
+enum ApprovalType {
+  ERC20_ALLOWANCE
+  ERC721_TOKEN
+  NFT_OPERATOR
+}
+
+enum RescuePlanStatus {
+  DRAFT
+  READY
+  PARTIAL
+  STALE
+  COMPLETED
+}
+
+enum RescueActionType {
+  TRANSFER_NATIVE
+  TRANSFER_ERC20
+  TRANSFER_ERC721
+  TRANSFER_ERC1155
+  REVOKE_ERC20_APPROVAL
+  REVOKE_NFT_OPERATOR
+  CLAIM_SUPPORTED_AIRDROP
+  WITHDRAW_SUPPORTED_POSITION
+  CUSTOM_SUPPORTED_ADAPTER
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ActionSimulationStatus {
+  NOT_SIMULATED
+  PASSED
+  FAILED
+  EXPIRED
+}
+
+enum SimulationStatus {
+  SUCCEEDED
+  REVERTED
+  UNSUPPORTED
+  ERROR
+}
+
+enum ExecutionAttemptStatus {
+  CREATED
+  WAITING_FOR_SIGNATURE
+  SUBMITTED
+  CONFIRMED
+  PARTIAL
+  FAILED
+}
+
+enum AgentJobStatus {
+  RECEIVED
+  WAITING_FOR_SOURCE
+  ANALYSING
+  PLAN_READY
+  WAITING_FOR_USER
+  SIGNING
+  EXECUTING
+  COMPLETED
+  PARTIAL
+  FAILED
+}
+
+model Incident {
+  id                        String             @id @db.VarChar(256)
+  chainId                   BigInt             @map("chain_id")
+  sourceAddress             String             @map("source_address") @db.VarChar(42)
+  destinationAddress        String             @map("destination_address") @db.VarChar(42)
+  status                    IncidentStatus
+  ownershipStatementVersion String             @map("ownership_statement_version") @db.VarChar(32)
+  ownershipAttestedAt       DateTime           @map("ownership_attested_at") @db.Timestamptz(3)
+  createdAt                 DateTime           @map("created_at") @db.Timestamptz(3)
+  updatedAt                 DateTime           @map("updated_at") @db.Timestamptz(3)
+  scans                     WalletScan[]
+  plans                     RescuePlan[]
+  executionAttempts         ExecutionAttempt[]
+  agentJobs                 AgentJob[]
+
+  @@index([chainId, sourceAddress])
+  @@map("incidents")
+}
+
+model WalletScan {
+  id              String       @id @db.VarChar(256)
+  incidentId      String       @map("incident_id") @db.VarChar(256)
+  chainId         BigInt       @map("chain_id")
+  address         String       @db.VarChar(42)
+  status          ScanStatus
+  providerId      String       @map("provider_id") @db.VarChar(128)
+  observedAtBlock Decimal      @map("observed_at_block") @db.Decimal(78, 0)
+  observedAt      DateTime     @map("observed_at") @db.Timestamptz(3)
+  warnings        String[]     @default([])
+  incident        Incident     @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  assets          Asset[]
+  approvals       Approval[]
+
+  @@index([incidentId, observedAt])
+  @@map("wallet_scans")
+}
+
+model Asset {
+  id                  String        @id @db.VarChar(256)
+  scanId              String        @map("scan_id") @db.VarChar(256)
+  chainId             BigInt        @map("chain_id")
+  ownerAddress        String        @map("owner_address") @db.VarChar(42)
+  supportStatus       SupportStatus @map("support_status")
+  observedAtBlock     Decimal       @map("observed_at_block") @db.Decimal(78, 0)
+  discoverySource     String        @map("discovery_source") @db.VarChar(128)
+  confidence          Decimal       @db.Decimal(5, 4)
+  assetType           AssetType     @map("asset_type")
+  contractAddress     String?       @map("contract_address") @db.VarChar(42)
+  tokenId             Decimal?      @map("token_id") @db.Decimal(78, 0)
+  name                String?       @db.VarChar(128)
+  symbol              String?       @db.VarChar(32)
+  decimals            Int?
+  balance             Decimal?      @db.Decimal(78, 0)
+  estimatedValueUsd   Decimal?      @map("estimated_value_usd") @db.Decimal(38, 8)
+  valuationSource     String?       @map("valuation_source") @db.VarChar(128)
+  valuationObservedAt DateTime?     @map("valuation_observed_at") @db.Timestamptz(3)
+  scan                WalletScan    @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([scanId, assetType])
+  @@index([chainId, ownerAddress])
+  @@map("assets")
+}
+
+model Approval {
+  id                String        @id @db.VarChar(256)
+  scanId            String        @map("scan_id") @db.VarChar(256)
+  chainId           BigInt        @map("chain_id")
+  ownerAddress      String        @map("owner_address") @db.VarChar(42)
+  supportStatus     SupportStatus @map("support_status")
+  observedAtBlock   Decimal       @map("observed_at_block") @db.Decimal(78, 0)
+  discoverySource   String        @map("discovery_source") @db.VarChar(128)
+  approvalType      ApprovalType  @map("approval_type")
+  tokenAddress      String?       @map("token_address") @db.VarChar(42)
+  collectionAddress String?       @map("collection_address") @db.VarChar(42)
+  spenderAddress    String?       @map("spender_address") @db.VarChar(42)
+  operatorAddress   String?       @map("operator_address") @db.VarChar(42)
+  tokenId           Decimal?      @map("token_id") @db.Decimal(78, 0)
+  amount            Decimal?      @db.Decimal(78, 0)
+  standard          String?       @db.VarChar(16)
+  approved          Boolean?
+  scan              WalletScan    @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([scanId, approvalType])
+  @@index([chainId, ownerAddress])
+  @@map("approvals")
+}
+
+model RescuePlan {
+  id                String             @id @db.VarChar(256)
+  incidentId        String             @map("incident_id") @db.VarChar(256)
+  version           Int
+  policyVersion     String             @map("policy_version") @db.VarChar(64)
+  chainId           BigInt             @map("chain_id")
+  sourceAddress     String             @map("source_address") @db.VarChar(42)
+  destinationAddress String            @map("destination_address") @db.VarChar(42)
+  observedAtBlock   Decimal            @map("observed_at_block") @db.Decimal(78, 0)
+  status            RescuePlanStatus
+  omissions         Json               @default("[]")
+  integrityHash     String             @map("integrity_hash") @db.Char(66)
+  createdAt         DateTime           @map("created_at") @db.Timestamptz(3)
+  incident          Incident           @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  actions           RescueAction[]
+  simulations       Simulation[]
+  executionAttempts ExecutionAttempt[]
+
+  @@unique([incidentId, version])
+  @@index([incidentId, createdAt])
+  @@map("rescue_plans")
+}
+
+model RescueAction {
+  id                String                 @id @db.VarChar(256)
+  planId            String                 @map("plan_id") @db.VarChar(256)
+  position          Int
+  chainId           BigInt                 @map("chain_id")
+  sourceAddress     String                 @map("source_address") @db.VarChar(42)
+  actionType        RescueActionType       @map("action_type")
+  dependencies      String[]               @default([])
+  evidenceIds       String[]               @map("evidence_ids") @default([])
+  expectedEffects   Json                   @map("expected_effects")
+  riskLevel         RiskLevel              @map("risk_level")
+  estimatedValueUsd Decimal?               @map("estimated_value_usd") @db.Decimal(38, 8)
+  supportStatus     SupportStatus          @map("support_status")
+  simulationStatus  ActionSimulationStatus @map("simulation_status")
+  parameters        Json
+  plan              RescuePlan             @relation(fields: [planId], references: [id], onDelete: Cascade)
+  simulations       Simulation[]
+
+  @@unique([planId, position])
+  @@index([planId, actionType])
+  @@map("rescue_actions")
+}
+
+model Simulation {
+  id              String           @id @db.VarChar(256)
+  planId          String           @map("plan_id") @db.VarChar(256)
+  actionId        String           @map("action_id") @db.VarChar(256)
+  providerId      String           @map("provider_id") @db.VarChar(128)
+  status          SimulationStatus
+  planHash        String           @map("plan_hash") @db.Char(66)
+  observedAtBlock Decimal          @map("observed_at_block") @db.Decimal(78, 0)
+  gasEstimate     Decimal?         @map("gas_estimate") @db.Decimal(78, 0)
+  expectedEffects Json             @map("expected_effects")
+  assetChanges    Json             @map("asset_changes")
+  warnings        String[]         @default([])
+  failureReason   String?          @map("failure_reason") @db.VarChar(1000)
+  simulatedAt     DateTime         @map("simulated_at") @db.Timestamptz(3)
+  expiresAt       DateTime         @map("expires_at") @db.Timestamptz(3)
+  plan            RescuePlan       @relation(fields: [planId], references: [id], onDelete: Cascade)
+  action          RescueAction     @relation(fields: [actionId], references: [id], onDelete: Cascade)
+
+  @@index([planId, status])
+  @@index([actionId, simulatedAt])
+  @@map("simulations")
+}
+
+model ExecutionAttempt {
+  id              String                 @id @db.VarChar(256)
+  incidentId      String                 @map("incident_id") @db.VarChar(256)
+  planId          String                 @map("plan_id") @db.VarChar(256)
+  attemptNumber   Int                    @map("attempt_number")
+  status          ExecutionAttemptStatus
+  transactionHash String?                @map("transaction_hash") @db.Char(66)
+  submittedAt     DateTime?              @map("submitted_at") @db.Timestamptz(3)
+  confirmedAt     DateTime?              @map("confirmed_at") @db.Timestamptz(3)
+  errorCode       String?                @map("error_code") @db.VarChar(128)
+  errorMessage    String?                @map("error_message") @db.VarChar(1000)
+  createdAt       DateTime               @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime               @map("updated_at") @db.Timestamptz(3)
+  incident        Incident               @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  plan            RescuePlan             @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, attemptNumber])
+  @@index([incidentId, status])
+  @@map("execution_attempts")
+}
+
+model AgentJob {
+  id            String               @id @db.VarChar(256)
+  requestId     String?              @map("request_id") @db.VarChar(256)
+  incidentId    String?              @map("incident_id") @db.VarChar(256)
+  service       String               @db.VarChar(64)
+  status        AgentJobStatus
+  dashboardUrl  String?              @map("dashboard_url") @db.VarChar(2048)
+  resultSummary String?              @map("result_summary") @db.VarChar(2000)
+  errorCode     String?              @map("error_code") @db.VarChar(128)
+  errorMessage  String?              @map("error_message") @db.VarChar(1000)
+  revision      Int
+  state         Json?
+  createdAt     DateTime             @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime             @map("updated_at") @db.Timestamptz(3)
+  incident      Incident?            @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+  transitions   AgentJobTransition[]
+
+  @@unique([requestId])
+  @@index([incidentId, status])
+  @@map("agent_jobs")
+}
+
+model AgentJobTransition {
+  jobId     String         @map("job_id") @db.VarChar(256)
+  sequence  Int
+  fromStatus AgentJobStatus? @map("from_status")
+  toStatus  AgentJobStatus @map("to_status")
+  reason    String         @db.VarChar(64)
+  occurredAt DateTime      @map("occurred_at") @db.Timestamptz(3)
+  job       AgentJob       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@id([jobId, sequence])
+  @@map("agent_job_transitions")
+}

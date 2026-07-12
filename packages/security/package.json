@@ -1,0 +1,17 @@
+{
+  "name": "@safeexit/security",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./headers": "./src/headers.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@safeexit/shared": "*",
+    "zod": "4.4.3"
+  }
+}

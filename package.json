@@ -1,0 +1,47 @@
+{
+  "name": "safeexit",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run db:generate && npm run build --workspace @safeexit/web",
+    "ci": "npm run db:validate && npm run lint && npm run typecheck && npm test && npm run build",
+    "dev": "npm run dev --workspace @safeexit/web",
+    "lint": "eslint . --max-warnings=0",
+    "db:generate": "prisma generate",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:validate": "prisma validate",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "contracts:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/forge.ps1 build",
+    "contracts:test": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/forge.ps1 test",
+    "demo:anvil": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/start-anvil.ps1",
+    "demo:prepare": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/prepare-demo.ps1",
+    "demo:seed": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/seed-demo.ps1",
+    "demo:setup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/setup-anvil.ps1",
+    "demo:rescue": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/run-rescue.ps1",
+    "demo:attacker": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/run-attacker-simulation.ps1",
+    "demo:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/stop-demo.ps1"
+  },
+  "devDependencies": {
+    "@openzeppelin/contracts": "^5.6.1",
+    "@types/node": "^20.19.0",
+    "dotenv": "17.4.2",
+    "eslint": "^9.39.2",
+    "eslint-config-next": "16.2.10",
+    "prisma": "7.8.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "overrides": {
+    "@hono/node-server": "1.19.13",
+    "postcss": "8.5.17"
+  }
+}

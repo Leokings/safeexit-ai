@@ -1,0 +1,17 @@
+{
+  "name": "@safeexit/agent-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schemas": "./src/schemas.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@safeexit/shared": "*",
+    "zod": "4.4.3"
+  }
+}
