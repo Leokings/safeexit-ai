@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "build": "npm run db:generate && npm run build --workspace @safeexit/web",
-    "ci": "npm run db:validate && npm run lint && npm run typecheck && npm test && npm run build",
+    "ci": "npm run db:validate && npm run db:generate && npm run lint && npm run typecheck && npm test && npm run build",
     "dev": "npm run dev --workspace @safeexit/web",
     "lint": "eslint . --max-warnings=0",
     "db:generate": "prisma generate",
