@@ -93,7 +93,7 @@ verification.
 
 ### Prepare once
 
-Prerequisites are Node.js 20.9+, `npm install`, and Foundry. The scripts also
+Prerequisites are Node.js 24, `npm install`, and Foundry. The scripts also
 detect workspace-local Foundry binaries in `.tools/foundry`.
 
 ```powershell
