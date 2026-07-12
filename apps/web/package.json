@@ -14,6 +14,7 @@
     "@safeexit/agent-service": "*",
     "@safeexit/ai": "*",
     "@safeexit/chain": "*",
+    "@safeexit/execution": "*",
     "@safeexit/planner": "*",
     "@safeexit/persistence": "*",
     "@safeexit/scanner": "*",

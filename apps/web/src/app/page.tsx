@@ -111,7 +111,7 @@ export default function HomePage() {
                 <p className="mt-1 text-sm font-semibold">{label}</p>
                 {index === 3 && (
                   <span className="mt-1 block font-mono text-[9px] uppercase text-warning">
-                    Browser integration pending
+                    Testnet wallet pilot active
                   </span>
                 )}
               </div>

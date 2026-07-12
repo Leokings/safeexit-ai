@@ -1,4 +1,8 @@
-import { createDedicatedPublicClient, xLayerMainnetConfig } from "@safeexit/chain";
+import {
+  createDedicatedPublicClient,
+  xLayerMainnetConfig,
+  xLayerTestnetConfig,
+} from "@safeexit/chain";
 import { checkDatabaseConnection } from "@safeexit/persistence";
 
 import { parseDeploymentEnvironment } from "@/lib/deployment-env";
@@ -42,6 +46,16 @@ export async function GET(): Promise<Response> {
       ).getBlockNumber();
       checks.xLayerRpc = `connected:${block.toString()}`;
       checks.okxWalletApi = "configured";
+    }
+    if (config.nodeEnv === "production") {
+      if (!config.xLayerTestnetRpcUrl) {
+        throw new Error("XLAYER_TESTNET_RPC_URL is required for the signing pilot");
+      }
+      const testnetBlock = await createDedicatedPublicClient(
+        xLayerTestnetConfig,
+        config.xLayerTestnetRpcUrl,
+      ).getBlockNumber();
+      checks.xLayerTestnetRpc = `connected:${testnetBlock.toString()}`;
     }
     if (config.aiMode === "GATEWAY" && !config.aiModel?.includes("/")) {
       throw new Error("SAFEEXIT_AI_MODEL must use provider/model format");

@@ -26,6 +26,28 @@ function updateData<T extends { id: string }>(data: T): Omit<T, "id"> {
 export class PrismaSafeExitRepository {
   constructor(private readonly client: PrismaClient) {}
 
+  async getIncident(id: string): Promise<Incident | undefined> {
+    const record = await this.client.incident.findUnique({ where: { id } });
+    if (!record) {
+      return undefined;
+    }
+    const domain = {
+      id: record.id,
+      chainId: Number(record.chainId),
+      sourceAddress: record.sourceAddress,
+      destinationAddress: record.destinationAddress,
+      status: record.status,
+      ownershipAttestation: {
+        accepted: true as const,
+        statementVersion: record.ownershipStatementVersion,
+        attestedAt: record.ownershipAttestedAt.toISOString(),
+      },
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    };
+    return (await import("@safeexit/shared")).incidentSchema.parse(domain);
+  }
+
   async saveIncident(value: unknown): Promise<Incident> {
     const domain = (await import("@safeexit/shared")).incidentSchema.parse(value);
     const data = mapIncident(domain);

@@ -247,6 +247,25 @@ describe("deterministic wallet scanner", () => {
     ).rejects.toThrow("Scanner is not configured for chain ID 1952");
   });
 
+  it("scopes evidence IDs to the incident scan", async () => {
+    const scanner = createScanner(createMockReader());
+    const first = await scanner.scan({
+      incidentId: "incident-a",
+      chainId: 31_337,
+      address: ownerAddress,
+      observedAtBlock: 100n,
+    });
+    const second = await scanner.scan({
+      incidentId: "incident-b",
+      chainId: 31_337,
+      address: ownerAddress,
+      observedAtBlock: 100n,
+    });
+
+    expect(first.scan.assets[0]?.id).not.toBe(second.scan.assets[0]?.id);
+    expect(first.scan.assets[0]?.id).toMatch(/^evidence:0x[a-f0-9]{64}$/);
+  });
+
   it("defines all four scanner state meanings", () => {
     expect(Object.keys(scannerStatusDescriptions).sort()).toEqual([
       "DETECTED",
@@ -256,4 +275,3 @@ describe("deterministic wallet scanner", () => {
     ]);
   });
 });
-

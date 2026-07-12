@@ -28,7 +28,7 @@ export function DraftWorkspace({
             <div>
               <div className="mb-4 flex flex-wrap items-center gap-2">
                 <Badge variant="danger">User reported compromised</Badge>
-                <Badge variant="neutral">Draft / no scan</Badge>
+                <Badge variant="neutral">Read-only review</Badge>
               </div>
               <p className="font-mono text-[10px] uppercase text-dim">Incident {incidentId}</p>
               <h1 className="mt-2 text-3xl font-semibold">Rescue review draft</h1>
@@ -65,8 +65,8 @@ export function DraftWorkspace({
             </span>
             <h2 className="mt-5 text-xl font-semibold">No deterministic scan has run</h2>
             <p className="mt-3 max-w-md text-sm leading-6 text-muted">
-              This draft stores only the displayed incident context. Live chain scanning and
-              browser wallet execution are not connected in this phase.
+              Mainnet browser signing remains disabled while protected submission and receipt
+              monitoring complete security review.
             </p>
             <div className="mt-6 flex items-center gap-2">
               <Badge variant="neutral">Coming soon</Badge>

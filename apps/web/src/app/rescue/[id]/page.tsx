@@ -1,44 +1,53 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
-import { isAddress } from "viem";
+import { notFound, redirect } from "next/navigation";
 
 import { DraftWorkspace } from "@/components/draft-workspace";
+import { TestnetRescueWorkspace } from "@/components/testnet-rescue-workspace";
+import { getPrismaClient, PrismaSafeExitRepository } from "@safeexit/persistence";
+import { getAgentIncidentService } from "@/lib/agent-runtime";
 
 export const metadata: Metadata = {
   title: "Rescue Workspace",
 };
 
-type RescuePageProps = {
-  params: Promise<{ id: string }>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-};
+export const dynamic = "force-dynamic";
 
-function first(value: string | string[] | undefined): string {
-  return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
-}
-
-export default async function RescuePage({ params, searchParams }: RescuePageProps) {
-  const [{ id }, query] = await Promise.all([params, searchParams]);
+export default async function RescuePage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
 
   if (id === "demo-31337") {
     redirect("/demo");
   }
 
-  const source = first(query.source);
-  const destination = first(query.destination);
-  const chainId = first(query.chainId);
-  const safeSource = isAddress(source) ? source : "Invalid or missing source address";
-  const safeDestination = isAddress(destination)
-    ? destination
-    : "Invalid or missing destination address";
-  const chainName = chainId === "31337" ? "Local Anvil / 31337" : "X Layer / 196";
+  const repository = new PrismaSafeExitRepository(getPrismaClient());
+  let incident = await repository.getIncident(id);
+  if (!incident && id.startsWith("job:")) {
+    try {
+      incident = (await getAgentIncidentService().getJob(id)).incident;
+    } catch {
+      incident = undefined;
+    }
+  }
+  if (!incident) {
+    notFound();
+  }
+
+  if (incident.chainId === 1_952) {
+    return (
+      <TestnetRescueWorkspace
+        incidentId={incident.id}
+        source={incident.sourceAddress}
+        destination={incident.destinationAddress}
+      />
+    );
+  }
 
   return (
     <DraftWorkspace
-      incidentId={id}
-      source={safeSource}
-      destination={safeDestination}
-      chainName={chainName}
+      incidentId={incident.id}
+      source={incident.sourceAddress}
+      destination={incident.destinationAddress}
+      chainName={incident.chainId === 196 ? "X Layer mainnet / 196" : `Chain ${incident.chainId}`}
     />
   );
 }

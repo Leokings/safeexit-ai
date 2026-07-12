@@ -1,4 +1,5 @@
 import type { ChainAdapterConfig } from "@safeexit/chain";
+import { keccak256, toBytes } from "viem";
 import {
   walletScanSchema,
   type Approval,
@@ -31,6 +32,10 @@ import type {
 
 const manifestScopeWarning =
   "Token, NFT, and approval discovery is limited to the explicit scan manifest.";
+
+function scopedEvidenceId(scanId: string, evidenceId: string): string {
+  return `evidence:${keccak256(toBytes(`${scanId}:${evidenceId}`))}`;
+}
 
 function errorReason(error: unknown): string {
   const message = error instanceof Error ? error.message : "Unknown read failure";
@@ -566,8 +571,9 @@ export class DeterministicWalletScanner implements WalletScanner {
       ),
     ];
 
+    const scanId = `scan:${request.incidentId}:${observedAtBlock}`;
     const scan = walletScanSchema.parse({
-      id: `scan:${request.incidentId}:${observedAtBlock}`,
+      id: scanId,
       incidentId: request.incidentId,
       chainId: request.chainId,
       address: request.address,
@@ -575,12 +581,21 @@ export class DeterministicWalletScanner implements WalletScanner {
       providerId: this.options.reader.id,
       observedAtBlock: observedAtBlock.toString(),
       observedAt: this.clock().toISOString(),
-      assets: assetResults.flatMap((result) => [...result.items]),
-      approvals: approvalResults.flatMap((result) => [...result.items]),
+      assets: assetResults.flatMap((result) =>
+        result.items.map((item) => ({
+          ...item,
+          id: scopedEvidenceId(scanId, item.id),
+        })),
+      ),
+      approvals: approvalResults.flatMap((result) =>
+        result.items.map((item) => ({
+          ...item,
+          id: scopedEvidenceId(scanId, item.id),
+        })),
+      ),
       warnings,
     });
 
     return { scan, findings };
   }
 }
-

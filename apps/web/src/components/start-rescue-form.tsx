@@ -19,11 +19,13 @@ export function StartRescueForm() {
   const router = useRouter();
   const [source, setSource] = useState("");
   const [destination, setDestination] = useState("");
-  const [chainId, setChainId] = useState("196");
+  const [chainId, setChainId] = useState("1952");
   const [authorized, setAuthorized] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string>();
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const nextErrors: FormErrors = {};
@@ -44,9 +46,28 @@ export function StartRescueForm() {
       return;
     }
 
-    const incidentId = `draft-${Date.now().toString(36)}`;
-    const query = new URLSearchParams({ source, destination, chainId });
-    router.push(`/rescue/${incidentId}?${query.toString()}`);
+    setSubmitting(true);
+    setSubmitError(undefined);
+    try {
+      const response = await fetch("/api/incidents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chainId: Number(chainId),
+          sourceAddress: source,
+          destinationAddress: destination,
+          authorizationConfirmed: true,
+        }),
+      });
+      const body = (await response.json()) as { dashboardUrl?: string; message?: string };
+      if (!response.ok || !body.dashboardUrl) {
+        throw new Error(body.message ?? "Incident could not be created");
+      }
+      router.push(body.dashboardUrl);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "Incident could not be created");
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -88,8 +109,8 @@ export function StartRescueForm() {
           onChange={(event) => setChainId(event.target.value)}
           className="h-11 w-full rounded-md border border-border-strong bg-background px-3 text-sm text-foreground focus:border-accent focus:outline focus:outline-1"
         >
-          <option value="196">X Layer mainnet</option>
-          <option value="31337">Local Anvil demo</option>
+          <option value="1952">X Layer testnet - signing pilot</option>
+          <option value="196">X Layer mainnet - read-only</option>
         </select>
       </label>
 
@@ -120,13 +141,16 @@ export function StartRescueForm() {
       <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="flex items-center gap-2 text-xs text-muted">
           <ShieldCheck className="size-4 text-accent" />
-          This creates a review draft only. No scan or transaction is submitted.
+          {chainId === "1952"
+            ? "Testnet signing requires a fresh deterministic preflight."
+            : "Mainnet remains read-only; no transaction can be signed."}
         </p>
-        <Button type="submit" size="lg" className="sm:min-w-44">
-          Create rescue draft
+        <Button type="submit" size="lg" className="sm:min-w-44" disabled={submitting}>
+          {submitting ? "Creating incident..." : "Create rescue incident"}
           <ArrowRight className="size-4" />
         </Button>
       </div>
+      {submitError && <p role="alert" className="mt-4 text-xs text-danger">{submitError}</p>}
     </form>
   );
 }
