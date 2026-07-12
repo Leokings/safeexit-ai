@@ -8,6 +8,7 @@ import {
   mapRescuePlan,
   mapSimulation,
   mapWalletScan,
+  normalizePostgresTlsUrl,
   parsePersistenceEnvironment,
   PrismaSafeExitRepository,
 } from "../src";
@@ -159,6 +160,17 @@ describe("persistence environment", () => {
       parsePersistenceEnvironment({ DATABASE_URL: "mysql://localhost/safeexit" }),
     ).toThrow();
     expect(() => parsePersistenceEnvironment({})).toThrow();
+  });
+
+  it("makes PostgreSQL certificate verification explicit", () => {
+    const normalized = new URL(
+      normalizePostgresTlsUrl(
+        "postgresql://safeexit:secret@db.example.com/safeexit?sslmode=require&channel_binding=require",
+      ),
+    );
+
+    expect(normalized.searchParams.get("sslmode")).toBe("verify-full");
+    expect(normalized.searchParams.get("channel_binding")).toBe("require");
   });
 });
 

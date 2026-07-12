@@ -7,11 +7,21 @@ const globalForPrisma = globalThis as typeof globalThis & {
   safeExitPrisma?: PrismaClient;
 };
 
+export function normalizePostgresTlsUrl(value: string): string {
+  const url = new URL(value);
+  if (url.searchParams.get("sslmode") === "require") {
+    url.searchParams.set("sslmode", "verify-full");
+  }
+  return url.toString();
+}
+
 export function createPrismaClient(
   environment: NodeJS.ProcessEnv = process.env,
 ): PrismaClient {
   const config = parsePersistenceEnvironment(environment);
-  const adapter = new PrismaPg({ connectionString: config.DATABASE_URL });
+  const adapter = new PrismaPg({
+    connectionString: normalizePostgresTlsUrl(config.DATABASE_URL),
+  });
   return new PrismaClient({ adapter });
 }
 
