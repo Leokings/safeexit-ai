@@ -2,6 +2,7 @@
   "name": "safeexit",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "npm@11.6.2",
   "workspaces": [
     "apps/*",
     "packages/*"
