@@ -6,6 +6,8 @@ const deploymentEnvironmentSchema = z.strictObject({
   demoMode: z.enum(["LOCAL_ANVIL", "HOSTED_REPLAY", "DISABLED"]),
   agentMode: z.enum(["HOSTED_REPLAY", "LIVE_READONLY", "DISABLED"]),
   agentStore: z.enum(["MEMORY", "DATABASE"]),
+  aiMode: z.enum(["DETERMINISTIC", "GATEWAY"]),
+  aiModel: z.string().min(3).max(128).optional(),
   agentApiKey: z.string().min(32).optional(),
   okxWeb3ApiKey: z.string().min(1).optional(),
   okxWeb3SecretKey: z.string().min(1).optional(),
@@ -33,6 +35,8 @@ export function parseDeploymentEnvironment(
     agentMode: environment.SAFEEXIT_AGENT_MODE ?? "DISABLED",
     agentStore:
       environment.SAFEEXIT_AGENT_STORE ?? (production ? "DATABASE" : "MEMORY"),
+    aiMode: environment.SAFEEXIT_AI_MODE ?? "DETERMINISTIC",
+    aiModel: environment.SAFEEXIT_AI_MODEL,
     agentApiKey: environment.SAFEEXIT_AGENT_API_KEY,
     okxWeb3ApiKey: environment.OKX_WEB3_API_KEY,
     okxWeb3SecretKey: environment.OKX_WEB3_SECRET_KEY,

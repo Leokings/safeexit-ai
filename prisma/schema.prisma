@@ -303,10 +303,27 @@ model AgentJob {
   updatedAt     DateTime             @map("updated_at") @db.Timestamptz(3)
   incident      Incident?            @relation(fields: [incidentId], references: [id], onDelete: SetNull)
   transitions   AgentJobTransition[]
+  aiUsageEvents AiUsageEvent[]
 
   @@unique([requestId])
   @@index([incidentId, status])
   @@map("agent_jobs")
+}
+
+model AiUsageEvent {
+  id           String   @id @db.VarChar(256)
+  jobId        String   @map("job_id") @db.VarChar(256)
+  providerId   String   @map("provider_id") @db.VarChar(128)
+  modelId      String   @map("model_id") @db.VarChar(128)
+  inputTokens  Int      @map("input_tokens")
+  outputTokens Int      @map("output_tokens")
+  totalTokens  Int      @map("total_tokens")
+  createdAt    DateTime @map("created_at") @db.Timestamptz(3)
+  job          AgentJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, createdAt])
+  @@index([modelId, createdAt])
+  @@map("ai_usage_events")
 }
 
 model AgentJobTransition {

@@ -12,6 +12,7 @@ export async function GET(): Promise<Response> {
       demo: config.demoMode,
       agent: config.agentMode,
       store: config.agentStore,
+      ai: config.aiMode,
     };
     if (
       config.nodeEnv === "production" &&
@@ -41,6 +42,9 @@ export async function GET(): Promise<Response> {
       ).getBlockNumber();
       checks.xLayerRpc = `connected:${block.toString()}`;
       checks.okxWalletApi = "configured";
+    }
+    if (config.aiMode === "GATEWAY" && !config.aiModel?.includes("/")) {
+      throw new Error("SAFEEXIT_AI_MODEL must use provider/model format");
     }
     return Response.json(
       { status: "ready", checks },
