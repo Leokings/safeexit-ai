@@ -185,12 +185,8 @@ class ScopedDashboardLocator implements DashboardLocatorPort {
   constructor(private readonly baseUrl: string) {}
 
   getDashboardUrl(job: Parameters<DashboardLocatorPort["getDashboardUrl"]>[0]): string {
-    const url = new URL(`/rescue/${encodeURIComponent(job.id)}`, this.baseUrl);
-    if (job.incident) {
-      url.searchParams.set("source", job.incident.sourceAddress);
-      url.searchParams.set("destination", job.incident.destinationAddress);
-      url.searchParams.set("chainId", String(job.incident.chainId));
-    }
+    const url = new URL("/demo", this.baseUrl);
+    url.searchParams.set("job", job.id);
     return url.toString();
   }
 }
