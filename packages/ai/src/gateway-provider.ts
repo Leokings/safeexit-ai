@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import {
+  aiIntentSchema,
+  aiToolNameSchema,
   groundedModelInputSchema,
   groundedSelectionSchema,
   type GroundedModelInput,
@@ -38,6 +40,12 @@ export type GatewayGenerator = (
   input: GroundedModelInput,
 ) => Promise<GatewayGeneration>;
 
+const gatewaySelectionSchema = z.strictObject({
+  intent: aiIntentSchema,
+  selectedRecordIds: z.array(z.string().min(1).max(256)).max(64),
+  requestedTool: aiToolNameSchema.nullable(),
+});
+
 async function defaultGatewayGenerator(
   modelId: string,
   input: GroundedModelInput,
@@ -48,7 +56,7 @@ async function defaultGatewayGenerator(
     system:
       "Select only an allowed SAFEEXIT intent, optional allowed tool, and IDs present in availableRecordIds. Never invent blockchain state, addresses, calls, or transaction data.",
     prompt: JSON.stringify(input),
-    output: Output.object({ schema: groundedSelectionSchema }),
+    output: Output.object({ schema: gatewaySelectionSchema }),
     maxOutputTokens: 256,
     temperature: 0,
     providerOptions: {
@@ -58,8 +66,13 @@ async function defaultGatewayGenerator(
       },
     },
   });
+  const wireOutput = gatewaySelectionSchema.parse(result.output);
   return {
-    output: result.output,
+    output: groundedSelectionSchema.parse({
+      intent: wireOutput.intent,
+      selectedRecordIds: wireOutput.selectedRecordIds,
+      ...(wireOutput.requestedTool ? { requestedTool: wireOutput.requestedTool } : {}),
+    }),
     usage: {
       ...(result.totalUsage.inputTokens !== undefined
         ? { inputTokens: result.totalUsage.inputTokens }
