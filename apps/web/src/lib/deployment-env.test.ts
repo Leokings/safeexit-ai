@@ -27,6 +27,20 @@ describe("deployment environment", () => {
     ).toThrow();
   });
 
+  it("parses server-only live discovery configuration", () => {
+    const config = parseDeploymentEnvironment({
+      NODE_ENV: "production",
+      SAFEEXIT_AGENT_MODE: "LIVE_READONLY",
+      OKX_WEB3_API_KEY: "api-key",
+      OKX_WEB3_SECRET_KEY: "secret-key",
+      OKX_WEB3_PASSPHRASE: "passphrase",
+      XLAYER_MAINNET_RPC_URL: "https://xlayer.example/rpc",
+    });
+    expect(config.agentMode).toBe("LIVE_READONLY");
+    expect(config.okxWeb3ApiKey).toBe("api-key");
+    expect(config.xLayerMainnetRpcUrl).toBe("https://xlayer.example/rpc");
+  });
+
   it("marks the hosted fixture as non-executable replay data", () => {
     const state = createHostedDemoState();
     expect(state.availability).toBe("READY");

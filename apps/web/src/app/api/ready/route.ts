@@ -1,3 +1,4 @@
+import { createDedicatedPublicClient, xLayerMainnetConfig } from "@safeexit/chain";
 import { checkDatabaseConnection } from "@safeexit/persistence";
 
 import { parseDeploymentEnvironment } from "@/lib/deployment-env";
@@ -18,12 +19,28 @@ export async function GET(): Promise<Response> {
     ) {
       throw new Error("SAFEEXIT_PUBLIC_BASE_URL must be configured in production");
     }
-    if (config.agentMode === "HOSTED_REPLAY" && !config.agentApiKey) {
+    if (config.agentMode !== "DISABLED" && !config.agentApiKey) {
       throw new Error("SAFEEXIT_AGENT_API_KEY is required when the agent service is enabled");
     }
-    if (config.agentMode === "HOSTED_REPLAY" && config.agentStore === "DATABASE") {
+    if (config.agentMode !== "DISABLED" && config.agentStore === "DATABASE") {
       await checkDatabaseConnection();
       checks.database = "connected";
+    }
+    if (config.agentMode === "LIVE_READONLY") {
+      if (
+        !config.okxWeb3ApiKey ||
+        !config.okxWeb3SecretKey ||
+        !config.okxWeb3Passphrase ||
+        !config.xLayerMainnetRpcUrl
+      ) {
+        throw new Error("OKX Wallet API credentials and a dedicated RPC are required");
+      }
+      const block = await createDedicatedPublicClient(
+        xLayerMainnetConfig,
+        config.xLayerMainnetRpcUrl,
+      ).getBlockNumber();
+      checks.xLayerRpc = `connected:${block.toString()}`;
+      checks.okxWalletApi = "configured";
     }
     return Response.json(
       { status: "ready", checks },

@@ -18,6 +18,7 @@ export type SimulationRequest = {
 export type SimulationProviderKind =
   | "LOCAL_RPC"
   | "TEST_RPC"
+  | "PRODUCTION_RPC"
   | "PRODUCTION_ADAPTER";
 
 export type SimulationSupport = {

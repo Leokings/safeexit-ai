@@ -9,11 +9,23 @@ import {
   type RescuePlanGeneratorPort,
   type RescuePlanSimulatorPort,
 } from "@safeexit/agent-service";
+import { OkxWalletBalanceDiscoveryClient } from "@safeexit/adapters";
+import {
+  createDedicatedPublicClient,
+  xLayerMainnetConfig,
+} from "@safeexit/chain";
 import {
   PrismaAgentServiceJobStore,
   getPrismaClient,
 } from "@safeexit/persistence";
-import { computePlanIntegrityHash } from "@safeexit/planner";
+import {
+  computePlanIntegrityHash,
+  DeterministicRescuePlanner,
+} from "@safeexit/planner";
+import {
+  DeterministicWalletScanner,
+  ViemStandardReadClient,
+} from "@safeexit/scanner";
 import {
   rescuePlanSchema,
   simulationResultSchema,
@@ -23,6 +35,22 @@ import {
   type RescuePlan,
   type WalletScan,
 } from "@safeexit/shared";
+import {
+  LocalSimulationProvider,
+  simulateRescuePlan,
+  ViemLocalSimulationClient,
+} from "@safeexit/simulator";
+import type { Address } from "viem";
+
+const erc20DecimalsAbi = [
+  {
+    type: "function",
+    name: "decimals",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint8" }],
+  },
+] as const;
 
 import { createDemoAiContext } from "./demo-ai-context";
 import { demoIncident } from "./demo-incident";
@@ -168,6 +196,178 @@ class HostedReplaySimulator implements RescuePlanSimulatorPort {
   }
 }
 
+class LiveXLayerAnalyzer implements IncidentAnalyzerPort {
+  private readonly discovery: OkxWalletBalanceDiscoveryClient;
+
+  constructor(private readonly rpcUrl: string, credentials: {
+    apiKey: string;
+    secretKey: string;
+    passphrase: string;
+  }) {
+    this.discovery = new OkxWalletBalanceDiscoveryClient(
+      credentials,
+      async (request) => {
+        const response = await fetch(request.url, {
+          method: "GET",
+          headers: { ...request.headers },
+          cache: "no-store",
+          signal: AbortSignal.timeout(10_000),
+        });
+        return {
+          ok: response.ok,
+          status: response.status,
+          json: () => response.json(),
+        };
+      },
+    );
+  }
+
+  async analyse(incident: Incident): Promise<WalletScan> {
+    if (incident.chainId !== xLayerMainnetConfig.chain.id) {
+      throw new Error("Live discovery currently supports X Layer mainnet only");
+    }
+
+    const client = createDedicatedPublicClient(xLayerMainnetConfig, this.rpcUrl);
+    const observedAtBlock = await client.getBlockNumber();
+    const discovered = await this.discovery.discoverErc20Tokens(
+      incident.sourceAddress,
+      incident.chainId,
+    );
+    const uniqueCandidates = [
+      ...new Map(
+        discovered.map((candidate) => [candidate.tokenAddress.toLowerCase(), candidate]),
+      ).values(),
+    ];
+    const selectedCandidates = uniqueCandidates.slice(0, 50);
+    const metadata = await Promise.all(
+      selectedCandidates.map(async (candidate) => {
+        try {
+          const decimals = await client.readContract({
+            address: candidate.tokenAddress as Address,
+            abi: erc20DecimalsAbi,
+            functionName: "decimals",
+            blockNumber: observedAtBlock,
+          });
+          return {
+            candidate,
+            query: {
+              tokenAddress: candidate.tokenAddress,
+              name: candidate.symbol,
+              symbol: candidate.symbol.slice(0, 32),
+              decimals,
+            },
+          };
+        } catch {
+          return { candidate };
+        }
+      }),
+    );
+    const manifestTokens = metadata.flatMap((entry) =>
+      "query" in entry && entry.query ? [entry.query] : [],
+    );
+    const metadataFailures = metadata.filter((entry) => !("query" in entry)).length;
+    const reader = new ViemStandardReadClient("x-layer-mainnet-rpc", client);
+    const scanner = new DeterministicWalletScanner({
+      config: xLayerMainnetConfig,
+      reader,
+    });
+    const report = await scanner.scan({
+      incidentId: incident.id,
+      chainId: incident.chainId,
+      address: incident.sourceAddress,
+      observedAtBlock,
+      manifest: { erc20Assets: manifestTokens },
+    });
+    const candidateByAddress = new Map(
+      selectedCandidates.map((candidate) => [
+        candidate.tokenAddress.toLowerCase(),
+        candidate,
+      ]),
+    );
+    const valuedAssets = report.scan.assets.map((asset) => {
+      if (asset.assetType !== "ERC20") {
+        return asset;
+      }
+      const candidate = candidateByAddress.get(asset.contractAddress.toLowerCase());
+      const estimatedValueUsd =
+        candidate?.tokenPriceUsd !== undefined
+          ? Number(candidate.displayBalance) * candidate.tokenPriceUsd
+          : undefined;
+      return estimatedValueUsd !== undefined && Number.isFinite(estimatedValueUsd)
+        ? {
+            ...asset,
+            valuation: {
+              estimatedValueUsd,
+              source: "OKX Wallet API token price",
+              observedAt: report.scan.observedAt,
+            },
+          }
+        : asset;
+    });
+
+    return walletScanSchema.parse({
+      ...report.scan,
+      status: "PARTIAL",
+      providerId: "safeexit-live-xlayer-v1",
+      assets: valuedAssets,
+      warnings: [
+        ...report.scan.warnings,
+        "ERC-20 candidates were discovered by the official OKX Wallet API and balances were re-verified at the pinned RPC block.",
+        "NFT, allowance, operator-approval, Permit2, airdrop, and protocol-position discovery is not exhaustive in this release.",
+        ...(uniqueCandidates.length > selectedCandidates.length
+          ? ["Token discovery was capped at 50 candidates for this incident."]
+          : []),
+        ...(metadataFailures > 0
+          ? [`${metadataFailures} token candidate(s) were omitted because standard metadata reads failed.`]
+          : []),
+      ],
+    });
+  }
+}
+
+class LiveDeterministicPlanner implements RescuePlanGeneratorPort {
+  private readonly planner = new DeterministicRescuePlanner();
+
+  async generate(incident: Incident, scan: WalletScan): Promise<RescuePlan> {
+    return this.planner.plan({
+      incidentId: incident.id,
+      destinationAddress: incident.destinationAddress,
+      policyVersion: "safeexit-live-standard-v1",
+      scan,
+      adapterCandidates: [],
+    });
+  }
+}
+
+class LiveRpcSimulator implements RescuePlanSimulatorPort {
+  constructor(private readonly rpcUrl: string) {}
+
+  async simulate(plan: RescuePlan): Promise<AgentSimulationReport> {
+    if (plan.chainId !== xLayerMainnetConfig.chain.id) {
+      throw new Error("Live RPC preflight currently supports X Layer mainnet only");
+    }
+    const publicClient = createDedicatedPublicClient(xLayerMainnetConfig, this.rpcUrl);
+    const client = new ViemLocalSimulationClient(
+      "x-layer-mainnet-rpc-preflight-client",
+      publicClient,
+    );
+    const provider = new LocalSimulationProvider({
+      id: "x-layer-mainnet-rpc-preflight-v1",
+      kind: "PRODUCTION_RPC",
+      client,
+      ttlMs: 60_000,
+    });
+    const report = await simulateRescuePlan(plan, provider);
+    return {
+      status: report.status,
+      providerId: report.providerId,
+      results: [...report.results],
+      executableActionIds: report.executableActions.map((action) => action.id),
+      excludedActionIds: report.excludedActions.map((action) => action.actionId),
+    };
+  }
+}
+
 class ReviewOnlyMonitor implements RescueMonitorPort {
   async observe() {
     return {
@@ -191,6 +391,14 @@ class ScopedDashboardLocator implements DashboardLocatorPort {
   }
 }
 
+class LiveDashboardLocator implements DashboardLocatorPort {
+  constructor(private readonly baseUrl: string) {}
+
+  getDashboardUrl(job: Parameters<DashboardLocatorPort["getDashboardUrl"]>[0]): string {
+    return new URL(`/rescue/${encodeURIComponent(job.id)}`, this.baseUrl).toString();
+  }
+}
+
 const globalAgentRuntime = globalThis as typeof globalThis & {
   safeExitAgentService?: AgentIncidentService;
   safeExitMemoryStore?: InMemoryAgentServiceJobStore;
@@ -207,16 +415,39 @@ function createStore(): AgentServiceJobStore {
 
 export function getAgentIncidentService(): AgentIncidentService {
   const config = parseDeploymentEnvironment();
-  if (config.agentMode !== "HOSTED_REPLAY") {
+  if (config.agentMode === "DISABLED") {
     throw new Error("SAFEEXIT agent service is disabled for this deployment");
   }
-  globalAgentRuntime.safeExitAgentService ??= new AgentIncidentService({
-    store: createStore(),
-    analyzer: new HostedReplayAnalyzer(),
-    planner: new HostedReplayPlanner(),
-    simulator: new HostedReplaySimulator(),
-    dashboard: new ScopedDashboardLocator(config.publicBaseUrl),
-    monitor: new ReviewOnlyMonitor(),
-  });
+  if (config.agentMode === "LIVE_READONLY") {
+    if (
+      !config.okxWeb3ApiKey ||
+      !config.okxWeb3SecretKey ||
+      !config.okxWeb3Passphrase ||
+      !config.xLayerMainnetRpcUrl
+    ) {
+      throw new Error("Live SAFEEXIT dependencies are not configured");
+    }
+    globalAgentRuntime.safeExitAgentService ??= new AgentIncidentService({
+      store: createStore(),
+      analyzer: new LiveXLayerAnalyzer(config.xLayerMainnetRpcUrl, {
+        apiKey: config.okxWeb3ApiKey,
+        secretKey: config.okxWeb3SecretKey,
+        passphrase: config.okxWeb3Passphrase,
+      }),
+      planner: new LiveDeterministicPlanner(),
+      simulator: new LiveRpcSimulator(config.xLayerMainnetRpcUrl),
+      dashboard: new LiveDashboardLocator(config.publicBaseUrl),
+      monitor: new ReviewOnlyMonitor(),
+    });
+  } else {
+    globalAgentRuntime.safeExitAgentService ??= new AgentIncidentService({
+      store: createStore(),
+      analyzer: new HostedReplayAnalyzer(),
+      planner: new HostedReplayPlanner(),
+      simulator: new HostedReplaySimulator(),
+      dashboard: new ScopedDashboardLocator(config.publicBaseUrl),
+      monitor: new ReviewOnlyMonitor(),
+    });
+  }
   return globalAgentRuntime.safeExitAgentService;
 }

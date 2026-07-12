@@ -4,6 +4,7 @@ import {
   anvilLocalConfig,
   configuredChains,
   createConfiguredPublicClient,
+  createDedicatedPublicClient,
   defaultDevelopmentChainConfig,
   getChainAdapterConfig,
   primaryChainConfig,
@@ -53,5 +54,15 @@ describe("chain adapter configuration", () => {
       createConfiguredPublicClient(xLayerMainnetConfig, "https://rpc.example"),
     ).toThrow("RPC URL is not configured for chain 196");
   });
-});
 
+  it("accepts a dedicated HTTPS production RPC without changing chain identity", () => {
+    const client = createDedicatedPublicClient(
+      xLayerMainnetConfig,
+      "https://rpc.provider.example/xlayer",
+    );
+    expect(client.chain.id).toBe(196);
+    expect(() =>
+      createDedicatedPublicClient(xLayerMainnetConfig, "http://rpc.example"),
+    ).toThrow("Dedicated production RPC URLs must use HTTPS");
+  });
+});

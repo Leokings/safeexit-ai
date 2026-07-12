@@ -163,3 +163,17 @@ export function createConfiguredPublicClient(
   });
 }
 
+export function createDedicatedPublicClient(
+  config: ChainAdapterConfig,
+  rpcUrl: string,
+) {
+  const url = new URL(rpcUrl);
+  if (config.environment !== "LOCAL" && url.protocol !== "https:") {
+    throw new Error("Dedicated production RPC URLs must use HTTPS");
+  }
+
+  return createPublicClient({
+    chain: config.chain,
+    transport: http(url.toString(), { retryCount: 2, timeout: 10_000 }),
+  });
+}

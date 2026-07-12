@@ -1,5 +1,5 @@
 {
-  "name": "@safeexit/adapters",
+  "name": "@safeexit/execution",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@safeexit/planner": "*",
     "@safeexit/shared": "*",
-    "zod": "4.4.3"
+    "viem": "2.55.0"
   }
 }

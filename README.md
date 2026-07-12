@@ -1,8 +1,9 @@
 # SAFEEXIT AI
 
 The current foundation contains the TypeScript monorepo, shared domain schemas,
-verified chain configuration, and deterministic standard-token scanners. It
-does not sign or submit transactions and does not integrate with OKX services.
+verified chain configuration, deterministic standard-token scanners, and an
+opt-in official OKX Wallet API balance-discovery adapter. It does not sign or
+submit production transactions.
 
 ## Deterministic scanning
 
@@ -79,6 +80,14 @@ replay. The local fixed executor is never exposed in hosted mode. A
 bearer-authenticated, provider-neutral agent lifecycle is available under
 `/api/agent/jobs`; it supports create, analyze, plan, simulate, monitor, and
 status operations but cannot sign or broadcast transactions.
+
+An opt-in `LIVE_READONLY` agent mode replaces fixture analysis with real X Layer
+mainnet reads. It discovers non-risk ERC-20 candidates through the official OKX
+Wallet API, rechecks each candidate at a pinned block through a dedicated RPC,
+then uses the deterministic planner and real RPC preflight provider. The scan is
+always `PARTIAL` while NFT and approval discovery remain incomplete. Required
+server-only credentials and readiness gates are documented in
+[`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 Deployment variables, database migration steps, API smoke tests, and the
 official-docs-required OKX handoff are documented in

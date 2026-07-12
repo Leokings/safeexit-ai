@@ -28,3 +28,4 @@ export interface PositionAdapter {
   ): readonly RescueAction[];
 }
 
+export * from "./okx-wallet-api";

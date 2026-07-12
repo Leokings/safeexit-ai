@@ -5,6 +5,12 @@ agent job API. The hosted service is intentionally review-only: it replays the
 fixed developer-created demo fixture and never signs or broadcasts a
 production transaction.
 
+The codebase also contains an opt-in `LIVE_READONLY` mode. It uses the official
+OKX Wallet API to discover X Layer ERC-20 candidates, re-verifies balances with
+pinned RPC reads, creates a deterministic standard-asset plan, and performs
+current-state `eth_call` and gas-estimation preflight checks. It still does not
+sign or broadcast transactions.
+
 ## 1. Create the hosted resources
 
 1. Push this standalone repository to a private or public GitHub repository.
@@ -34,6 +40,31 @@ SAFEEXIT_RATE_LIMIT_WINDOW_MS=60000
 `SAFEEXIT_AGENT_API_KEY` is a temporary server-to-server credential for the
 SAFEEXIT API. It is not an OKX wallet secret and must never have a
 `NEXT_PUBLIC_` prefix.
+
+### Live read-only production mode
+
+Do not switch the deployment until all credentials have been added as encrypted
+Vercel environment variables:
+
+```text
+SAFEEXIT_AGENT_MODE=LIVE_READONLY
+OKX_WEB3_API_KEY=<OKX developer API key>
+OKX_WEB3_SECRET_KEY=<OKX developer secret key>
+OKX_WEB3_PASSPHRASE=<OKX developer passphrase>
+XLAYER_MAINNET_RPC_URL=<dedicated HTTPS X Layer RPC URL>
+XLAYER_TESTNET_RPC_URL=<dedicated HTTPS X Layer testnet RPC URL>
+```
+
+Create the OKX credentials in the official Onchain OS developer portal. Never
+commit them, paste them into an agent conversation, add a `NEXT_PUBLIC_` prefix,
+or expose them to browser code. `/api/ready` fails closed in `LIVE_READONLY`
+mode when the OKX credentials or dedicated mainnet RPC are missing, and it
+verifies an RPC block read before reporting ready.
+
+Live discovery is intentionally partial. Native and OKX-discovered ERC-20
+balances are verified by RPC. NFT discovery, approval discovery, Permit2,
+airdrops, and protocol positions are not represented as absent; the scan is
+marked `PARTIAL` until verified adapters cover them.
 
 ## 3. Apply the database migrations
 
@@ -110,8 +141,8 @@ stops at `WAITING_FOR_USER`.
 
 ## Current production limitations
 
-- Hosted scanning and simulation are verified fixture replays, not live chain
-  reads.
+- Hosted scanning and simulation are verified fixture replays unless the agent
+  is explicitly switched to `LIVE_READONLY`.
 - Only the fixed local developer incident is accepted by the hosted analyzer.
 - No production wallet signing, relayer, private transaction, paymaster,
   Permit2, protocol withdrawal, or OKX execution integration is enabled.

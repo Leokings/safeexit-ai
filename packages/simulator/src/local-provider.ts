@@ -161,7 +161,10 @@ function errorReason(error: unknown): string {
 
 export type LocalSimulationProviderOptions = {
   id: string;
-  kind: Extract<SimulationProviderKind, "LOCAL_RPC" | "TEST_RPC">;
+  kind: Extract<
+    SimulationProviderKind,
+    "LOCAL_RPC" | "TEST_RPC" | "PRODUCTION_RPC"
+  >;
   client: LocalSimulationClient;
   adapterResolvers?: readonly AdapterSimulationResolver[];
   clock?: () => Date;
@@ -170,7 +173,10 @@ export type LocalSimulationProviderOptions = {
 
 export class LocalSimulationProvider implements SimulationProvider {
   readonly id: string;
-  readonly kind: Extract<SimulationProviderKind, "LOCAL_RPC" | "TEST_RPC">;
+  readonly kind: Extract<
+    SimulationProviderKind,
+    "LOCAL_RPC" | "TEST_RPC" | "PRODUCTION_RPC"
+  >;
   readonly officialDocsRequired = false;
   private readonly clock: () => Date;
   private readonly ttlMs: number;
