@@ -24,6 +24,18 @@ const chatRequestSchema = z.strictObject({
   question: z.string().trim().min(1).max(1_000),
 });
 
+function describeGatewayError(error: unknown): Record<string, string | number> {
+  if (!error || typeof error !== "object") {
+    return { name: "UnknownError" };
+  }
+  const value = error as { name?: unknown; statusCode?: unknown; cause?: unknown };
+  return {
+    name: typeof value.name === "string" ? value.name : "UnknownError",
+    ...(typeof value.statusCode === "number" ? { statusCode: value.statusCode } : {}),
+    ...(value.cause instanceof Error ? { causeName: value.cause.name } : {}),
+  };
+}
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
@@ -67,7 +79,8 @@ export async function POST(
           ),
         );
         mode = "GATEWAY";
-      } catch {
+      } catch (error) {
+        console.error("SAFEEXIT_AI_GATEWAY_FALLBACK", describeGatewayError(error));
         response = answerIncidentQuestion({ question: input.question, context: aiContext });
       }
     } else {

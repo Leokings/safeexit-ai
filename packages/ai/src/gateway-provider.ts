@@ -57,9 +57,12 @@ async function defaultGatewayGenerator(
       "Select only an allowed SAFEEXIT intent, optional allowed tool, and IDs present in availableRecordIds. Never invent blockchain state, addresses, calls, or transaction data.",
     prompt: JSON.stringify(input),
     output: Output.object({ schema: gatewaySelectionSchema }),
-    maxOutputTokens: 256,
+    maxOutputTokens: 512,
     temperature: 0,
     providerOptions: {
+      openai: {
+        reasoningEffort: "low",
+      },
       gateway: {
         user: input.availableRecordIds[0] ?? "safeexit",
         tags: ["app:safeexit", "feature:grounded-intent"],
