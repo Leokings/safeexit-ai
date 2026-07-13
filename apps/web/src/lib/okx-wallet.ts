@@ -10,6 +10,7 @@ import {
 import {
   XLAYER_TESTNET_CHAIN_HEX,
   XLAYER_TESTNET_CHAIN_ID,
+  type DaiPermitRescueAction,
   type Erc2612RescueAction,
   type Erc4494RescueAction,
   type GaslessRescueAction,
@@ -62,6 +63,28 @@ export type SignedErc2612Permit = {
   transferFromData: Hex;
 };
 
+export type DaiPermitPairAuthorization = {
+  actionId: string;
+  tokenAddress: `0x${string}`;
+  holder: `0x${string}`;
+  spender: `0x${string}`;
+  value: string;
+  allowNonce: bigint;
+  revokeNonce: bigint;
+  expiry: bigint;
+  domain: DaiPermitRescueAction["domain"];
+};
+
+export type SignedDaiPermitPair = {
+  standard: "DAI_PERMIT_ATOMIC_BATCH";
+  authorization: DaiPermitPairAuthorization;
+  allowSignature: Hex;
+  revokeSignature: Hex;
+  allowPermitData: Hex;
+  transferFromData: Hex;
+  revokePermitData: Hex;
+};
+
 export type Erc4494PermitAuthorization = {
   actionId: string;
   collectionAddress: `0x${string}`;
@@ -84,6 +107,7 @@ export type SignedErc4494Permit = {
 export type SignedRecoveryAuthorization =
   | SignedEip3009Authorization
   | SignedErc2612Permit
+  | SignedDaiPermitPair
   | SignedErc4494Permit;
 
 export type OkxCallsStatus = {
@@ -138,6 +162,16 @@ const permitTypes = {
   ],
 } as const;
 
+const daiPermitTypes = {
+  Permit: [
+    { name: "holder", type: "address" },
+    { name: "spender", type: "address" },
+    { name: "nonce", type: "uint256" },
+    { name: "expiry", type: "uint256" },
+    { name: "allowed", type: "bool" },
+  ],
+} as const;
+
 const nftPermitTypes = {
   Permit: [
     { name: "spender", type: "address" },
@@ -157,6 +191,36 @@ const erc2612SettlementAbi = [
       { name: "spender", type: "address" },
       { name: "value", type: "uint256" },
       { name: "deadline", type: "uint256" },
+      { name: "v", type: "uint8" },
+      { name: "r", type: "bytes32" },
+      { name: "s", type: "bytes32" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "transferFrom",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "from", type: "address" },
+      { name: "to", type: "address" },
+      { name: "value", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+] as const;
+
+const daiPermitSettlementAbi = [
+  {
+    type: "function",
+    name: "permit",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "holder", type: "address" },
+      { name: "spender", type: "address" },
+      { name: "nonce", type: "uint256" },
+      { name: "expiry", type: "uint256" },
+      { name: "allowed", type: "bool" },
       { name: "v", type: "uint8" },
       { name: "r", type: "bytes32" },
       { name: "s", type: "bytes32" },
@@ -541,6 +605,162 @@ export async function signErc2612Permit(
   };
 }
 
+function daiPermitTypedDataFor(
+  authorization: DaiPermitPairAuthorization,
+  allowed: boolean,
+) {
+  return {
+    domain: {
+      name: authorization.domain.name,
+      version: authorization.domain.version,
+      chainId: authorization.domain.chainId,
+      verifyingContract: getAddress(authorization.domain.verifyingContract),
+    },
+    types: daiPermitTypes,
+    primaryType: "Permit" as const,
+    message: {
+      holder: authorization.holder,
+      spender: authorization.spender,
+      nonce: allowed ? authorization.allowNonce : authorization.revokeNonce,
+      expiry: authorization.expiry,
+      allowed,
+    },
+  };
+}
+
+function daiPermitTypedDataRpcPayload(
+  authorization: DaiPermitPairAuthorization,
+  allowed: boolean,
+): string {
+  const typedData = daiPermitTypedDataFor(authorization, allowed);
+  return JSON.stringify({
+    ...typedData,
+    types: {
+      EIP712Domain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "uint256" },
+        { name: "verifyingContract", type: "address" },
+      ],
+      ...typedData.types,
+    },
+    message: {
+      ...typedData.message,
+      nonce: typedData.message.nonce.toString(),
+      expiry: typedData.message.expiry.toString(),
+    },
+  });
+}
+
+export function createDaiPermitPairAuthorization(
+  action: DaiPermitRescueAction,
+  options: { now?: Date } = {},
+): DaiPermitPairAuthorization {
+  if (action.domain.chainId !== XLAYER_TESTNET_CHAIN_ID) {
+    throw new Error("Only X Layer testnet DAI-style permits are enabled");
+  }
+  if (action.tokenAddress.toLowerCase() !== action.domain.verifyingContract.toLowerCase()) {
+    throw new Error("The verified signing domain does not match the token contract");
+  }
+  if (action.from.toLowerCase() === action.to.toLowerCase()) {
+    throw new Error("Source and destination must be different");
+  }
+  const allowNonce = BigInt(action.nonce);
+  const now = BigInt(Math.floor((options.now ?? new Date()).getTime() / 1_000));
+  return {
+    actionId: action.actionId,
+    tokenAddress: getAddress(action.tokenAddress),
+    holder: getAddress(action.from),
+    spender: getAddress(action.to),
+    value: action.amount,
+    allowNonce,
+    revokeNonce: allowNonce + 1n,
+    expiry: now + 300n,
+    domain: action.domain,
+  };
+}
+
+function encodeDaiPermitCall(
+  authorization: DaiPermitPairAuthorization,
+  allowed: boolean,
+  signature: Hex,
+): Hex {
+  const { v, r, s } = signatureParts(signature);
+  return encodeFunctionData({
+    abi: daiPermitSettlementAbi,
+    functionName: "permit",
+    args: [
+      authorization.holder,
+      authorization.spender,
+      allowed ? authorization.allowNonce : authorization.revokeNonce,
+      authorization.expiry,
+      allowed,
+      v,
+      r,
+      s,
+    ],
+  });
+}
+
+export function encodeDaiPermitSettlement(
+  authorization: DaiPermitPairAuthorization,
+  allowSignature: Hex,
+  revokeSignature: Hex,
+): Pick<SignedDaiPermitPair, "allowPermitData" | "transferFromData" | "revokePermitData"> {
+  return {
+    allowPermitData: encodeDaiPermitCall(authorization, true, allowSignature),
+    transferFromData: encodeFunctionData({
+      abi: daiPermitSettlementAbi,
+      functionName: "transferFrom",
+      args: [authorization.holder, authorization.spender, BigInt(authorization.value)],
+    }),
+    revokePermitData: encodeDaiPermitCall(authorization, false, revokeSignature),
+  };
+}
+
+export async function signDaiPermitPair(
+  provider: OkxInjectedProvider,
+  action: DaiPermitRescueAction,
+  connectedAccount: `0x${string}`,
+  options: { now?: Date } = {},
+): Promise<SignedDaiPermitPair> {
+  if (connectedAccount.toLowerCase() !== action.from.toLowerCase()) {
+    throw new Error("Connected account does not match the DAI-style permit holder");
+  }
+  const authorization = createDaiPermitPairAuthorization(action, options);
+  const allowSignature = await provider.request({
+    method: "eth_signTypedData_v4",
+    params: [connectedAccount, daiPermitTypedDataRpcPayload(authorization, true)],
+  });
+  assertSignature(allowSignature);
+  const allowSigner = await recoverTypedDataAddress({
+    ...daiPermitTypedDataFor(authorization, true),
+    signature: allowSignature,
+  });
+  if (allowSigner.toLowerCase() !== authorization.holder.toLowerCase()) {
+    throw new Error("The DAI-style allow signature does not recover to the reported source");
+  }
+  const revokeSignature = await provider.request({
+    method: "eth_signTypedData_v4",
+    params: [connectedAccount, daiPermitTypedDataRpcPayload(authorization, false)],
+  });
+  assertSignature(revokeSignature);
+  const revokeSigner = await recoverTypedDataAddress({
+    ...daiPermitTypedDataFor(authorization, false),
+    signature: revokeSignature,
+  });
+  if (revokeSigner.toLowerCase() !== authorization.holder.toLowerCase()) {
+    throw new Error("The DAI-style revoke signature does not recover to the reported source");
+  }
+  return {
+    standard: "DAI_PERMIT_ATOMIC_BATCH",
+    authorization,
+    allowSignature,
+    revokeSignature,
+    ...encodeDaiPermitSettlement(authorization, allowSignature, revokeSignature),
+  };
+}
+
 function erc4494TypedDataFor(authorization: Erc4494PermitAuthorization) {
   return {
     domain: {
@@ -717,6 +937,46 @@ export async function submitErc2612AtomicBatch(
   });
   if (typeof result !== "string" || !/^0x[a-fA-F0-9]{2,512}$/.test(result)) {
     throw new Error("OKX Wallet did not return a valid atomic call identifier");
+  }
+  return result;
+}
+
+export async function submitDaiPermitAtomicBatch(
+  provider: OkxInjectedProvider,
+  signed: SignedDaiPermitPair,
+  connectedAccount: `0x${string}`,
+): Promise<string> {
+  if (connectedAccount.toLowerCase() !== signed.authorization.spender.toLowerCase()) {
+    throw new Error("Only the designated safe destination can submit this DAI-style permit batch");
+  }
+  if (signed.authorization.revokeNonce !== signed.authorization.allowNonce + 1n) {
+    throw new Error("The DAI-style revoke nonce must immediately follow the allow nonce");
+  }
+  const now = BigInt(Math.floor(Date.now() / 1_000));
+  if (now >= signed.authorization.expiry) {
+    throw new Error("The source DAI-style permits have expired; create fresh permits");
+  }
+  const chainId = await provider.request({ method: "eth_chainId" });
+  if (typeof chainId !== "string" || chainId.toLowerCase() !== XLAYER_TESTNET_CHAIN_HEX) {
+    throw new Error("OKX Wallet is not connected to X Layer testnet");
+  }
+  await requireOkxAtomicBatchCapability(provider, connectedAccount);
+  const result = await provider.request({
+    method: "wallet_sendCalls",
+    params: [{
+      version: "2.0.0",
+      from: connectedAccount,
+      chainId: XLAYER_TESTNET_CHAIN_HEX,
+      atomicRequired: true,
+      calls: [
+        { to: signed.authorization.tokenAddress, data: signed.allowPermitData, value: "0x0" },
+        { to: signed.authorization.tokenAddress, data: signed.transferFromData, value: "0x0" },
+        { to: signed.authorization.tokenAddress, data: signed.revokePermitData, value: "0x0" },
+      ],
+    }],
+  });
+  if (typeof result !== "string" || !/^0x[a-fA-F0-9]{2,512}$/.test(result)) {
+    throw new Error("OKX Wallet did not return a valid DAI-style atomic call identifier");
   }
   return result;
 }

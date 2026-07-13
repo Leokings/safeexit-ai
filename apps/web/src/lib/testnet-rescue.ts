@@ -49,6 +49,20 @@ export const erc2612RescueActionSchema = z.strictObject({
   requiredWalletCapability: z.literal("ATOMIC_BATCH"),
 });
 
+export const daiPermitRescueActionSchema = z.strictObject({
+  actionId: z.string().min(1).max(256),
+  standard: z.literal("DAI_PERMIT_ATOMIC_BATCH"),
+  capabilityStatus: z.literal("SIGNATURE_VERIFICATION_REQUIRED"),
+  tokenAddress: evmAddressSchema,
+  from: evmAddressSchema,
+  to: evmAddressSchema,
+  amount: z.string().regex(/^(0|[1-9]\d*)$/),
+  nonce: z.string().regex(/^(0|[1-9]\d*)$/),
+  domain: eip712DomainSchema,
+  requiredWalletCapability: z.literal("ATOMIC_BATCH"),
+  requiredSignatures: z.literal(2),
+});
+
 export const erc4494RescueActionSchema = z.strictObject({
   actionId: z.string().min(1).max(256),
   standard: z.literal("ERC4494_PERMIT_ATOMIC_BATCH"),
@@ -65,6 +79,7 @@ export const erc4494RescueActionSchema = z.strictObject({
 export const gaslessRescueActionSchema = z.discriminatedUnion("standard", [
   eip3009RescueActionSchema,
   erc2612RescueActionSchema,
+  daiPermitRescueActionSchema,
   erc4494RescueActionSchema,
 ]);
 
@@ -89,4 +104,5 @@ export type Eip712Domain = z.infer<typeof eip712DomainSchema>;
 export type GaslessRescueAction = z.infer<typeof gaslessRescueActionSchema>;
 export type Eip3009RescueAction = z.infer<typeof eip3009RescueActionSchema>;
 export type Erc2612RescueAction = z.infer<typeof erc2612RescueActionSchema>;
+export type DaiPermitRescueAction = z.infer<typeof daiPermitRescueActionSchema>;
 export type Erc4494RescueAction = z.infer<typeof erc4494RescueActionSchema>;

@@ -29,9 +29,11 @@ import {
   getOkxCallsStatus,
   getOkxProvider,
   requireOkxAtomicBatchCapability,
+  signDaiPermitPair,
   signEip3009Authorization,
   signErc2612Permit,
   signErc4494Permit,
+  submitDaiPermitAtomicBatch,
   submitErc2612AtomicBatch,
   submitErc4494AtomicBatch,
   submitEip3009Settlement,
@@ -103,6 +105,8 @@ function routeLabel(standard: string): string {
       return "ERC-3009 direct authorization";
     case "ERC2612_PERMIT_ATOMIC_BATCH":
       return "ERC-2612 atomic permit";
+    case "DAI_PERMIT_ATOMIC_BATCH":
+      return "DAI-style atomic permit and revoke";
     case "ERC4494_PERMIT_ATOMIC_BATCH":
       return "ERC-4494 NFT atomic permit";
     default:
@@ -267,6 +271,13 @@ export function TestnetRescueWorkspace({
             to: result.authorization.tokenAddress,
             data: result.permitData,
           });
+        } else if (action.standard === "DAI_PERMIT_ATOMIC_BATCH") {
+          result = await signDaiPermitPair(provider, action, account);
+          await publicClient.call({
+            account: destinationAccount,
+            to: result.authorization.tokenAddress,
+            data: result.allowPermitData,
+          });
         } else {
           result = await signErc4494Permit(provider, action, account);
           await publicClient.call({
@@ -334,6 +345,29 @@ export function TestnetRescueWorkspace({
         }
         if (!confirmedHash) {
           throw new Error("The OKX atomic permit batch did not confirm within two minutes.");
+        }
+        hash = confirmedHash;
+      } else if (signed.standard === "DAI_PERMIT_ATOMIC_BATCH") {
+        await publicClient.call({
+          account,
+          to: signed.authorization.tokenAddress,
+          data: signed.allowPermitData,
+        });
+        const callsId = await submitDaiPermitAtomicBatch(provider, signed, account);
+        let confirmedHash: Hex | undefined;
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          const callsStatus = await getOkxCallsStatus(provider, callsId);
+          if (callsStatus.status === 200) {
+            confirmedHash = callsStatus.transactionHashes[0];
+            break;
+          }
+          if (callsStatus.status === 400 || callsStatus.status === 500) {
+            throw new Error("The OKX atomic DAI-style permit batch failed before confirmation.");
+          }
+          await new Promise((resolve) => setTimeout(resolve, 2_000));
+        }
+        if (!confirmedHash) {
+          throw new Error("The OKX atomic DAI-style permit batch did not confirm within two minutes.");
         }
         hash = confirmedHash;
       } else {
@@ -565,6 +599,7 @@ export function TestnetRescueWorkspace({
               <div className="flex justify-between gap-4"><span className="text-muted">Route</span><span className="text-right">{nextGaslessAction ? routeLabel(nextGaslessAction.standard) : "None verified"}</span></div>
               {nextGaslessAction && <div className="space-y-2"><span className="block text-muted">Asset contract</span><CopyAddress address={routeContract(nextGaslessAction)} compact /></div>}
               {nextGaslessAction?.standard === "ERC4494_PERMIT_ATOMIC_BATCH" && <div className="flex justify-between gap-4"><span className="text-muted">Token ID</span><span className="font-mono">{nextGaslessAction.tokenId}</span></div>}
+              {nextGaslessAction?.standard === "DAI_PERMIT_ATOMIC_BATCH" && <div className="flex justify-between gap-4"><span className="text-muted">Source signatures</span><span className="font-mono">2 (allow + revoke)</span></div>}
               <div className="flex justify-between gap-4"><span className="text-muted">Authorization</span><Badge variant={signed ? "success" : "neutral"}>{signed ? "SIGNED IN MEMORY" : "NOT SIGNED"}</Badge></div>
               <div className="flex justify-between gap-4"><span className="text-muted">Preflight block</span><span className="font-mono">{preflight?.scan.observedAtBlock ?? "--"}</span></div>
             </div>

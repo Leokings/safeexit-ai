@@ -2,6 +2,7 @@
 pragma solidity 0.8.30;
 
 import { RescueToken } from "../src/RescueToken.sol";
+import { DaiStyleRescueToken } from "../src/DaiStyleRescueToken.sol";
 import { DemoNFT } from "../src/DemoNFT.sol";
 import { DemoAirdrop } from "../src/DemoAirdrop.sol";
 import { DemoAttackerSimulation } from "../src/DemoAttackerSimulation.sol";
@@ -34,8 +35,12 @@ contract SafeExitDemoTest {
     bytes32 private constant NFT_PERMIT_TYPEHASH = keccak256(
         "Permit(address spender,uint256 tokenId,uint256 nonce,uint256 deadline)"
     );
+    bytes32 private constant DAI_PERMIT_TYPEHASH = keccak256(
+        "Permit(address holder,address spender,uint256 nonce,uint256 expiry,bool allowed)"
+    );
 
     RescueToken private token;
+    DaiStyleRescueToken private daiStyleToken;
     DemoNFT private nft;
     DemoAirdrop private airdrop;
     DemoAttackerSimulation private attacker;
@@ -43,11 +48,13 @@ contract SafeExitDemoTest {
     function setUp() public {
         vm.chainId(31_337);
         token = new RescueToken(address(this));
+        daiStyleToken = new DaiStyleRescueToken(address(this));
         nft = new DemoNFT(address(this));
         airdrop = new DemoAirdrop(token, address(this));
         attacker = new DemoAttackerSimulation(token, SWEEP_AMOUNT);
 
         token.mint(COMPROMISED, INITIAL_TOKENS);
+        daiStyleToken.mint(COMPROMISED, INITIAL_TOKENS);
         token.mint(address(airdrop), CLAIM_REWARD);
         nft.mint(COMPROMISED);
         airdrop.setClaimable(COMPROMISED, CLAIM_REWARD);
@@ -142,5 +149,75 @@ contract SafeExitDemoTest {
         vm.prank(DESTINATION);
         vm.expectRevert();
         nft.permit(DESTINATION, 1, deadline, signature);
+    }
+
+    function testDestinationPaysAndRevokesDaiStylePermit() public {
+        uint256 compromisedPrivateKey =
+            0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
+        uint256 amount = 40 ether;
+        uint256 expiry = block.timestamp + 5 minutes;
+
+        bytes32 allowHash = keccak256(
+            abi.encode(
+                DAI_PERMIT_TYPEHASH,
+                COMPROMISED,
+                DESTINATION,
+                0,
+                expiry,
+                true
+            )
+        );
+        bytes32 allowDigest = keccak256(
+            abi.encodePacked("\x19\x01", daiStyleToken.DOMAIN_SEPARATOR(), allowHash)
+        );
+        (uint8 allowV, bytes32 allowR, bytes32 allowS) =
+            vm.sign(compromisedPrivateKey, allowDigest);
+
+        bytes32 revokeHash = keccak256(
+            abi.encode(
+                DAI_PERMIT_TYPEHASH,
+                COMPROMISED,
+                DESTINATION,
+                1,
+                expiry,
+                false
+            )
+        );
+        bytes32 revokeDigest = keccak256(
+            abi.encodePacked("\x19\x01", daiStyleToken.DOMAIN_SEPARATOR(), revokeHash)
+        );
+        (uint8 revokeV, bytes32 revokeR, bytes32 revokeS) =
+            vm.sign(compromisedPrivateKey, revokeDigest);
+
+        vm.startPrank(DESTINATION);
+        daiStyleToken.permit(
+            COMPROMISED,
+            DESTINATION,
+            0,
+            expiry,
+            true,
+            allowV,
+            allowR,
+            allowS
+        );
+        daiStyleToken.transferFrom(COMPROMISED, DESTINATION, amount);
+        daiStyleToken.permit(
+            COMPROMISED,
+            DESTINATION,
+            1,
+            expiry,
+            false,
+            revokeV,
+            revokeR,
+            revokeS
+        );
+        vm.stopPrank();
+
+        require(daiStyleToken.balanceOf(DESTINATION) == amount, "DAI-style rescue failed");
+        require(daiStyleToken.nonces(COMPROMISED) == 2, "DAI-style nonces not consumed");
+        require(
+            daiStyleToken.allowance(COMPROMISED, DESTINATION) == 0,
+            "DAI-style allowance not revoked"
+        );
     }
 }

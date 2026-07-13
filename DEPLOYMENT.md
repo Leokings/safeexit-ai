@@ -149,6 +149,12 @@ atomic batch support. The destination submits either
 `receiveWithAuthorization` or an atomic `permit` plus `transferFrom` batch and
 pays all testnet gas.
 
+DAI-style routes require the exact legacy permit type hash, a version `1`
+domain separator reconstructed from verified token metadata, and the pinned
+holder nonce. Two consecutive source signatures let the destination atomically
+grant the boolean allowance, pull the exact scanned balance, and revoke the
+allowance in the same batch.
+
 ERC-4494 NFT routes additionally require pinned ownership, EIP-165 interface
 support, a verifiable EIP-712 domain, and the token-specific nonce. The exact
 signed permit must recover to the source owner before OKX Wallet receives an
@@ -167,9 +173,9 @@ control has received an independent security review.
 - Only the fixed local developer incident is accepted by the hosted analyzer.
 - No mainnet wallet signing, relayer, private transaction, paymaster, Permit2,
   protocol withdrawal, or OKX server-side execution integration is enabled.
-  Testnet execution is limited to ERC-3009 and signature-verified ERC-2612
-  or ERC-4494 destination-paid settlement through the user-controlled OKX
-  Wallet.
+  Testnet execution is limited to ERC-3009, signature-verified ERC-2612,
+  strict DAI-style permits, or ERC-4494 destination-paid settlement through
+  the user-controlled OKX Wallet.
 - Native OKB remains blocked. `@safeexit/adapters` defines the mandatory proof
   for EIP-7702 sponsorship and private atomic bundles, but exposes neither as
   executable until official X Layer integration details and an independent

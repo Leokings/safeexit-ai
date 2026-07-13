@@ -16,7 +16,13 @@ import {
   simulateRescuePlan,
   ViemLocalSimulationClient,
 } from "@safeexit/simulator";
-import { encodeFunctionData, hashDomain, type Address } from "viem";
+import {
+  encodeFunctionData,
+  hashDomain,
+  keccak256,
+  stringToHex,
+  type Address,
+} from "viem";
 
 import { parseDeploymentEnvironment } from "@/lib/deployment-env";
 import {
@@ -131,6 +137,46 @@ const erc2612CapabilityAbi = [
   },
 ] as const;
 
+const daiPermitCapabilityAbi = [
+  {
+    type: "function",
+    name: "nonces",
+    stateMutability: "view",
+    inputs: [{ name: "holder", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "DOMAIN_SEPARATOR",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes32" }],
+  },
+  {
+    type: "function",
+    name: "PERMIT_TYPEHASH",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes32" }],
+  },
+  {
+    type: "function",
+    name: "permit",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "holder", type: "address" },
+      { name: "spender", type: "address" },
+      { name: "nonce", type: "uint256" },
+      { name: "expiry", type: "uint256" },
+      { name: "allowed", type: "bool" },
+      { name: "v", type: "uint8" },
+      { name: "r", type: "bytes32" },
+      { name: "s", type: "bytes32" },
+    ],
+    outputs: [],
+  },
+] as const;
+
 const erc4494CapabilityAbi = [
   {
     type: "function",
@@ -171,6 +217,9 @@ const eip712DomainTypes = {
 
 const receiveWithAuthorizationTypehash =
   "0xd099cc98ef71107a616c4f0f941f04c322d8e254fe26b3c6668db87aae413de8";
+const daiPermitTypehash = keccak256(stringToHex(
+  "Permit(address holder,address spender,uint256 nonce,uint256 expiry,bool allowed)",
+));
 const zeroBytes32 = `0x${"00".repeat(32)}` as const;
 const invalidSignature = `0x${"00".repeat(65)}` as const;
 const erc4494InterfaceId = "0x5604e225";
@@ -329,6 +378,94 @@ async function detectErc2612Permit(
   }
 }
 
+async function detectDaiStylePermit(
+  client: ReturnType<typeof createDedicatedPublicClient>,
+  tokenAddress: Address,
+  sourceAddress: Address,
+  destinationAddress: Address,
+  blockNumber: bigint,
+): Promise<{ domain: Eip712Domain; nonce: string } | undefined> {
+  try {
+    const [rawName, domainSeparator, typehash, nonce] = await Promise.all([
+      client.readContract({
+        address: tokenAddress,
+        abi: metadataAbi,
+        functionName: "name",
+        blockNumber,
+      }),
+      client.readContract({
+        address: tokenAddress,
+        abi: daiPermitCapabilityAbi,
+        functionName: "DOMAIN_SEPARATOR",
+        blockNumber,
+      }),
+      client.readContract({
+        address: tokenAddress,
+        abi: daiPermitCapabilityAbi,
+        functionName: "PERMIT_TYPEHASH",
+        blockNumber,
+      }),
+      client.readContract({
+        address: tokenAddress,
+        abi: daiPermitCapabilityAbi,
+        functionName: "nonces",
+        args: [sourceAddress],
+        blockNumber,
+      }),
+    ]);
+    const name = safeDomainText(rawName, 128);
+    if (!name || typehash.toLowerCase() !== daiPermitTypehash.toLowerCase()) {
+      return undefined;
+    }
+    const domain = eip712DomainSchema.parse({
+      name,
+      version: "1",
+      chainId: XLAYER_TESTNET_CHAIN_ID,
+      verifyingContract: tokenAddress,
+    });
+    const computedSeparator = hashDomain({
+      domain: {
+        name: domain.name,
+        version: domain.version,
+        chainId: BigInt(domain.chainId),
+        verifyingContract: tokenAddress,
+      },
+      types: eip712DomainTypes,
+    });
+    if (computedSeparator.toLowerCase() !== domainSeparator.toLowerCase()) {
+      return undefined;
+    }
+    const probeData = encodeFunctionData({
+      abi: daiPermitCapabilityAbi,
+      functionName: "permit",
+      args: [
+        sourceAddress,
+        destinationAddress,
+        nonce,
+        9_999_999_999n,
+        true,
+        27,
+        zeroBytes32,
+        zeroBytes32,
+      ],
+    });
+    try {
+      await client.call({
+        account: destinationAddress,
+        to: tokenAddress,
+        data: probeData,
+        blockNumber,
+      });
+      return undefined;
+    } catch {
+      // Exact allow and revoke signatures remain browser-side capability gates.
+    }
+    return { domain, nonce: nonce.toString() };
+  } catch {
+    return undefined;
+  }
+}
+
 async function detectErc4494Permit(
   client: ReturnType<typeof createDedicatedPublicClient>,
   collectionAddress: Address,
@@ -455,7 +592,14 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           if (!bytecode) {
             return { tokenAddress, reason: "No contract bytecode was found" } as const;
           }
-          const [name, symbol, decimals, eip3009Domain, erc2612Permit] = await Promise.all([
+          const [
+            name,
+            symbol,
+            decimals,
+            eip3009Domain,
+            erc2612Permit,
+            daiPermit,
+          ] = await Promise.all([
             client.readContract({ address, abi: metadataAbi, functionName: "name", blockNumber: observedAtBlock }),
             client.readContract({ address, abi: metadataAbi, functionName: "symbol", blockNumber: observedAtBlock }),
             client.readContract({ address, abi: metadataAbi, functionName: "decimals", blockNumber: observedAtBlock }),
@@ -472,6 +616,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
               incident.destinationAddress as Address,
               observedAtBlock,
             ),
+            detectDaiStylePermit(
+              client,
+              address,
+              incident.sourceAddress as Address,
+              incident.destinationAddress as Address,
+              observedAtBlock,
+            ),
           ]);
           return {
             query: {
@@ -482,6 +633,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
             },
             ...(eip3009Domain ? { eip3009Domain } : {}),
             ...(erc2612Permit ? { erc2612Permit } : {}),
+            ...(daiPermit ? { daiPermit } : {}),
           } as const;
         } catch {
           return { tokenAddress, reason: "Standard ERC-20 metadata reads failed" } as const;
@@ -676,6 +828,21 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           requiredWalletCapability: "ATOMIC_BATCH" as const,
         });
       }
+      if ("daiPermit" in tokenMetadata && tokenMetadata.daiPermit) {
+        routes.push({
+          actionId: action.id,
+          standard: "DAI_PERMIT_ATOMIC_BATCH" as const,
+          capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED" as const,
+          tokenAddress: action.parameters.tokenAddress,
+          from: action.sourceAddress,
+          to: action.parameters.recipient,
+          amount: action.parameters.amount,
+          nonce: tokenMetadata.daiPermit.nonce,
+          domain: tokenMetadata.daiPermit.domain,
+          requiredWalletCapability: "ATOMIC_BATCH" as const,
+          requiredSignatures: 2 as const,
+        });
+      }
       return routes;
     });
     const gaslessActionIds = new Set(gaslessActions.map((action) => action.actionId));
@@ -693,10 +860,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
               `${action.parameters.collectionAddress.toLowerCase()}:${action.parameters.tokenId}`,
             )
           : undefined;
-      const verifiedEip3009 =
+      const verifiedDestinationPaidRoute =
         tokenMetadata &&
         (("eip3009Domain" in tokenMetadata && Boolean(tokenMetadata.eip3009Domain)) ||
-          ("erc2612Permit" in tokenMetadata && Boolean(tokenMetadata.erc2612Permit)));
+          ("erc2612Permit" in tokenMetadata && Boolean(tokenMetadata.erc2612Permit)) ||
+          ("daiPermit" in tokenMetadata && Boolean(tokenMetadata.daiPermit)));
       return [{
         actionId: action.id,
         reason:
@@ -707,10 +875,10 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
               ? "The NFT supports ERC-4494, but its current-state transfer preflight did not succeed."
               : action.actionType === "TRANSFER_ERC721"
                 ? "The NFT does not expose a verified ERC-4494 destination-paid permit route."
-            : action.actionType === "TRANSFER_ERC20" && verifiedEip3009
+            : action.actionType === "TRANSFER_ERC20" && verifiedDestinationPaidRoute
               ? "The token supports a destination-paid authorization, but its current-state transfer preflight did not succeed."
               : action.actionType === "TRANSFER_ERC20"
-                ? "The token does not expose a verified ERC-3009 or ERC-2612 destination-paid route."
+                ? "The token does not expose a verified ERC-3009, ERC-2612, or DAI-style destination-paid route."
                 : "This asset type has no verified destination-paid gasless adapter.",
       }];
     });

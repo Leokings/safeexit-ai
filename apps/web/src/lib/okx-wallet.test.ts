@@ -3,14 +3,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   connectOkxWallet,
+  createDaiPermitPairAuthorization,
   createEip3009Authorization,
   createErc2612PermitAuthorization,
   createErc4494PermitAuthorization,
   ensureXLayerTestnet,
   getOkxCallsStatus,
+  signDaiPermitPair,
   signEip3009Authorization,
   signErc2612Permit,
   signErc4494Permit,
+  submitDaiPermitAtomicBatch,
   submitErc2612AtomicBatch,
   submitErc4494AtomicBatch,
   submitEip3009Settlement,
@@ -66,6 +69,25 @@ const permitAction = gaslessRescueActionSchema.parse({
   requiredWalletCapability: "ATOMIC_BATCH",
 });
 
+const daiPermitAction = gaslessRescueActionSchema.parse({
+  actionId: "action:dai-permit-test",
+  standard: "DAI_PERMIT_ATOMIC_BATCH",
+  capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED",
+  tokenAddress: token,
+  from: source,
+  to: destination,
+  amount: "1250000",
+  nonce: "11",
+  domain: {
+    name: "Dai Stablecoin",
+    version: "1",
+    chainId: 1_952,
+    verifyingContract: token,
+  },
+  requiredWalletCapability: "ATOMIC_BATCH",
+  requiredSignatures: 2,
+});
+
 const nftPermitAction = gaslessRescueActionSchema.parse({
   actionId: "action:nft-permit-test",
   standard: "ERC4494_PERMIT_ATOMIC_BATCH",
@@ -102,6 +124,16 @@ const permitTypes = {
     { name: "value", type: "uint256" },
     { name: "nonce", type: "uint256" },
     { name: "deadline", type: "uint256" },
+  ],
+} as const;
+
+const daiPermitTypes = {
+  Permit: [
+    { name: "holder", type: "address" },
+    { name: "spender", type: "address" },
+    { name: "nonce", type: "uint256" },
+    { name: "expiry", type: "uint256" },
+    { name: "allowed", type: "bool" },
   ],
 } as const;
 
@@ -158,13 +190,16 @@ class FakeProvider implements OkxInjectedProvider {
           from?: `0x${string}`;
           to?: `0x${string}`;
           owner?: `0x${string}`;
+          holder?: `0x${string}`;
           spender?: `0x${string}`;
-          value: string;
+          value?: string;
           tokenId?: string;
           validAfter?: string;
           validBefore?: string;
           nonce: string;
           deadline?: string;
+          expiry?: string;
+          allowed?: boolean;
         };
       };
       if (payload.primaryType === "Permit") {
@@ -181,6 +216,20 @@ class FakeProvider implements OkxInjectedProvider {
             },
           });
         }
+        if (payload.message.holder !== undefined) {
+          return this.account.signTypedData({
+            domain: payload.domain,
+            types: daiPermitTypes,
+            primaryType: "Permit",
+            message: {
+              holder: payload.message.holder,
+              spender: payload.message.spender!,
+              nonce: BigInt(payload.message.nonce),
+              expiry: BigInt(payload.message.expiry!),
+              allowed: payload.message.allowed!,
+            },
+          });
+        }
         return this.account.signTypedData({
           domain: payload.domain,
           types: permitTypes,
@@ -188,7 +237,7 @@ class FakeProvider implements OkxInjectedProvider {
           message: {
             owner: payload.message.owner!,
             spender: payload.message.spender!,
-            value: BigInt(payload.message.value),
+            value: BigInt(payload.message.value!),
             nonce: BigInt(payload.message.nonce),
             deadline: BigInt(payload.message.deadline!),
           },
@@ -202,7 +251,7 @@ class FakeProvider implements OkxInjectedProvider {
           from: payload.message.from!,
           to: payload.message.to!,
           nonce: payload.message.nonce as `0x${string}`,
-          value: BigInt(payload.message.value),
+          value: BigInt(payload.message.value!),
           validAfter: BigInt(payload.message.validAfter!),
           validBefore: BigInt(payload.message.validBefore!),
         },
@@ -377,6 +426,58 @@ describe("OKX injected wallet guardrails", () => {
       "eth_chainId",
       "wallet_getCapabilities",
     ]);
+  });
+
+  it("creates consecutive DAI-style allow and revoke authorizations", async () => {
+    if (daiPermitAction.standard !== "DAI_PERMIT_ATOMIC_BATCH") {
+      throw new Error("Expected a DAI-style action fixture");
+    }
+    const authorization = createDaiPermitPairAuthorization(daiPermitAction, {
+      now: new Date("2026-07-13T12:00:00.000Z"),
+    });
+    expect(authorization.spender).toBe(destination);
+    expect(authorization.allowNonce).toBe(11n);
+    expect(authorization.revokeNonce).toBe(12n);
+    expect(authorization.expiry).toBe(1_783_944_300n);
+
+    const provider = new FakeProvider();
+    const signed = await signDaiPermitPair(provider, daiPermitAction, source, {
+      now: new Date("2026-07-13T12:00:00.000Z"),
+    });
+    expect(provider.calls.map((call) => call.method)).toEqual([
+      "eth_signTypedData_v4",
+      "eth_signTypedData_v4",
+    ]);
+    expect(signed.allowPermitData.startsWith("0x8fcbaf0c")).toBe(true);
+    expect(signed.transferFromData.startsWith("0x23b872dd")).toBe(true);
+    expect(signed.revokePermitData.startsWith("0x8fcbaf0c")).toBe(true);
+  });
+
+  it("atomically grants, pulls, and revokes a DAI-style allowance", async () => {
+    if (daiPermitAction.standard !== "DAI_PERMIT_ATOMIC_BATCH") {
+      throw new Error("Expected a DAI-style action fixture");
+    }
+    const signed = await signDaiPermitPair(
+      new FakeProvider(),
+      daiPermitAction,
+      source,
+    );
+    const destinationProvider = new FakeProvider(destinationAccount);
+    destinationProvider.chainId = "0x7a0";
+
+    await expect(
+      submitDaiPermitAtomicBatch(destinationProvider, signed, destination),
+    ).resolves.toBe("0x1234");
+    expect(destinationProvider.calls[2]?.params).toEqual([expect.objectContaining({
+      from: destination,
+      chainId: "0x7a0",
+      atomicRequired: true,
+      calls: [
+        { to: signed.authorization.tokenAddress, data: signed.allowPermitData, value: "0x0" },
+        { to: signed.authorization.tokenAddress, data: signed.transferFromData, value: "0x0" },
+        { to: signed.authorization.tokenAddress, data: signed.revokePermitData, value: "0x0" },
+      ],
+    })]);
   });
 
   it("parses confirmed OKX atomic call receipts", async () => {

@@ -107,6 +107,12 @@ the destination to atomically submit `permit` and `transferFrom` through the
 official EIP-5792 wallet methods. In both routes the source submits no
 transaction and pays no network fee.
 
+DAI-style permits are supported when the token exposes the exact legacy permit
+type hash and its `name`, version `1`, chain ID, contract address, and domain
+separator agree. The source signs consecutive allow and revoke permits. The
+destination atomically submits `permit(true)`, `transferFrom`, and
+`permit(false)`, leaving no DAI-style allowance after settlement.
+
 ERC-721 NFTs can use an ERC-4494 fallback when the explicit collection/token ID
 is owned by the source and the collection reports the ERC-4494 interface plus a
 verifiable EIP-712 domain and nonce. The source signs the NFT permit; the
