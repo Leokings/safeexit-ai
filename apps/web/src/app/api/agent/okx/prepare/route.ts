@@ -23,7 +23,10 @@ export async function POST(request: Request): Promise<Response> {
     headers = authorizeAgentRequest(request);
     const input = await parseJsonBody(request, okxA2ATaskRequestSchema);
     const deliverable = await getOkxProviderBridge().prepareSigningDeliverable(
-      getAgentIncidentService(),
+      getAgentIncidentService({
+        chainId: input.walletContext.chainId,
+        ...(input.assetManifest ? { assetManifest: input.assetManifest } : {}),
+      }),
       input,
     );
     return agentJson(okxA2ASigningDeliverableSchema.parse(deliverable), 200, headers);

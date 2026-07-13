@@ -12,8 +12,11 @@ import {
 import { OkxWalletBalanceDiscoveryClient } from "@safeexit/adapters";
 import {
   createDedicatedPublicClient,
+  type ChainAdapterConfig,
   xLayerMainnetConfig,
+  xLayerTestnetConfig,
 } from "@safeexit/chain";
+import type { OkxA2AAssetManifest } from "@safeexit/okx-transport";
 import {
   PrismaAgentServiceJobStore,
   getPrismaClient,
@@ -57,6 +60,7 @@ import { demoIncident } from "./demo-incident";
 import { parseDeploymentEnvironment } from "./deployment-env";
 import { LivePermitSigningPackageBuilder } from "./live-signing-package-builder";
 import { LiveBuyerExecutionVerifier } from "./live-buyer-report-verifier";
+import { LiveXLayerTestnetManifestAnalyzer } from "./live-testnet-analyzer";
 
 const replayGas: Record<RescueAction["actionType"], string> = {
   CLAIM_SUPPORTED_AIRDROP: "34873",
@@ -342,22 +346,25 @@ class LiveDeterministicPlanner implements RescuePlanGeneratorPort {
 }
 
 class LiveRpcSimulator implements RescuePlanSimulatorPort {
-  constructor(private readonly rpcUrl: string) {}
+  constructor(
+    private readonly chain: ChainAdapterConfig,
+    private readonly rpcUrl: string,
+  ) {}
 
   async simulate(plan: RescuePlan): Promise<AgentSimulationReport> {
-    if (plan.chainId !== xLayerMainnetConfig.chain.id) {
-      throw new Error("Live RPC preflight currently supports X Layer mainnet only");
+    if (plan.chainId !== this.chain.chain.id) {
+      throw new Error("Live RPC preflight is not configured for this plan chain");
     }
-    const publicClient = createDedicatedPublicClient(xLayerMainnetConfig, this.rpcUrl);
+    const publicClient = createDedicatedPublicClient(this.chain, this.rpcUrl);
     const client = new ViemLocalSimulationClient(
-      "x-layer-mainnet-rpc-preflight-client",
+      `${this.chain.id}-rpc-preflight-client`,
       publicClient,
     );
     const provider = new LocalSimulationProvider({
-      id: "x-layer-mainnet-rpc-preflight-v1",
-      kind: "PRODUCTION_RPC",
+      id: `${this.chain.id}-rpc-preflight-v1`,
+      kind: this.chain.environment === "MAINNET" ? "PRODUCTION_RPC" : "TEST_RPC",
       client,
-      ttlMs: 300_000,
+      ttlMs: this.chain.environment === "MAINNET" ? 300_000 : 60_000,
     });
     const report = await simulateRescuePlan(plan, provider);
     return {
@@ -378,7 +385,7 @@ class ReviewOnlyMonitor implements RescueMonitorPort {
       failedActionIds: [],
       transactionHashes: [],
       observedAt: new Date().toISOString(),
-      detail: "Hosted execution is disabled; user-controlled signing is not connected.",
+      detail: "Provider-side execution is disabled; signing and settlement stay buyer-controlled.",
     };
   }
 }
@@ -402,7 +409,6 @@ class LiveDashboardLocator implements DashboardLocatorPort {
 }
 
 const globalAgentRuntime = globalThis as typeof globalThis & {
-  safeExitAgentService?: AgentIncidentService;
   safeExitMemoryStore?: InMemoryAgentServiceJobStore;
 };
 
@@ -415,59 +421,105 @@ function createStore(): AgentServiceJobStore {
   return globalAgentRuntime.safeExitMemoryStore;
 }
 
-export function getAgentIncidentService(): AgentIncidentService {
+export type AgentRuntimeRequest = {
+  chainId?: number;
+  assetManifest?: OkxA2AAssetManifest;
+};
+
+function createMainnetService(
+  config: ReturnType<typeof parseDeploymentEnvironment>,
+): AgentIncidentService {
+  if (
+    !config.okxWeb3ApiKey ||
+    !config.okxWeb3SecretKey ||
+    !config.okxWeb3Passphrase ||
+    !config.xLayerMainnetRpcUrl
+  ) {
+    throw new Error("Live X Layer mainnet dependencies are not configured");
+  }
+  return new AgentIncidentService({
+    store: createStore(),
+    analyzer: new LiveXLayerAnalyzer(config.xLayerMainnetRpcUrl, {
+      apiKey: config.okxWeb3ApiKey,
+      secretKey: config.okxWeb3SecretKey,
+      passphrase: config.okxWeb3Passphrase,
+    }),
+    planner: new LiveDeterministicPlanner(),
+    simulator: new LiveRpcSimulator(xLayerMainnetConfig, config.xLayerMainnetRpcUrl),
+    dashboard: new LiveDashboardLocator(config.publicBaseUrl),
+    signingPackages: new LivePermitSigningPackageBuilder(
+      xLayerMainnetConfig,
+      config.xLayerMainnetRpcUrl,
+    ),
+    executionVerifier: new LiveBuyerExecutionVerifier(
+      xLayerMainnetConfig,
+      config.xLayerMainnetRpcUrl,
+    ),
+    monitor: new ReviewOnlyMonitor(),
+  });
+}
+
+function createTestnetService(
+  config: ReturnType<typeof parseDeploymentEnvironment>,
+  assetManifest?: OkxA2AAssetManifest,
+): AgentIncidentService {
+  if (!config.xLayerTestnetRpcUrl) {
+    throw new Error("Live X Layer testnet RPC is not configured");
+  }
+  return new AgentIncidentService({
+    store: createStore(),
+    analyzer: new LiveXLayerTestnetManifestAnalyzer(
+      config.xLayerTestnetRpcUrl,
+      assetManifest,
+    ),
+    planner: new LiveDeterministicPlanner(),
+    simulator: new LiveRpcSimulator(xLayerTestnetConfig, config.xLayerTestnetRpcUrl),
+    dashboard: new LiveDashboardLocator(config.publicBaseUrl),
+    signingPackages: new LivePermitSigningPackageBuilder(
+      xLayerTestnetConfig,
+      config.xLayerTestnetRpcUrl,
+    ),
+    executionVerifier: new LiveBuyerExecutionVerifier(
+      xLayerTestnetConfig,
+      config.xLayerTestnetRpcUrl,
+    ),
+    monitor: new ReviewOnlyMonitor(),
+  });
+}
+
+export function getAgentIncidentService(
+  request: AgentRuntimeRequest = {},
+): AgentIncidentService {
   const config = parseDeploymentEnvironment();
   if (config.agentMode === "DISABLED") {
     throw new Error("SAFEEXIT agent service is disabled for this deployment");
   }
   if (config.agentMode === "LIVE_READONLY") {
-    if (
-      !config.okxWeb3ApiKey ||
-      !config.okxWeb3SecretKey ||
-      !config.okxWeb3Passphrase ||
-      !config.xLayerMainnetRpcUrl
-    ) {
-      throw new Error("Live SAFEEXIT dependencies are not configured");
+    const chainId = request.chainId ?? xLayerMainnetConfig.chain.id;
+    if (chainId === xLayerMainnetConfig.chain.id) {
+      return createMainnetService(config);
     }
-    globalAgentRuntime.safeExitAgentService ??= new AgentIncidentService({
-      store: createStore(),
-      analyzer: new LiveXLayerAnalyzer(config.xLayerMainnetRpcUrl, {
-        apiKey: config.okxWeb3ApiKey,
-        secretKey: config.okxWeb3SecretKey,
-        passphrase: config.okxWeb3Passphrase,
-      }),
-      planner: new LiveDeterministicPlanner(),
-      simulator: new LiveRpcSimulator(config.xLayerMainnetRpcUrl),
-      dashboard: new LiveDashboardLocator(config.publicBaseUrl),
-      signingPackages: new LivePermitSigningPackageBuilder(
-        xLayerMainnetConfig,
-        config.xLayerMainnetRpcUrl,
-      ),
-      executionVerifier: new LiveBuyerExecutionVerifier(
-        xLayerMainnetConfig,
-        config.xLayerMainnetRpcUrl,
-      ),
-      monitor: new ReviewOnlyMonitor(),
-    });
-  } else {
-    globalAgentRuntime.safeExitAgentService ??= new AgentIncidentService({
-      store: createStore(),
-      analyzer: new HostedReplayAnalyzer(),
-      planner: new HostedReplayPlanner(),
-      simulator: new HostedReplaySimulator(),
-      dashboard: new ScopedDashboardLocator(config.publicBaseUrl),
-      signingPackages: {
-        build: async () => {
-          throw new Error("Hosted replay does not issue production signing packages");
-        },
-      },
-      executionVerifier: {
-        verify: async () => {
-          throw new Error("Hosted replay does not verify buyer execution reports");
-        },
-      },
-      monitor: new ReviewOnlyMonitor(),
-    });
+    if (chainId === xLayerTestnetConfig.chain.id) {
+      return createTestnetService(config, request.assetManifest);
+    }
+    throw new Error(`Live SAFEEXIT does not support chain ${chainId}`);
   }
-  return globalAgentRuntime.safeExitAgentService;
+  return new AgentIncidentService({
+    store: createStore(),
+    analyzer: new HostedReplayAnalyzer(),
+    planner: new HostedReplayPlanner(),
+    simulator: new HostedReplaySimulator(),
+    dashboard: new ScopedDashboardLocator(config.publicBaseUrl),
+    signingPackages: {
+      build: async () => {
+        throw new Error("Hosted replay does not issue production signing packages");
+      },
+    },
+    executionVerifier: {
+      verify: async () => {
+        throw new Error("Hosted replay does not verify buyer execution reports");
+      },
+    },
+    monitor: new ReviewOnlyMonitor(),
+  });
 }

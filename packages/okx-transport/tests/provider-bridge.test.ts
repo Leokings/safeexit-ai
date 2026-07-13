@@ -14,6 +14,7 @@ import {
 } from "@safeexit/shared";
 
 import {
+  OKX_A2A_XLAYER_TESTNET_CHAIN_ID,
   OkxA2AProviderBridge,
   SAFEEXIT_AUTHORIZATION_STATEMENT,
   okxA2ATaskRequestSchema,
@@ -280,6 +281,55 @@ describe("OKX A2A provider bridge", () => {
       authorization: { ...request.authorization, statement: "I own it" },
     })).toThrow();
     expect(() => okxA2ATaskRequestSchema.parse({ ...request, privateKey: "0xsecret" })).toThrow();
+  });
+
+  it("requires a bounded explicit asset manifest only for X Layer testnet", () => {
+    const testnetRequest = {
+      ...request,
+      walletContext: {
+        ...request.walletContext,
+        chainId: OKX_A2A_XLAYER_TESTNET_CHAIN_ID,
+      },
+    };
+    expect(() => okxA2ATaskRequestSchema.parse(testnetRequest)).toThrow(
+      "explicit ERC-20 asset manifest",
+    );
+    expect(okxA2ATaskRequestSchema.parse({
+      ...testnetRequest,
+      assetManifest: { erc20TokenAddresses: [token] },
+    }).assetManifest?.erc20TokenAddresses).toEqual([token]);
+    expect(() => okxA2ATaskRequestSchema.parse({
+      ...request,
+      assetManifest: { erc20TokenAddresses: [token] },
+    })).toThrow("restricted to X Layer testnet");
+  });
+
+  it("binds the canonical testnet manifest to the persisted incident scope", async () => {
+    const bridge = new OkxA2AProviderBridge(
+      "5196",
+      () => new Date(now),
+      undefined,
+      [OKX_A2A_XLAYER_TESTNET_CHAIN_ID],
+    );
+    const versions: string[] = [];
+    for (const tokenAddress of [token, destination]) {
+      const service = lifecycle();
+      await expect(bridge.prepareSigningDeliverable(service, {
+        ...request,
+        walletContext: {
+          ...request.walletContext,
+          chainId: OKX_A2A_XLAYER_TESTNET_CHAIN_ID,
+        },
+        assetManifest: { erc20TokenAddresses: [tokenAddress] },
+      })).rejects.toThrow("outside the normalized task scope");
+      const createIncident = vi.mocked(service.createIncident);
+      const input = createIncident.mock.calls[0]?.[0];
+      versions.push(input?.incident?.ownershipAttestation.statementVersion ?? "");
+    }
+
+    expect(versions[0]).toMatch(/^safeexit-okx-a2a-auth-v1-[a-f0-9]{7}$/);
+    expect(versions[1]).toMatch(/^safeexit-okx-a2a-auth-v1-[a-f0-9]{7}$/);
+    expect(versions[0]).not.toBe(versions[1]);
   });
 
   it("prepares a strict signing deliverable without source signatures", async () => {

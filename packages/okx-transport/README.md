@@ -18,6 +18,16 @@ Required task fields are:
 - the exact ownership statement exported as
   `SAFEEXIT_AUTHORIZATION_STATEMENT`
 
+X Layer testnet tasks (`chainId: 1952`) additionally require an explicit
+`assetManifest.erc20TokenAddresses` list with one to eight contracts. SAFEEXIT
+reads metadata and balances for only those contracts at a pinned testnet block.
+The manifest is rejected on mainnet, where the existing OKX-backed discovery
+path is used instead.
+
+The canonical testnet manifest is committed into the persisted incident scope.
+Reusing an OKX job ID with a different token list is rejected by the same
+idempotency guard that protects source, destination, and chain binding.
+
 Unknown fields are rejected. Private keys, seed phrases, credentials,
 signatures, and arbitrary calldata have no accepted field.
 

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import {
   agentServiceJobSchema,
@@ -25,6 +25,20 @@ function sameAddress(left: string, right: string): boolean {
 
 function requestIdFor(providerAgentId: string, okxJobId: string): string {
   return `okx:${providerAgentId}:${okxJobId}`;
+}
+
+function statementVersionFor(request: OkxA2ATaskRequest): string {
+  if (!request.assetManifest) {
+    return "safeexit-okx-a2a-auth-v1";
+  }
+  const canonicalAddresses = [...new Set(
+    request.assetManifest.erc20TokenAddresses.map((address) => address.toLowerCase()),
+  )].sort();
+  const commitment = createHash("sha256")
+    .update(JSON.stringify(canonicalAddresses))
+    .digest("hex")
+    .slice(0, 7);
+  return `safeexit-okx-a2a-auth-v1-${commitment}`;
 }
 
 export class OkxProviderBridgeError extends Error {
@@ -114,7 +128,7 @@ export class OkxA2AProviderBridge {
       status: "RECEIVED",
       ownershipAttestation: {
         accepted: true,
-        statementVersion: "safeexit-okx-a2a-auth-v1",
+        statementVersion: statementVersionFor(request),
         attestedAt: request.authorization.confirmedAt,
       },
       createdAt: now,

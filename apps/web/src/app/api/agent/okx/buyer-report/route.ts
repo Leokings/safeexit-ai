@@ -23,7 +23,7 @@ export async function POST(request: Request): Promise<Response> {
     headers = authorizeAgentRequest(request);
     const input = await parseJsonBody(request, okxA2ABuyerReportRequestSchema);
     const deliverable = await getOkxProviderBridge().recordBuyerReport(
-      getAgentIncidentService(),
+      getAgentIncidentService({ chainId: input.report.chainId }),
       input,
     );
     return agentJson(okxA2ACompletionDeliverableSchema.parse(deliverable), 200, headers);

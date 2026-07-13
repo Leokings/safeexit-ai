@@ -14,6 +14,12 @@ const agentIdSchema = z.string().regex(/^\d{1,32}$/);
 const timestampSchema = z.string().datetime({ offset: true });
 const transactionHashSchema = z.string().regex(/^0x[a-fA-F0-9]{64}$/);
 
+export const OKX_A2A_XLAYER_TESTNET_CHAIN_ID = 1_952;
+
+export const okxA2AAssetManifestSchema = z.strictObject({
+  erc20TokenAddresses: z.array(evmAddressSchema).min(1).max(8),
+});
+
 const walletContextSchema = z
   .strictObject({
     chainId: chainIdSchema,
@@ -30,19 +36,43 @@ const walletContextSchema = z
     }
   });
 
-export const okxA2ATaskRequestSchema = z.strictObject({
-  schemaVersion: z.literal("safeexit-okx-a2a-v1"),
-  transportMode: z.literal("SAFEEXIT_NORMALIZED"),
-  okxJobId: identifierSchema,
-  providerAgentId: agentIdSchema,
-  buyerAgentId: agentIdSchema.optional(),
-  service: z.literal("compromised-wallet-rescue"),
-  walletContext: walletContextSchema,
-  authorization: z.strictObject({
-    statement: z.literal(SAFEEXIT_AUTHORIZATION_STATEMENT),
-    confirmedAt: timestampSchema,
-  }),
-});
+export const okxA2ATaskRequestSchema = z
+  .strictObject({
+    schemaVersion: z.literal("safeexit-okx-a2a-v1"),
+    transportMode: z.literal("SAFEEXIT_NORMALIZED"),
+    okxJobId: identifierSchema,
+    providerAgentId: agentIdSchema,
+    buyerAgentId: agentIdSchema.optional(),
+    service: z.literal("compromised-wallet-rescue"),
+    walletContext: walletContextSchema,
+    assetManifest: okxA2AAssetManifestSchema.optional(),
+    authorization: z.strictObject({
+      statement: z.literal(SAFEEXIT_AUTHORIZATION_STATEMENT),
+      confirmedAt: timestampSchema,
+    }),
+  })
+  .superRefine(({ walletContext, assetManifest }, context) => {
+    if (
+      walletContext.chainId === OKX_A2A_XLAYER_TESTNET_CHAIN_ID &&
+      !assetManifest
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "X Layer testnet tasks require an explicit ERC-20 asset manifest",
+        path: ["assetManifest"],
+      });
+    }
+    if (
+      walletContext.chainId !== OKX_A2A_XLAYER_TESTNET_CHAIN_ID &&
+      assetManifest
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Explicit asset manifests are currently restricted to X Layer testnet",
+        path: ["assetManifest"],
+      });
+    }
+  });
 
 export const okxA2ASigningDeliverableSchema = z.strictObject({
   schemaVersion: z.literal("safeexit-okx-deliverable-v1"),
@@ -89,6 +119,7 @@ export const okxA2ACompletionDeliverableSchema = z.strictObject({
 });
 
 export type OkxA2ATaskRequest = z.infer<typeof okxA2ATaskRequestSchema>;
+export type OkxA2AAssetManifest = z.infer<typeof okxA2AAssetManifestSchema>;
 export type OkxA2ASigningDeliverable = z.infer<typeof okxA2ASigningDeliverableSchema>;
 export type OkxA2ABuyerReportRequest = z.infer<typeof okxA2ABuyerReportRequestSchema>;
 export type OkxA2ACompletionDeliverable = z.infer<typeof okxA2ACompletionDeliverableSchema>;

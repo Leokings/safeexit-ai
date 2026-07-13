@@ -141,6 +141,12 @@ The returned signing-package JSON is delivered through the official A2A task
 flow. After local buyer execution, only the receipt report is mapped into
 `buyer-report`; source signatures must never be included.
 
+The normalized bridge accepts X Layer mainnet (`196`) and the guarded X Layer
+testnet pilot (`1952`). A testnet handoff must declare one to eight ERC-20
+contract addresses in `assetManifest.erc20TokenAddresses`; the testnet analyzer
+does not use AI or an indexer to infer additional assets. Mainnet uses the
+OKX-backed discovery path and rejects this test-only manifest field.
+
 Analysis, planning, simulation, and monitoring accept the strict body
 `{ "schemaVersion": "safeexit-agent-api-v1" }`.
 
