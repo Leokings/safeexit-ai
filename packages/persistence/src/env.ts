@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const postgresUrlSchema = z.string().url().superRefine((value, context) => {
+const postgresUrlSchema = z.string().trim().url().superRefine((value, context) => {
   const protocol = new URL(value).protocol;
   if (protocol !== "postgres:" && protocol !== "postgresql:") {
     context.addIssue({
@@ -23,7 +23,7 @@ export function parsePersistenceEnvironment(
 ): PersistenceEnvironment {
   return persistenceEnvironmentSchema.parse({
     NODE_ENV: environment.NODE_ENV,
-    DATABASE_URL: environment.DATABASE_URL,
-    DIRECT_URL: environment.DIRECT_URL,
+    DATABASE_URL: environment.DATABASE_URL?.trim(),
+    DIRECT_URL: environment.DIRECT_URL?.trim() || undefined,
   });
 }

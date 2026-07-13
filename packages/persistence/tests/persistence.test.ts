@@ -167,6 +167,17 @@ describe("persistence environment", () => {
     expect(() => parsePersistenceEnvironment({})).toThrow();
   });
 
+  it("ignores a blank direct URL and trims the runtime database URL", () => {
+    expect(parsePersistenceEnvironment({
+      NODE_ENV: "production",
+      DATABASE_URL: "  postgresql://safeexit:secret@localhost:5432/safeexit  ",
+      DIRECT_URL: "\r\n",
+    })).toEqual({
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://safeexit:secret@localhost:5432/safeexit",
+    });
+  });
+
   it("makes PostgreSQL certificate verification explicit", () => {
     const normalized = new URL(
       normalizePostgresTlsUrl(
