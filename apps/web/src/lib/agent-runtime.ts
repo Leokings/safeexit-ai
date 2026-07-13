@@ -55,6 +55,7 @@ const erc20DecimalsAbi = [
 import { createDemoAiContext } from "./demo-ai-context";
 import { demoIncident } from "./demo-incident";
 import { parseDeploymentEnvironment } from "./deployment-env";
+import { LivePermitSigningPackageBuilder } from "./live-signing-package-builder";
 
 const replayGas: Record<RescueAction["actionType"], string> = {
   CLAIM_SUPPORTED_AIRDROP: "34873",
@@ -355,7 +356,7 @@ class LiveRpcSimulator implements RescuePlanSimulatorPort {
       id: "x-layer-mainnet-rpc-preflight-v1",
       kind: "PRODUCTION_RPC",
       client,
-      ttlMs: 60_000,
+      ttlMs: 300_000,
     });
     const report = await simulateRescuePlan(plan, provider);
     return {
@@ -437,6 +438,10 @@ export function getAgentIncidentService(): AgentIncidentService {
       planner: new LiveDeterministicPlanner(),
       simulator: new LiveRpcSimulator(config.xLayerMainnetRpcUrl),
       dashboard: new LiveDashboardLocator(config.publicBaseUrl),
+      signingPackages: new LivePermitSigningPackageBuilder(
+        xLayerMainnetConfig,
+        config.xLayerMainnetRpcUrl,
+      ),
       monitor: new ReviewOnlyMonitor(),
     });
   } else {
@@ -446,6 +451,11 @@ export function getAgentIncidentService(): AgentIncidentService {
       planner: new HostedReplayPlanner(),
       simulator: new HostedReplaySimulator(),
       dashboard: new ScopedDashboardLocator(config.publicBaseUrl),
+      signingPackages: {
+        build: async () => {
+          throw new Error("Hosted replay does not issue production signing packages");
+        },
+      },
       monitor: new ReviewOnlyMonitor(),
     });
   }

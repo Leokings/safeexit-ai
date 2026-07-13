@@ -39,12 +39,10 @@ export async function POST(request: Request): Promise<Response> {
         })
       : undefined;
     const service = getAgentIncidentService();
-    let job = await service.createIncident({
+    const job = await service.createIncident({
       ...(input.requestId ? { requestId: input.requestId } : {}),
       ...(incident ? { incident } : {}),
     });
-    await service.getDashboardUrl(job.id);
-    job = await service.getJob(job.id);
     return agentJson(
       agentJobResponseSchema.parse({ schemaVersion: input.schemaVersion, job }),
       201,

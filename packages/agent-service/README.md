@@ -28,17 +28,39 @@ Any non-terminal operational state can fail only where declared in
   `PLAN_READY`.
 - `simulatePlan`: stores validated simulation results. A successful or partial
   simulation enters `WAITING_FOR_USER`; a fully failed simulation fails closed.
+- `getSigningPackage`: returns one short-lived, allowlisted EIP-712 route for an
+  action approved by the pinned simulation. It commits to the job, plan hash,
+  source, destination, chain, block, action, amount or token ID, and simulation.
+  It contains no private credential, signature, arbitrary calldata, or server
+  execution capability.
 - `getDashboardUrl`: resolves a SAFEEXIT-owned dashboard URL through an injected
-  locator. It is not an OKX marketplace URL.
+  locator only when explicitly requested. Agent jobs are dashboardless by
+  default, and this URL is not an OKX marketplace URL.
 - `monitorRescue`: reads signature, execution, and receipt observations through
   a monitor port. It has no signing or broadcasting capability.
+
+## Signing-package boundary
+
+The signing package is a declarative contract between SAFEEXIT and a buyer-local
+runtime. Supported schema routes are ERC-3009, ERC-2612, strict DAI-style permit,
+and ERC-4494. The destination is the settlement executor and gas payer. Every
+source authorization uses EIP-712 and must be requested from the source signer
+locally.
+
+The buyer runtime must independently render the committed source and
+destination, obtain confirmation, request the source signature, perform the
+required post-signature simulation, assemble only the declared operation
+sequence, and submit from the destination wallet. Signatures must not be sent
+back to SAFEEXIT. The repository does not yet contain that OKX Agentic Wallet or
+wallet-extension runtime.
 
 ## Conceptual A2A boundary
 
 `ConceptualA2ARequest` and `ConceptualA2AResponse` are versioned SAFEEXIT data
 contracts, not an assertion about an OKX wire protocol. They accept only public
 wallet context and an ownership confirmation. Strict validation rejects raw
-credentials and undeclared fields.
+credentials and undeclared fields. A conceptual response may identify a ready
+signing package, while the dashboard URL remains optional.
 
 ## OKX integration status
 

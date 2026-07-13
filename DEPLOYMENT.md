@@ -1,8 +1,9 @@
 # SAFEEXIT Deployment
 
-This repository is ready to host the web dashboard and the provider-neutral
-agent job API. Mainnet execution is intentionally disabled. The hosted service
-also exposes a narrowly scoped X Layer testnet ERC-3009 pilot described below.
+This repository is ready to host the optional web dashboard and the
+provider-neutral agent job API. Mainnet execution is intentionally disabled.
+The hosted service also exposes a narrowly scoped X Layer testnet
+destination-paid pilot described below.
 
 The codebase also contains an opt-in `LIVE_READONLY` mode. It uses the official
 OKX Wallet API to discover X Layer ERC-20 candidates, re-verifies balances with
@@ -114,12 +115,27 @@ Then call the job actions in order with a versioned JSON body:
 POST /api/agent/jobs/{id}/analyse
 POST /api/agent/jobs/{id}/plan
 POST /api/agent/jobs/{id}/simulate
+POST /api/agent/jobs/{id}/signing-package
 POST /api/agent/jobs/{id}/monitor
 GET  /api/agent/jobs/{id}
 ```
 
 Analysis, planning, simulation, and monitoring accept the strict body
 `{ "schemaVersion": "safeexit-agent-api-v1" }`.
+
+`signing-package` accepts the same version-only body. It returns one strict,
+short-lived package for a successfully simulated action. The package contains
+EIP-712 typed data and a declarative settlement sequence, not signatures,
+private credentials, raw calldata, or an unrestricted call list. The buyer's
+local runtime must re-confirm the fixed addresses, collect source signatures,
+perform post-signature simulation, and submit settlement from the destination.
+
+The dashboard is optional and is not created with the job. Request it only for
+a manual audit handoff:
+
+```text
+POST /api/agent/jobs/{id}/dashboard
+```
 
 ## 5. Connect OKX.AI from official tooling
 
@@ -128,15 +144,17 @@ format. Registration, Agentic Wallet setup, marketplace metadata, escrow,
 service discovery, and any A2A transport mapping must be completed with the
 current official OKX.AI and Onchain OS tooling.
 
-Use the hosted dashboard URL as the human review handoff and map an OKX service
-request into the SAFEEXIT lifecycle only after confirming the official request
-and response contract. Keep `packages/agent-service/src/official-boundaries.ts`
-marked `OFFICIAL_DOCS_REQUIRED` until that adapter has tests against the
-official contract.
+Map an OKX service request into the SAFEEXIT lifecycle only after confirming the
+official request and response contract. Use the hosted dashboard only as an
+optional human audit handoff. Keep
+`packages/agent-service/src/official-boundaries.ts` marked
+`OFFICIAL_DOCS_REQUIRED` until that adapter has tests against the official
+contract.
 
-Never provide an OKX prompt or agent with a seed phrase or private key. The
-mainnet user-controlled signing integration remains future work and the hosted
-agent lifecycle stops at `WAITING_FOR_USER`.
+Never provide an OKX prompt or agent with a seed phrase, private key, or raw
+wallet credential. SAFEEXIT can prepare a signing package and remains at
+`WAITING_FOR_USER`; the audited buyer-local signing, atomic settlement, and
+receipt-verification runtime remains future work.
 
 ## X Layer testnet destination-paid pilot
 
@@ -176,6 +194,9 @@ control has received an independent security review.
   Testnet execution is limited to ERC-3009, signature-verified ERC-2612,
   strict DAI-style permits, or ERC-4494 destination-paid settlement through
   the user-controlled OKX Wallet.
+- The agent API can issue strict signing packages in `LIVE_READONLY`, but the
+  buyer-agent wallet bridge that collects signatures, assembles settlement,
+  submits it, and returns deterministically verified receipts is not connected.
 - Native OKB remains blocked. `@safeexit/adapters` defines the mandatory proof
   for EIP-7702 sponsorship and private atomic bundles, but exposes neither as
   executable until official X Layer integration details and an independent

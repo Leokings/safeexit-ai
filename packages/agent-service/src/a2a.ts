@@ -56,6 +56,13 @@ export const conceptualA2AResponseSchema = z.strictObject({
     scanId: identifierSchema.optional(),
     planId: identifierSchema.optional(),
     simulationStatus: z.enum(["SUCCEEDED", "PARTIAL", "FAILED"]).optional(),
+    signingPackageId: identifierSchema.optional(),
+    signingRoute: z.enum([
+      "ERC3009_RECEIVE_WITH_AUTHORIZATION",
+      "ERC2612_PERMIT_ATOMIC_BATCH",
+      "DAI_PERMIT_ATOMIC_BATCH",
+      "ERC4494_PERMIT_ATOMIC_BATCH",
+    ]).optional(),
     completedActionCount: z.number().int().nonnegative(),
     failedActionCount: z.number().int().nonnegative(),
     transactionHashes: z.array(z.string().regex(/^0x[a-fA-F0-9]{64}$/)),
@@ -106,6 +113,12 @@ export function toConceptualA2AResponse(
       ...(job.scan ? { scanId: job.scan.id } : {}),
       ...(job.plan ? { planId: job.plan.id } : {}),
       ...(job.simulation ? { simulationStatus: job.simulation.status } : {}),
+      ...(job.signingPackage
+        ? {
+            signingPackageId: job.signingPackage.packageId,
+            signingRoute: job.signingPackage.route,
+          }
+        : {}),
       completedActionCount: job.monitor?.completedActionIds.length ?? 0,
       failedActionCount: job.monitor?.failedActionIds.length ?? 0,
       transactionHashes: job.monitor?.transactionHashes ?? [],

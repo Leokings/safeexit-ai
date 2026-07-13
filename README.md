@@ -78,8 +78,10 @@ The workspace uses npm workspaces under `apps/*` and `packages/*`.
 Production mode serves the verified demo as a clearly labelled read-only
 replay. The local fixed executor is never exposed in hosted mode. A
 bearer-authenticated, provider-neutral agent lifecycle is available under
-`/api/agent/jobs`; it supports create, analyze, plan, simulate, monitor, and
-status operations but cannot sign or broadcast transactions.
+`/api/agent/jobs`; it supports create, analyze, plan, simulate, strict signing
+package delivery, monitor, and status operations but cannot sign or broadcast
+transactions. Jobs are dashboardless by default; an audit URL is created only
+through the explicit dashboard endpoint.
 
 An opt-in `LIVE_READONLY` agent mode replaces fixture analysis with real X Layer
 mainnet reads. It discovers non-risk ERC-20 candidates through the official OKX
@@ -201,7 +203,8 @@ development fixtures. Never fund or reuse them.
 - Recovery is best effort. An EVM chain cannot distinguish the legitimate owner
   from another party holding the same private key.
 - The fixed multi-asset demo executor is localhost-only. The separate X Layer
-  testnet pilot supports only verified ERC-3009 token authorizations.
+  testnet pilot supports only verified ERC-3009, ERC-2612, strict DAI-style,
+  and ERC-4494 destination-paid routes.
 - Permit2 discovery, arbitrary protocol positions, production simulation,
   private submission, paymasters, and OKX-specific execution are not connected.
 - Snapshot success does not guarantee production execution. Gas, ordering,
@@ -228,8 +231,15 @@ itself as a deterministic fallback and remains fully usable without credentials.
 
 `@safeexit/agent-service` adds the provider-neutral incident job lifecycle and
 the methods `createIncident`, `analyseIncident`, `generatePlan`, `simulatePlan`,
-`getDashboardUrl`, and `monitorRescue`. Scanner, planner, simulator, dashboard,
-and monitor behavior are injected ports. There is no execution or wallet port.
+`getSigningPackage`, `getDashboardUrl`, and `monitorRescue`. Scanner, planner,
+simulator, signing-package, dashboard, and monitor behavior are injected ports.
+There is no execution or wallet port.
+
+Signing packages are short-lived strict schemas, not generic unsigned
+transactions. They commit to the confirmed source and destination, plan hash,
+pinned block, simulation, route, asset, and exact operation sequence. The buyer
+runtime must request EIP-712 signatures locally and pay settlement gas from the
+destination. SAFEEXIT accepts neither signatures nor arbitrary calldata.
 
 The package also contains versioned conceptual A2A request/response schemas.
 They are SAFEEXIT contracts, not claimed OKX wire formats. ASP registration,

@@ -110,7 +110,10 @@ export function agentErrorResponse(
 
   const message = error instanceof Error ? error.message : "Agent service request failed";
   const notFound = message.startsWith("Agent-service job not found:");
-  const conflict = message.startsWith("Cannot ") || message.includes(" is required before ");
+  const conflict =
+    message.startsWith("Cannot ") ||
+    message.startsWith("Signing package is unavailable:") ||
+    message.includes(" is required before ");
   logger.error("Agent service request failed", { error });
   return agentJson(
     {

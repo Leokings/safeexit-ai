@@ -6,11 +6,14 @@ import {
   AgentIncidentService,
   InMemoryAgentServiceJobStore,
   OKX_AI_INTEGRATION_BOUNDARIES,
+  SIGNING_PACKAGE_EIP712_TYPES,
   SafeExitDashboardLocator,
+  agentServiceJobSchema,
   conceptualA2ARequestSchema,
   toConceptualA2AResponse,
   type AgentSimulationReport,
   type RescueMonitorObservation,
+  type SigningPackage,
 } from "../src";
 
 const source = evmAddressSchema.parse("0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
@@ -132,6 +135,74 @@ function simulationReport(status: AgentSimulationReport["status"]): AgentSimulat
   };
 }
 
+function signingPackage(overrides: Partial<SigningPackage> = {}): SigningPackage {
+  return {
+    schemaVersion: "safeexit-signing-package-v1",
+    packageId: "signing-package:test",
+    jobId: "job:test",
+    incidentId: incident.id,
+    planId: plan.id,
+    planHash,
+    actionId: "action:transfer",
+    route: "ERC2612_PERMIT_ATOMIC_BATCH",
+    chainId: incident.chainId,
+    sourceAddress: source,
+    destinationAddress: destination,
+    observedAtBlock: plan.observedAtBlock,
+    expiresAt: "2026-07-12T10:04:00.000Z",
+    tokenAddress: token,
+    amount: "100",
+    sourceSigningRequests: [{
+      id: "source-permit",
+      signer: source,
+      method: "EIP712",
+      rpcMethod: "eth_signTypedData_v4",
+      typedData: {
+        primaryType: "Permit",
+        types: {
+          EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+          Permit: [...SIGNING_PACKAGE_EIP712_TYPES.ERC2612Permit],
+        },
+        domain: {
+          name: "Test Token",
+          version: "1",
+          chainId: incident.chainId,
+          verifyingContract: token,
+        },
+        message: {
+          owner: source,
+          spender: destination,
+          value: "100",
+          nonce: "0",
+          deadline: "1783850640",
+        },
+      },
+    }],
+    destinationSettlement: {
+      executor: destination,
+      payer: "DESTINATION",
+      assembly: "BUYER_LOCAL_RUNTIME",
+      atomicRequired: true,
+      operations: ["PERMIT_ERC2612", "TRANSFER_FROM_ERC20"],
+    },
+    simulation: {
+      resultId: "simulation:test",
+      providerId: "test-simulator",
+      status: "SUCCEEDED",
+      expiresAt: "2026-07-12T10:05:00.000Z",
+    },
+    policy: {
+      sourceSignsLocally: true,
+      destinationPaysSettlement: true,
+      privateCredentialsAccepted: false,
+      signaturesReturnedToSafeExit: false,
+      arbitraryCallsAllowed: false,
+      postSignatureSimulationRequired: true,
+    },
+    ...overrides,
+  } as SigningPackage;
+}
+
 function observation(
   phase: RescueMonitorObservation["phase"],
 ): RescueMonitorObservation {
@@ -149,6 +220,7 @@ type ServiceOptions = {
   analyzerError?: Error;
   simulationStatus?: AgentSimulationReport["status"];
   observations?: RescueMonitorObservation[];
+  signingPackage?: SigningPackage;
 };
 
 function createService(options: ServiceOptions = {}) {
@@ -169,6 +241,9 @@ function createService(options: ServiceOptions = {}) {
       simulate: async () => simulationReport(options.simulationStatus ?? "SUCCEEDED"),
     },
     dashboard: new SafeExitDashboardLocator("http://localhost:3001"),
+    signingPackages: {
+      build: async () => options.signingPackage ?? signingPackage(),
+    },
     monitor: {
       observe: async () => pendingObservations.shift() ?? observation("WAITING_FOR_USER"),
     },
@@ -212,9 +287,13 @@ describe("agent service lifecycle", () => {
     });
 
     expect((await service.createIncident({ incident })).status).toBe("RECEIVED");
+    expect((await service.getJob("job:test")).dashboardUrl).toBeUndefined();
     expect((await service.analyseIncident("job:test")).status).toBe("ANALYSING");
     expect((await service.generatePlan("job:test")).status).toBe("PLAN_READY");
     expect((await service.simulatePlan("job:test")).status).toBe("WAITING_FOR_USER");
+    expect((await service.getSigningPackage("job:test")).route).toBe(
+      "ERC2612_PERMIT_ATOMIC_BATCH",
+    );
     expect(await service.getDashboardUrl("job:test")).toBe(
       "http://localhost:3001/rescue/job%3Atest",
     );
@@ -241,6 +320,45 @@ describe("agent service lifecycle", () => {
     await expect(service.generatePlan("job:test")).rejects.toThrow(
       "scan is required",
     );
+  });
+
+  it("rejects a signing package that substitutes the destination", async () => {
+    const maliciousDestination = evmAddressSchema.parse(
+      "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+    );
+    const unsafe = signingPackage({
+      destinationAddress: maliciousDestination,
+      destinationSettlement: {
+        executor: maliciousDestination,
+        payer: "DESTINATION",
+        assembly: "BUYER_LOCAL_RUNTIME",
+        atomicRequired: true,
+        operations: ["PERMIT_ERC2612", "TRANSFER_FROM_ERC20"],
+      },
+    });
+    const { service } = createService({ signingPackage: unsafe });
+    await prepareWaitingForUser(service);
+
+    await expect(service.getSigningPackage("job:test")).rejects.toThrow(
+      "Signing package is unavailable",
+    );
+  });
+
+  it("rejects a persisted signing package outside its job scope", async () => {
+    const { service } = createService();
+    await prepareWaitingForUser(service);
+    await service.getSigningPackage("job:test");
+    const job = await service.getJob("job:test");
+
+    expect(
+      agentServiceJobSchema.safeParse({
+        ...job,
+        signingPackage: {
+          ...job.signingPackage,
+          planHash: `0x${"4".repeat(64)}`,
+        },
+      }).success,
+    ).toBe(false);
   });
 
   it("records analysis adapter failures as FAILED", async () => {

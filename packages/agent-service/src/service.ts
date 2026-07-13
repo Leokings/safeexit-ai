@@ -16,6 +16,7 @@ import type {
   RescueMonitorPort,
   RescuePlanGeneratorPort,
   RescuePlanSimulatorPort,
+  SigningPackageBuilderPort,
 } from "./ports";
 import {
   agentServiceJobSchema,
@@ -27,6 +28,7 @@ import {
   type CreateIncidentInput,
   type RescueMonitorObservation,
 } from "./schemas";
+import { signingPackageSchema, type SigningPackage } from "./signing-package";
 import type { AgentServiceJobStore } from "./store";
 
 export type AgentIncidentServiceOptions = {
@@ -35,6 +37,7 @@ export type AgentIncidentServiceOptions = {
   planner: RescuePlanGeneratorPort;
   simulator: RescuePlanSimulatorPort;
   dashboard: DashboardLocatorPort;
+  signingPackages: SigningPackageBuilderPort;
   monitor: RescueMonitorPort;
   clock?: () => Date;
   idFactory?: () => string;
@@ -72,6 +75,7 @@ export class AgentIncidentService {
   private readonly planner: RescuePlanGeneratorPort;
   private readonly simulator: RescuePlanSimulatorPort;
   private readonly dashboard: DashboardLocatorPort;
+  private readonly signingPackages: SigningPackageBuilderPort;
   private readonly monitor: RescueMonitorPort;
   private readonly clock: () => Date;
   private readonly idFactory: () => string;
@@ -82,6 +86,7 @@ export class AgentIncidentService {
     this.planner = options.planner;
     this.simulator = options.simulator;
     this.dashboard = options.dashboard;
+    this.signingPackages = options.signingPackages;
     this.monitor = options.monitor;
     this.clock = options.clock ?? (() => new Date());
     this.idFactory = options.idFactory ?? (() => `job:${crypto.randomUUID()}`);
@@ -197,6 +202,28 @@ export class AgentIncidentService {
     const dashboardUrl = z.string().url().parse(this.dashboard.getDashboardUrl(job));
     await this.updateJob(job, { dashboardUrl });
     return dashboardUrl;
+  }
+
+  async getSigningPackage(jobId: string): Promise<SigningPackage> {
+    const job = await this.requireJob(jobId);
+    if (
+      job.status !== "WAITING_FOR_USER" ||
+      !job.incident ||
+      !job.plan ||
+      !job.simulation
+    ) {
+      throw new Error("A successfully simulated rescue plan is required before signing-package generation");
+    }
+    try {
+      const signingPackage = signingPackageSchema.parse(
+        await this.signingPackages.build(job),
+      );
+      this.validateSigningPackage(job, signingPackage);
+      await this.updateJob(job, { signingPackage });
+      return signingPackage;
+    } catch (error) {
+      throw new Error(`Signing package is unavailable: ${messageFor(error)}`);
+    }
   }
 
   async monitorRescue(jobId: string): Promise<AgentServiceJob> {
@@ -316,6 +343,63 @@ export class AgentIncidentService {
     }
   }
 
+  private validateSigningPackage(job: AgentServiceJob, value: SigningPackage): void {
+    if (!job.incident || !job.plan || !job.simulation) {
+      throw new Error("Signing package validation requires incident, plan, and simulation state");
+    }
+    if (
+      value.jobId !== job.id ||
+      value.incidentId !== job.incident.id ||
+      value.planId !== job.plan.id ||
+      value.planHash.toLowerCase() !== job.plan.integrityHash.toLowerCase() ||
+      value.chainId !== job.plan.chainId ||
+      value.sourceAddress.toLowerCase() !== job.plan.sourceAddress.toLowerCase() ||
+      value.destinationAddress.toLowerCase() !== job.plan.destinationAddress.toLowerCase() ||
+      value.observedAtBlock !== job.plan.observedAtBlock
+    ) {
+      throw new Error("Signing package does not match the simulated rescue scope");
+    }
+    if (!job.simulation.executableActionIds.includes(value.actionId)) {
+      throw new Error("Signing package action was not approved by simulation");
+    }
+    const action = job.plan.actions.find((candidate) => candidate.id === value.actionId);
+    const simulation = job.simulation.results.find(
+      (candidate) => candidate.id === value.simulation.resultId,
+    );
+    if (
+      !action ||
+      !simulation ||
+      simulation.actionId !== action.id ||
+      simulation.status !== "SUCCEEDED" ||
+      simulation.providerId !== value.simulation.providerId ||
+      simulation.expiresAt !== value.simulation.expiresAt
+    ) {
+      throw new Error("Signing package simulation commitment is invalid");
+    }
+    const packageExpiry = Date.parse(value.expiresAt);
+    const simulationExpiry = Date.parse(simulation.expiresAt);
+    if (packageExpiry > simulationExpiry || packageExpiry <= this.clock().getTime()) {
+      throw new Error("Signing package must expire before its live simulation");
+    }
+    if (value.route === "ERC4494_PERMIT_ATOMIC_BATCH") {
+      if (
+        action.actionType !== "TRANSFER_ERC721" ||
+        value.collectionAddress.toLowerCase() !== action.parameters.collectionAddress.toLowerCase() ||
+        value.tokenId !== action.parameters.tokenId
+      ) {
+        throw new Error("NFT signing package does not match its rescue action");
+      }
+      return;
+    }
+    if (
+      action.actionType !== "TRANSFER_ERC20" ||
+      value.tokenAddress.toLowerCase() !== action.parameters.tokenAddress.toLowerCase() ||
+      value.amount !== action.parameters.amount
+    ) {
+      throw new Error("Token signing package does not match its rescue action");
+    }
+  }
+
   private async failJob(
     job: AgentServiceJob,
     code: AgentServiceError["code"],
@@ -336,7 +420,7 @@ export class AgentIncidentService {
 
   private async updateJob(
     job: AgentServiceJob,
-    patch: Partial<Pick<AgentServiceJob, "incident" | "scan" | "monitor" | "dashboardUrl">>,
+    patch: Partial<Pick<AgentServiceJob, "incident" | "scan" | "signingPackage" | "monitor" | "dashboardUrl">>,
   ): Promise<AgentServiceJob> {
     const at = this.now();
     return this.store.save(

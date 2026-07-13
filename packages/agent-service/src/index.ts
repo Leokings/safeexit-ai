@@ -6,3 +6,4 @@ export * from "./service";
 export * from "./a2a";
 export * from "./api";
 export * from "./official-boundaries";
+export * from "./signing-package";

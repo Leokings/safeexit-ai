@@ -7,6 +7,8 @@ import {
   walletScanSchema,
 } from "@safeexit/shared";
 
+import { signingPackageSchema } from "./signing-package";
+
 const identifierSchema = z.string().min(1).max(256);
 const timestampSchema = z.string().datetime({ offset: true });
 const transactionHashSchema = z.string().regex(/^0x[a-fA-F0-9]{64}$/);
@@ -92,6 +94,7 @@ export const agentServiceJobSchema = z
     scan: walletScanSchema.optional(),
     plan: rescuePlanSchema.optional(),
     simulation: agentSimulationReportSchema.optional(),
+    signingPackage: signingPackageSchema.optional(),
     monitor: rescueMonitorObservationSchema.optional(),
     dashboardUrl: z.string().url().optional(),
     error: agentServiceErrorSchema.optional(),
@@ -145,6 +148,33 @@ export const agentServiceJobSchema = z
         message: "A simulation report requires a plan",
         path: ["simulation"],
       });
+    }
+    if (job.signingPackage && !job.simulation) {
+      context.addIssue({
+        code: "custom",
+        message: "A signing package requires a simulation report",
+        path: ["signingPackage"],
+      });
+    }
+    if (job.signingPackage && job.incident && job.plan) {
+      const signingPackage = job.signingPackage;
+      const scopeMatches =
+        signingPackage.jobId === job.id &&
+        signingPackage.incidentId === job.incident.id &&
+        signingPackage.planId === job.plan.id &&
+        signingPackage.planHash === job.plan.integrityHash &&
+        signingPackage.chainId === job.plan.chainId &&
+        signingPackage.sourceAddress.toLowerCase() === job.plan.sourceAddress.toLowerCase() &&
+        signingPackage.destinationAddress.toLowerCase() ===
+          job.plan.destinationAddress.toLowerCase() &&
+        signingPackage.observedAtBlock === job.plan.observedAtBlock;
+      if (!scopeMatches) {
+        context.addIssue({
+          code: "custom",
+          message: "The signing package must exactly match the persisted job and plan scope",
+          path: ["signingPackage"],
+        });
+      }
     }
     if (job.status === "WAITING_FOR_SOURCE" && job.incident) {
       context.addIssue({
