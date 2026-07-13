@@ -1,9 +1,8 @@
 # SAFEEXIT Deployment
 
 This repository is ready to host the web dashboard and the provider-neutral
-agent job API. The hosted service is intentionally review-only: it replays the
-fixed developer-created demo fixture and never signs or broadcasts a
-production transaction.
+agent job API. Mainnet execution is intentionally disabled. The hosted service
+also exposes a narrowly scoped X Layer testnet ERC-3009 pilot described below.
 
 The codebase also contains an opt-in `LIVE_READONLY` mode. It uses the official
 OKX Wallet API to discover X Layer ERC-20 candidates, re-verifies balances with
@@ -136,16 +135,31 @@ marked `OFFICIAL_DOCS_REQUIRED` until that adapter has tests against the
 official contract.
 
 Never provide an OKX prompt or agent with a seed phrase or private key. The
-user-controlled signing integration remains future work and the hosted replay
-stops at `WAITING_FOR_USER`.
+mainnet user-controlled signing integration remains future work and the hosted
+agent lifecycle stops at `WAITING_FOR_USER`.
+
+## X Layer testnet destination-paid pilot
+
+For an incident created on chain ID `1952`, the rescue dashboard can scan an
+explicit ERC-20 manifest and enable execution only when the token's ERC-3009
+type hash, EIP-712 domain, domain separator, and authorization-state method are
+verified through pinned RPC reads. The source signs typed data locally. The
+safe destination submits `receiveWithAuthorization` and pays testnet gas.
+
+No server credential, relayer key, or private key is used. The short-lived
+signature remains only in the browser tab. Source-funded transactions are
+disabled in this flow. Keep this testnet-only gate in place until every
+mainnet contract, simulation, submission, monitoring, and incident-response
+control has received an independent security review.
 
 ## Current production limitations
 
 - Hosted scanning and simulation are verified fixture replays unless the agent
   is explicitly switched to `LIVE_READONLY`.
 - Only the fixed local developer incident is accepted by the hosted analyzer.
-- No production wallet signing, relayer, private transaction, paymaster,
-  Permit2, protocol withdrawal, or OKX execution integration is enabled.
+- No mainnet wallet signing, relayer, private transaction, paymaster, Permit2,
+  protocol withdrawal, or OKX execution integration is enabled. Testnet
+  execution is limited to verified ERC-3009 destination-paid settlement.
 - The in-process rate limiter is defense in depth only. Configure an edge or
   shared rate limiter before accepting untrusted public traffic at scale.
 - Recovery remains best effort because a blockchain cannot distinguish two

@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   ArrowLeft,
   ExternalLink,
+  FileSignature,
   LoaderCircle,
   RefreshCw,
   Send,
@@ -15,7 +16,6 @@ import {
 import { useState } from "react";
 import { createPublicClient, http, isAddress, type Hex } from "viem";
 
-import { prepareWalletTransaction } from "@safeexit/execution";
 import { xLayerTestnetConfig } from "@safeexit/chain";
 import type { EvmAddress, RescueAction } from "@safeexit/shared";
 
@@ -27,16 +27,19 @@ import {
   connectOkxWallet,
   ensureXLayerTestnet,
   getOkxProvider,
-  sendPreparedTestnetTransaction,
+  signEip3009Authorization,
+  submitEip3009Settlement,
+  type SignedEip3009Authorization,
 } from "@/lib/okx-wallet";
 import {
   testnetPreflightResponseSchema,
   type TestnetPreflightResponse,
 } from "@/lib/testnet-rescue";
 
+const OFFICIAL_TEST_USDT0 = "0x9e29b3aada05bf2d2c827af80bd28dc0b9b4fb0c";
+
 type SubmittedTransaction = {
   actionId: string;
-  actionType: RescueAction["actionType"];
   hash: Hex;
   status: "CONFIRMING" | "CONFIRMED" | "FAILED";
 };
@@ -90,20 +93,19 @@ export function TestnetRescueWorkspace({
   destination: EvmAddress;
 }) {
   const [connectedAccount, setConnectedAccount] = useState<`0x${string}`>();
-  const [tokenInput, setTokenInput] = useState("");
+  const [tokenInput, setTokenInput] = useState(OFFICIAL_TEST_USDT0);
   const [preflight, setPreflight] = useState<TestnetPreflightResponse>();
   const [authorized, setAuthorized] = useState(false);
-  const [busy, setBusy] = useState<"CONNECT" | "PREFLIGHT" | "SIGN" | null>(null);
+  const [signed, setSigned] = useState<SignedEip3009Authorization>();
+  const [busy, setBusy] = useState<"CONNECT" | "PREFLIGHT" | "SIGN" | "SETTLE" | null>(null);
   const [error, setError] = useState<string>();
   const [transactions, setTransactions] = useState<SubmittedTransaction[]>([]);
 
-  const accountMatches =
-    connectedAccount?.toLowerCase() === source.toLowerCase();
-  const nextAction = preflight?.plan.actions.find((action) =>
-    preflight.executableActionIds.includes(action.id),
-  );
+  const sourceConnected = connectedAccount?.toLowerCase() === source.toLowerCase();
+  const destinationConnected = connectedAccount?.toLowerCase() === destination.toLowerCase();
+  const nextGaslessAction = preflight?.gaslessActions[0];
 
-  async function connect() {
+  async function connectExpected(role: "SOURCE" | "DESTINATION") {
     setBusy("CONNECT");
     setError(undefined);
     try {
@@ -111,8 +113,13 @@ export function TestnetRescueWorkspace({
       const account = await connectOkxWallet(provider);
       await ensureXLayerTestnet(provider);
       setConnectedAccount(account);
-      if (account.toLowerCase() !== source.toLowerCase()) {
-        setError("Connected OKX Wallet account does not match the reported source wallet.");
+      const expected = role === "SOURCE" ? source : destination;
+      if (account.toLowerCase() !== expected.toLowerCase()) {
+        throw new Error(
+          role === "SOURCE"
+            ? "Switch OKX Wallet to the reported source account before signing."
+            : "Switch OKX Wallet to the safe destination account before settlement.",
+        );
       }
     } catch (nextError) {
       setError(errorMessage(nextError));
@@ -144,6 +151,7 @@ export function TestnetRescueWorkspace({
     setBusy("PREFLIGHT");
     setError(undefined);
     try {
+      setSigned(undefined);
       await requestPreflight();
     } catch (nextError) {
       setError(errorMessage(nextError));
@@ -152,9 +160,9 @@ export function TestnetRescueWorkspace({
     }
   }
 
-  async function signNextAction() {
+  async function signAuthorization() {
     if (!authorized) {
-      setError("Authorisation confirmation is required before every signing session.");
+      setError("Authorization confirmation is required before signing.");
       return;
     }
     setBusy("SIGN");
@@ -163,41 +171,71 @@ export function TestnetRescueWorkspace({
       const provider = getOkxProvider();
       const account = await connectOkxWallet(provider);
       await ensureXLayerTestnet(provider);
+      setConnectedAccount(account);
       if (account.toLowerCase() !== source.toLowerCase()) {
-        throw new Error("Connected OKX Wallet account does not match the reported source wallet");
+        throw new Error("Switch OKX Wallet to the reported source account before signing.");
       }
 
       const fresh = await requestPreflight();
-      const action = fresh.plan.actions.find((candidate) =>
-        fresh.executableActionIds.includes(candidate.id),
-      );
+      const action = fresh.gaslessActions[0];
       if (!action) {
-        throw new Error("No action has a fresh successful preflight");
+        throw new Error("No verified destination-paid ERC-3009 action is available.");
       }
-      const simulation = fresh.simulations.find((result) => result.actionId === action.id);
-      if (!simulation) {
-        throw new Error("The next action has no matching preflight result");
-      }
-      const transaction = prepareWalletTransaction(fresh.plan, simulation, new Date());
-      const hash = await sendPreparedTestnetTransaction(provider, transaction, account);
-      setTransactions((current) => [
-        ...current,
-        { actionId: action.id, actionType: action.actionType, hash, status: "CONFIRMING" },
-      ]);
+      const result = await signEip3009Authorization(provider, action, account);
+      setSigned(result);
+      setAuthorized(false);
+    } catch (nextError) {
+      setError(errorMessage(nextError));
+    } finally {
+      setBusy(null);
+    }
+  }
 
-      const receipt = await createPublicClient({
+  async function settleAuthorization() {
+    if (!signed) {
+      setError("Sign the source authorization before settlement.");
+      return;
+    }
+    setBusy("SETTLE");
+    setError(undefined);
+    try {
+      const provider = getOkxProvider();
+      const account = await connectOkxWallet(provider);
+      await ensureXLayerTestnet(provider);
+      setConnectedAccount(account);
+      if (account.toLowerCase() !== destination.toLowerCase()) {
+        throw new Error("Switch OKX Wallet to the safe destination account before settlement.");
+      }
+
+      const publicClient = createPublicClient({
         chain: xLayerTestnetConfig.chain,
         transport: http(xLayerTestnetConfig.rpcUrls[0]),
-      }).waitForTransactionReceipt({ hash, confirmations: 1, timeout: 120_000 });
+      });
+      await publicClient.call({
+        account,
+        to: signed.authorization.tokenAddress,
+        data: signed.settlementData,
+      });
+
+      const hash = await submitEip3009Settlement(provider, signed, account);
+      setTransactions((current) => [
+        ...current,
+        { actionId: signed.authorization.actionId, hash, status: "CONFIRMING" },
+      ]);
+      const receipt = await publicClient.waitForTransactionReceipt({
+        hash,
+        confirmations: 1,
+        timeout: 120_000,
+      });
       const status = receipt.status === "success" ? "CONFIRMED" : "FAILED";
       setTransactions((current) =>
         current.map((item) => (item.hash === hash ? { ...item, status } : item)),
       );
       if (status === "FAILED") {
-        throw new Error("The testnet transaction was included but reverted");
+        throw new Error("The destination-paid settlement was included but reverted.");
       }
+      setSigned(undefined);
       await requestPreflight();
-      setAuthorized(false);
     } catch (nextError) {
       setError(errorMessage(nextError));
     } finally {
@@ -216,10 +254,11 @@ export function TestnetRescueWorkspace({
             <div>
               <div className="mb-4 flex flex-wrap items-center gap-2">
                 <Badge variant="danger">User reported compromised</Badge>
-                <Badge variant="info">Testnet signing pilot</Badge>
+                <Badge variant="success">Source pays 0 gas</Badge>
+                <Badge variant="info">Testnet pilot</Badge>
               </div>
               <p className="font-mono text-[10px] uppercase text-dim">Incident {incidentId}</p>
-              <h1 className="mt-2 text-3xl font-semibold">X Layer rescue execution</h1>
+              <h1 className="mt-2 text-3xl font-semibold">Destination-paid rescue</h1>
             </div>
             <Badge variant="info">X Layer testnet / 1952</Badge>
           </div>
@@ -229,47 +268,35 @@ export function TestnetRescueWorkspace({
       <section className="border-b border-border">
         <div className="content-shell grid py-6 md:grid-cols-2">
           <div className="min-w-0 border-b border-border pb-5 md:border-b-0 md:border-r md:pb-0 md:pr-6">
-            <div className="mb-2 flex items-center gap-2"><ShieldAlert className="size-3.5 text-danger" /><span className="font-mono text-[10px] uppercase text-dim">Source</span></div>
+            <div className="mb-2 flex items-center gap-2"><ShieldAlert className="size-3.5 text-danger" /><span className="font-mono text-[10px] uppercase text-dim">Source signs only</span></div>
             <CopyAddress address={source} />
           </div>
           <div className="min-w-0 pt-5 md:pl-6 md:pt-0">
-            <div className="mb-2 flex items-center gap-2"><ShieldCheck className="size-3.5 text-accent" /><span className="font-mono text-[10px] uppercase text-dim">Safe destination</span></div>
+            <div className="mb-2 flex items-center gap-2"><ShieldCheck className="size-3.5 text-accent" /><span className="font-mono text-[10px] uppercase text-dim">Destination pays network fee</span></div>
             <CopyAddress address={destination} />
           </div>
         </div>
       </section>
 
       <section className="content-shell py-10 sm:py-14">
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_380px]">
           <div className="space-y-10">
             <section>
-              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
-                <div><p className="font-mono text-[10px] uppercase text-info">01 / Wallet</p><h2 className="mt-2 text-xl font-semibold">Connect the reported source</h2></div>
-                <Button type="button" variant="secondary" onClick={() => void connect()} disabled={busy !== null}>
-                  {busy === "CONNECT" ? <LoaderCircle className="size-4 animate-spin" /> : <Wallet className="size-4" />}
-                  {connectedAccount ? "Reconnect OKX Wallet" : "Connect OKX Wallet"}
-                </Button>
+              <div className="border-b border-border pb-4">
+                <p className="font-mono text-[10px] uppercase text-info">01 / Deterministic scan</p>
+                <h2 className="mt-2 text-xl font-semibold">Verify a gasless token path</h2>
               </div>
-              <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
-                <span className="text-muted">Connected account</span>
-                {connectedAccount ? <CopyAddress address={connectedAccount} compact /> : <Badge variant="neutral">Not connected</Badge>}
-                {connectedAccount && <Badge variant={accountMatches ? "success" : "danger"}>{accountMatches ? "Source matched" : "Wrong account"}</Badge>}
-              </div>
-            </section>
-
-            <section>
-              <div className="border-b border-border pb-4"><p className="font-mono text-[10px] uppercase text-info">02 / Deterministic scan</p><h2 className="mt-2 text-xl font-semibold">Add known testnet ERC-20 contracts</h2></div>
               <label className="mt-5 block">
-                <span className="mb-2 block text-sm font-semibold">Contract manifest</span>
+                <span className="mb-2 block text-sm font-semibold">Known ERC-20 contracts</span>
                 <textarea
                   value={tokenInput}
                   onChange={(event) => setTokenInput(event.target.value)}
-                  rows={4}
+                  rows={3}
                   placeholder="0x... one address per line"
                   spellCheck={false}
                   className="w-full resize-y rounded-md border border-border-strong bg-background p-3 font-mono text-sm text-foreground placeholder:text-dim focus:border-accent focus:outline focus:outline-1"
                 />
-                <span className="mt-2 block text-xs leading-5 text-muted">Native balance is always checked. Token discovery is limited to these addresses and never treated as exhaustive.</span>
+                <span className="mt-2 block text-xs leading-5 text-muted">Pre-filled with official X Layer testnet USD₮0. SAFEEXIT verifies its ERC-3009 domain onchain before enabling authorization.</span>
               </label>
               <Button type="button" className="mt-4" variant="secondary" onClick={() => void refreshPreflight()} disabled={busy !== null}>
                 {busy === "PREFLIGHT" ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
@@ -278,20 +305,30 @@ export function TestnetRescueWorkspace({
             </section>
 
             <section>
-              <div className="border-b border-border pb-4"><p className="font-mono text-[10px] uppercase text-info">03 / Plan and simulation</p><h2 className="mt-2 text-xl font-semibold">Integrity-locked actions</h2></div>
+              <div className="border-b border-border pb-4">
+                <p className="font-mono text-[10px] uppercase text-info">02 / Rescue plan</p>
+                <h2 className="mt-2 text-xl font-semibold">Destination-paid eligibility</h2>
+              </div>
               {!preflight ? (
-                <p className="mt-5 text-sm text-muted">Run preflight to read current testnet state and create a plan.</p>
+                <p className="mt-5 text-sm text-muted">Run preflight to read current testnet state and verify token capabilities.</p>
               ) : preflight.plan.actions.length === 0 ? (
-                <p className="mt-5 text-sm text-muted">No supported positive balances were detected in the current manifest.</p>
+                <p className="mt-5 text-sm text-muted">No positive supported balances were detected for the current manifest.</p>
               ) : (
                 <div className="mt-5 divide-y divide-border border-y border-border">
                   {preflight.plan.actions.map((action, index) => {
-                    const result = preflight.simulations.find((item) => item.actionId === action.id);
+                    const gasless = preflight.gaslessActions.find((item) => item.actionId === action.id);
+                    const blocked = preflight.blockedActions.find((item) => item.actionId === action.id);
+                    const simulation = preflight.simulations.find((item) => item.actionId === action.id);
                     return (
-                      <div key={action.id} className="grid gap-3 py-4 sm:grid-cols-[40px_1fr_auto] sm:items-center">
+                      <div key={action.id} className="grid gap-3 py-4 sm:grid-cols-[40px_1fr_auto] sm:items-start">
                         <span className="font-mono text-xs text-dim">{String(index + 1).padStart(2, "0")}</span>
-                        <div className="min-w-0"><p className="text-sm font-semibold capitalize">{actionLabel(action.actionType)}</p><div className="mt-1"><CopyAddress address={actionTarget(action)} compact /></div><code className="mt-1 block truncate font-mono text-[11px] text-muted">{action.id}</code></div>
-                        <Badge variant={result?.status === "SUCCEEDED" ? "success" : "danger"}>{result?.status ?? "NOT SIMULATED"}</Badge>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold capitalize">{actionLabel(action.actionType)}</p>
+                          <div className="mt-1"><CopyAddress address={actionTarget(action)} compact /></div>
+                          <p className="mt-2 text-xs leading-5 text-muted">{gasless ? "Verified ERC-3009 authorization. Source signature is offchain; destination submits." : blocked?.reason}</p>
+                          <code className="mt-1 block truncate font-mono text-[11px] text-dim">State preflight: {simulation?.status ?? "NOT RUN"}</code>
+                        </div>
+                        <Badge variant={gasless ? "success" : "danger"}>{gasless ? "AUTHORIZATION READY" : "BLOCKED"}</Badge>
                       </div>
                     );
                   })}
@@ -299,13 +336,40 @@ export function TestnetRescueWorkspace({
               )}
             </section>
 
+            <section>
+              <div className="border-b border-border pb-4">
+                <p className="font-mono text-[10px] uppercase text-info">03 / Two-wallet execution</p>
+                <h2 className="mt-2 text-xl font-semibold">Sign from source, settle from destination</h2>
+              </div>
+              <div className="mt-5 grid gap-5 sm:grid-cols-2">
+                <div className="border-l-2 border-info bg-info/5 p-4">
+                  <div className="flex items-center justify-between gap-3"><span className="text-sm font-semibold">Source account</span><Badge variant={sourceConnected ? "success" : "neutral"}>{sourceConnected ? "MATCHED" : "SIGNER"}</Badge></div>
+                  <p className="mt-3 text-xs leading-5 text-muted">Signs typed data only. No transaction or gas payment is requested from this wallet.</p>
+                  <Button type="button" className="mt-4 w-full" variant="secondary" onClick={() => void connectExpected("SOURCE")} disabled={busy !== null}>
+                    <Wallet className="size-4" /> Connect source
+                  </Button>
+                </div>
+                <div className="border-l-2 border-accent bg-accent/5 p-4">
+                  <div className="flex items-center justify-between gap-3"><span className="text-sm font-semibold">Safe destination</span><Badge variant={destinationConnected ? "success" : "neutral"}>{destinationConnected ? "MATCHED" : "RELAYER"}</Badge></div>
+                  <p className="mt-3 text-xs leading-5 text-muted">Submits the signed authorization and pays X Layer network gas after exact-call simulation.</p>
+                  <Button type="button" className="mt-4 w-full" variant="secondary" onClick={() => void connectExpected("DESTINATION")} disabled={busy !== null}>
+                    <Wallet className="size-4" /> Connect destination
+                  </Button>
+                </div>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
+                <span className="text-muted">Current OKX account</span>
+                {connectedAccount ? <CopyAddress address={connectedAccount} compact /> : <Badge variant="neutral">Not connected</Badge>}
+              </div>
+            </section>
+
             {transactions.length > 0 && (
               <section>
-                <div className="border-b border-border pb-4"><p className="font-mono text-[10px] uppercase text-accent">Execution status</p><h2 className="mt-2 text-xl font-semibold">Submitted testnet transactions</h2></div>
+                <div className="border-b border-border pb-4"><p className="font-mono text-[10px] uppercase text-accent">Execution status</p><h2 className="mt-2 text-xl font-semibold">Destination-paid settlements</h2></div>
                 <div className="mt-5 space-y-4">
                   {transactions.map((transaction) => (
                     <div key={transaction.hash} className="border-l-2 border-border-strong pl-4">
-                      <div className="flex flex-wrap items-center gap-3"><Badge variant={transaction.status === "CONFIRMED" ? "success" : transaction.status === "FAILED" ? "danger" : "info"}>{transaction.status}</Badge><span className="text-xs capitalize text-muted">{actionLabel(transaction.actionType)}</span></div>
+                      <Badge variant={transaction.status === "CONFIRMED" ? "success" : transaction.status === "FAILED" ? "danger" : "info"}>{transaction.status}</Badge>
                       <a href={`https://www.okx.com/web3/explorer/xlayer-test/tx/${transaction.hash}`} target="_blank" rel="noreferrer" className="mt-2 inline-flex max-w-full items-center gap-2 font-mono text-[11px] text-info hover:text-foreground"><span className="break-all">{transaction.hash}</span><ExternalLink className="size-3.5 shrink-0" /></a>
                     </div>
                   ))}
@@ -315,29 +379,42 @@ export function TestnetRescueWorkspace({
           </div>
 
           <aside className="self-start border-l-2 border-warning bg-warning/5 p-5 lg:sticky lg:top-6">
-            <p className="font-mono text-[10px] uppercase text-warning">Signing checkpoint</p>
-            <h2 className="mt-2 text-lg font-semibold">Review the next action</h2>
+            <p className="font-mono text-[10px] uppercase text-warning">Authorization checkpoint</p>
+            <h2 className="mt-2 text-lg font-semibold">Source-funded execution disabled</h2>
             <div className="mt-5 space-y-4 border-y border-border py-4 text-xs">
               <div className="flex justify-between gap-4"><span className="text-muted">Network</span><span>X Layer testnet</span></div>
-              <div className="space-y-2"><span className="block text-muted">Source</span><CopyAddress address={source} compact /></div>
-              <div className="space-y-2"><span className="block text-muted">Safe destination</span><CopyAddress address={destination} compact /></div>
-              <div className="flex justify-between gap-4"><span className="text-muted">Next action</span><span className="text-right capitalize">{nextAction ? actionLabel(nextAction.actionType) : "None"}</span></div>
-              {nextAction && <div className="space-y-2"><span className="block text-muted">Contract or recipient</span><CopyAddress address={actionTarget(nextAction)} compact /></div>}
+              <div className="space-y-2"><span className="block text-muted">Source signs</span><CopyAddress address={source} compact /></div>
+              <div className="space-y-2"><span className="block text-muted">Destination receives and pays gas</span><CopyAddress address={destination} compact /></div>
+              <div className="flex justify-between gap-4"><span className="text-muted">Standard</span><span className="text-right">{nextGaslessAction ? "ERC-3009" : "None verified"}</span></div>
+              {nextGaslessAction && <div className="space-y-2"><span className="block text-muted">Token contract</span><CopyAddress address={nextGaslessAction.tokenAddress} compact /></div>}
+              <div className="flex justify-between gap-4"><span className="text-muted">Authorization</span><Badge variant={signed ? "success" : "neutral"}>{signed ? "SIGNED IN MEMORY" : "NOT SIGNED"}</Badge></div>
               <div className="flex justify-between gap-4"><span className="text-muted">Preflight block</span><span className="font-mono">{preflight?.scan.observedAtBlock ?? "--"}</span></div>
-              <div className="flex justify-between gap-4"><span className="text-muted">Detected assets</span><span>{preflight?.scan.assets.length ?? 0}</span></div>
             </div>
-            {nextAction?.actionType === "TRANSFER_NATIVE" && (
-              <p className="mt-4 flex items-start gap-2 text-xs leading-5 text-warning"><TriangleAlert className="mt-0.5 size-3.5 shrink-0" />This action transfers the simulated maximum native balance after reserving estimated gas.</p>
+
+            {!signed ? (
+              <>
+                <label className="mt-5 flex cursor-pointer items-start gap-3">
+                  <Checkbox checked={authorized} onChange={(event) => setAuthorized(event.target.checked)} />
+                  <span className="text-xs leading-5">I confirm I am authorised to control and sign for the displayed source wallet.</span>
+                </label>
+                <Button type="button" className="mt-5 w-full" size="lg" onClick={() => void signAuthorization()} disabled={!sourceConnected || !nextGaslessAction || !authorized || busy !== null}>
+                  {busy === "SIGN" ? <LoaderCircle className="size-4 animate-spin" /> : <FileSignature className="size-4" />}
+                  Sign gasless authorization
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="mt-5 flex items-start gap-2 text-xs leading-5 text-accent"><ShieldCheck className="mt-0.5 size-3.5 shrink-0" />Authorization signed locally. Switch OKX Wallet to the displayed destination account.</p>
+                <Button type="button" className="mt-5 w-full" size="lg" onClick={() => void settleAuthorization()} disabled={!destinationConnected || busy !== null}>
+                  {busy === "SETTLE" ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
+                  Settle from destination
+                </Button>
+              </>
             )}
-            <label className="mt-5 flex cursor-pointer items-start gap-3">
-              <Checkbox checked={authorized} onChange={(event) => setAuthorized(event.target.checked)} />
-              <span className="text-xs leading-5">I confirm I am authorised to sign for the displayed source and approve only the reviewed testnet action.</span>
-            </label>
-            <Button type="button" className="mt-5 w-full" size="lg" onClick={() => void signNextAction()} disabled={!accountMatches || !nextAction || !authorized || busy !== null}>
-              {busy === "SIGN" ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
-              Sign next testnet action
-            </Button>
-            <p className="mt-4 text-xs leading-5 text-muted">A fresh preflight runs immediately before the OKX Wallet popup. SAFEEXIT never receives the private key, seed phrase, or raw signature.</p>
+            <p className="mt-4 text-xs leading-5 text-muted">The authorization is short-lived and stays in this browser tab. SAFEEXIT never receives the private key, seed phrase, or signature.</p>
+            {preflight?.blockedActions.some((item) => preflight.plan.actions.find((action) => action.id === item.actionId)?.actionType === "TRANSFER_NATIVE") && (
+              <p className="mt-4 flex items-start gap-2 text-xs leading-5 text-warning"><TriangleAlert className="mt-0.5 size-3.5 shrink-0" />Native OKB is blocked until a verified sponsored EIP-7702 or private atomic bundle adapter is available.</p>
+            )}
             {error && <p role="alert" className="mt-4 flex items-start gap-2 text-xs leading-5 text-danger"><TriangleAlert className="mt-0.5 size-3.5 shrink-0" />{error}</p>}
           </aside>
         </div>

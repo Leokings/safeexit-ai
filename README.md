@@ -2,8 +2,8 @@
 
 The current foundation contains the TypeScript monorepo, shared domain schemas,
 verified chain configuration, deterministic standard-token scanners, and an
-opt-in official OKX Wallet API balance-discovery adapter. It does not sign or
-submit production transactions.
+opt-in official OKX Wallet API balance-discovery adapter. Mainnet signing and
+submission remain disabled.
 
 ## Deterministic scanning
 
@@ -93,6 +93,21 @@ Deployment variables, database migration steps, API smoke tests, and the
 official-docs-required OKX handoff are documented in
 [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
+## Destination-paid X Layer testnet pilot
+
+The X Layer testnet rescue workspace supports a deliberately narrow real
+execution path for ERC-20 contracts whose ERC-3009 capability and EIP-712
+domain are verified onchain. The reported source signs a short-lived
+`ReceiveWithAuthorization` message in OKX Wallet without submitting a
+transaction. The designated safe destination then simulates and submits
+`receiveWithAuthorization`, receives the tokens, and pays the network fee.
+
+The authorization signature remains in browser memory and is never sent to or
+stored by SAFEEXIT. Ordinary ERC-20s, native OKB, NFTs, approvals, airdrops,
+and positions stay blocked in this browser flow until a verified
+destination-paid adapter exists. A successful testnet pilot is not approval to
+enable mainnet execution.
+
 ## Hackathon demo
 
 The three-minute walkthrough uses only developer-created contracts and public
@@ -159,8 +174,8 @@ development fixtures. Never fund or reuse them.
 
 - Recovery is best effort. An EVM chain cannot distinguish the legitimate owner
   from another party holding the same private key.
-- The executable browser flow is a localhost-only hackathon fixture, not a
-  production wallet-signing or private-relay implementation.
+- The fixed multi-asset demo executor is localhost-only. The separate X Layer
+  testnet pilot supports only verified ERC-3009 token authorizations.
 - Permit2 discovery, arbitrary protocol positions, production simulation,
   private submission, paymasters, and OKX-specific execution are not connected.
 - Snapshot success does not guarantee production execution. Gas, ordering,

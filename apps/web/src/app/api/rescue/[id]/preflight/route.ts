@@ -16,12 +16,14 @@ import {
   simulateRescuePlan,
   ViemLocalSimulationClient,
 } from "@safeexit/simulator";
-import type { Address } from "viem";
+import { hashDomain, type Address } from "viem";
 
 import { parseDeploymentEnvironment } from "@/lib/deployment-env";
 import {
+  eip3009DomainSchema,
   testnetPreflightRequestSchema,
   testnetPreflightResponseSchema,
+  type Eip3009Domain,
   XLAYER_TESTNET_CHAIN_ID,
 } from "@/lib/testnet-rescue";
 
@@ -51,6 +53,61 @@ const metadataAbi = [
   },
 ] as const;
 
+const eip3009CapabilityAbi = [
+  {
+    type: "function",
+    name: "eip712Domain",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      { name: "fields", type: "bytes1" },
+      { name: "name", type: "string" },
+      { name: "version", type: "string" },
+      { name: "chainId", type: "uint256" },
+      { name: "verifyingContract", type: "address" },
+      { name: "salt", type: "bytes32" },
+      { name: "extensions", type: "uint256[]" },
+    ],
+  },
+  {
+    type: "function",
+    name: "DOMAIN_SEPARATOR",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes32" }],
+  },
+  {
+    type: "function",
+    name: "RECEIVE_WITH_AUTHORIZATION_TYPEHASH",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes32" }],
+  },
+  {
+    type: "function",
+    name: "authorizationState",
+    stateMutability: "view",
+    inputs: [
+      { name: "authorizer", type: "address" },
+      { name: "nonce", type: "bytes32" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+] as const;
+
+const eip712DomainTypes = {
+  EIP712Domain: [
+    { name: "name", type: "string" },
+    { name: "version", type: "string" },
+    { name: "chainId", type: "uint256" },
+    { name: "verifyingContract", type: "address" },
+  ],
+} as const;
+
+const receiveWithAuthorizationTypehash =
+  "0xd099cc98ef71107a616c4f0f941f04c322d8e254fe26b3c6668db87aae413de8";
+const zeroBytes32 = `0x${"00".repeat(32)}` as const;
+
 const securityConfig = parseApiSecurityEnvironment(process.env);
 const rateLimiter = new InMemoryRateLimiter(
   Math.min(securityConfig.maxRequests, 10),
@@ -66,6 +123,77 @@ function clientKey(request: Request): string {
 function safeMetadata(value: string, maximum: number, fallback: string): string {
   const printable = value.replace(/[^\x20-\x7E]/g, "").trim().slice(0, maximum);
   return printable || fallback;
+}
+
+function safeDomainText(value: string, maximum: number): string {
+  return value.replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, maximum);
+}
+
+async function detectEip3009Domain(
+  client: ReturnType<typeof createDedicatedPublicClient>,
+  tokenAddress: Address,
+  sourceAddress: Address,
+  blockNumber: bigint,
+): Promise<Eip3009Domain | undefined> {
+  try {
+    const [domainFields, domainSeparator, typehash] = await Promise.all([
+      client.readContract({
+        address: tokenAddress,
+        abi: eip3009CapabilityAbi,
+        functionName: "eip712Domain",
+        blockNumber,
+      }),
+      client.readContract({
+        address: tokenAddress,
+        abi: eip3009CapabilityAbi,
+        functionName: "DOMAIN_SEPARATOR",
+        blockNumber,
+      }),
+      client.readContract({
+        address: tokenAddress,
+        abi: eip3009CapabilityAbi,
+        functionName: "RECEIVE_WITH_AUTHORIZATION_TYPEHASH",
+        blockNumber,
+      }),
+      client.readContract({
+        address: tokenAddress,
+        abi: eip3009CapabilityAbi,
+        functionName: "authorizationState",
+        args: [sourceAddress, zeroBytes32],
+        blockNumber,
+      }),
+    ]);
+    const [fields, rawName, rawVersion, chainId, verifyingContract, , extensions] =
+      domainFields;
+    const name = safeDomainText(rawName, 128);
+    const version = safeDomainText(rawVersion, 32);
+    if (
+      (Number(BigInt(fields)) & 0x0f) !== 0x0f ||
+      !name ||
+      !version ||
+      chainId !== BigInt(XLAYER_TESTNET_CHAIN_ID) ||
+      verifyingContract.toLowerCase() !== tokenAddress.toLowerCase() ||
+      extensions.length > 0 ||
+      typehash.toLowerCase() !== receiveWithAuthorizationTypehash
+    ) {
+      return undefined;
+    }
+    const computedSeparator = hashDomain({
+      domain: { name, version, chainId, verifyingContract },
+      types: eip712DomainTypes,
+    });
+    if (computedSeparator.toLowerCase() !== domainSeparator.toLowerCase()) {
+      return undefined;
+    }
+    return eip3009DomainSchema.parse({
+      name,
+      version,
+      chainId: XLAYER_TESTNET_CHAIN_ID,
+      verifyingContract,
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 function json(body: unknown, status: number, headers: Record<string, string> = {}): Response {
@@ -133,10 +261,16 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           if (!bytecode) {
             return { tokenAddress, reason: "No contract bytecode was found" } as const;
           }
-          const [name, symbol, decimals] = await Promise.all([
+          const [name, symbol, decimals, eip3009Domain] = await Promise.all([
             client.readContract({ address, abi: metadataAbi, functionName: "name", blockNumber: observedAtBlock }),
             client.readContract({ address, abi: metadataAbi, functionName: "symbol", blockNumber: observedAtBlock }),
             client.readContract({ address, abi: metadataAbi, functionName: "decimals", blockNumber: observedAtBlock }),
+            detectEip3009Domain(
+              client,
+              address,
+              incident.sourceAddress as Address,
+              observedAtBlock,
+            ),
           ]);
           return {
             query: {
@@ -145,6 +279,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
               symbol: safeMetadata(symbol, 32, "TOKEN"),
               decimals,
             },
+            ...(eip3009Domain ? { eip3009Domain } : {}),
           } as const;
         } catch {
           return { tokenAddress, reason: "Standard ERC-20 metadata reads failed" } as const;
@@ -212,6 +347,61 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     });
     const simulation = await simulateRescuePlan(plan, provider);
     await Promise.all(simulation.results.map((result) => repository.saveSimulation(result)));
+    const metadataByToken = new Map(
+      metadata.flatMap((entry) =>
+        "query" in entry
+          ? [[entry.query.tokenAddress.toLowerCase(), entry] as const]
+          : [],
+      ),
+    );
+    const successfulActionIds = new Set(
+      simulation.results
+        .filter((result) => result.status === "SUCCEEDED")
+        .map((result) => result.actionId),
+    );
+    const gaslessActions = plan.actions.flatMap((action) => {
+      if (action.actionType !== "TRANSFER_ERC20" || !successfulActionIds.has(action.id)) {
+        return [];
+      }
+      const tokenMetadata = metadataByToken.get(action.parameters.tokenAddress.toLowerCase());
+      if (!tokenMetadata || !("eip3009Domain" in tokenMetadata) || !tokenMetadata.eip3009Domain) {
+        return [];
+      }
+      return [{
+        actionId: action.id,
+        standard: "ERC3009_RECEIVE_WITH_AUTHORIZATION" as const,
+        tokenAddress: action.parameters.tokenAddress,
+        from: action.sourceAddress,
+        to: action.parameters.recipient,
+        amount: action.parameters.amount,
+        domain: tokenMetadata.eip3009Domain,
+      }];
+    });
+    const gaslessActionIds = new Set(gaslessActions.map((action) => action.actionId));
+    const blockedActions = plan.actions.flatMap((action) => {
+      if (gaslessActionIds.has(action.id)) {
+        return [];
+      }
+      const tokenMetadata =
+        action.actionType === "TRANSFER_ERC20"
+          ? metadataByToken.get(action.parameters.tokenAddress.toLowerCase())
+          : undefined;
+      const verifiedEip3009 =
+        tokenMetadata &&
+        "eip3009Domain" in tokenMetadata &&
+        Boolean(tokenMetadata.eip3009Domain);
+      return [{
+        actionId: action.id,
+        reason:
+          action.actionType === "TRANSFER_NATIVE"
+            ? "Native rescue requires a verified sponsored EIP-7702 or private atomic bundle path."
+            : action.actionType === "TRANSFER_ERC20" && verifiedEip3009
+              ? "The token supports ERC-3009, but its current-state transfer preflight did not succeed."
+              : action.actionType === "TRANSFER_ERC20"
+                ? "The token does not expose a verified ERC-3009 receiveWithAuthorization domain."
+                : "This asset type has no verified destination-paid gasless adapter.",
+      }];
+    });
 
     return json(
       testnetPreflightResponseSchema.parse({
@@ -219,8 +409,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         scan,
         plan,
         simulations: simulation.results,
-        executableActionIds: simulation.executableActions.map((action) => action.id),
-        excludedActionIds: simulation.excludedActions.map((action) => action.actionId),
+        sourceFundedExecutionDisabled: true,
+        gaslessActions,
+        blockedActions,
       }),
       200,
       rateHeaders,
