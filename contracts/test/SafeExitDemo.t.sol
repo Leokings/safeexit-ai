@@ -7,11 +7,15 @@ import { DemoAirdrop } from "../src/DemoAirdrop.sol";
 import { DemoAttackerSimulation } from "../src/DemoAttackerSimulation.sol";
 
 interface Vm {
+    function addr(uint256 privateKey) external returns (address);
     function chainId(uint256 newChainId) external;
     function prank(address sender) external;
     function startPrank(address sender) external;
     function stopPrank() external;
     function expectRevert() external;
+    function sign(uint256 privateKey, bytes32 digest)
+        external
+        returns (uint8 v, bytes32 r, bytes32 s);
 }
 
 contract SafeExitDemoTest {
@@ -24,6 +28,9 @@ contract SafeExitDemoTest {
     uint256 private constant INITIAL_TOKENS = 100 ether;
     uint256 private constant CLAIM_REWARD = 50 ether;
     uint256 private constant SWEEP_AMOUNT = 25 ether;
+    bytes32 private constant PERMIT_TYPEHASH = keccak256(
+        "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
+    );
 
     RescueToken private token;
     DemoNFT private nft;
@@ -75,5 +82,36 @@ contract SafeExitDemoTest {
 
         require(token.balanceOf(COMPROMISED) == INITIAL_TOKENS - SWEEP_AMOUNT, "target unchanged");
         require(token.balanceOf(ATTACKER_SINK) == SWEEP_AMOUNT, "sink unchanged");
+    }
+
+    function testDestinationPaysForPermitRescue() public {
+        uint256 compromisedPrivateKey =
+            0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
+        require(vm.addr(compromisedPrivateKey) == COMPROMISED, "unexpected permit signer");
+
+        uint256 amount = 40 ether;
+        uint256 deadline = block.timestamp + 5 minutes;
+        bytes32 structHash = keccak256(
+            abi.encode(
+                PERMIT_TYPEHASH,
+                COMPROMISED,
+                DESTINATION,
+                amount,
+                token.nonces(COMPROMISED),
+                deadline
+            )
+        );
+        bytes32 digest = keccak256(
+            abi.encodePacked("\x19\x01", token.DOMAIN_SEPARATOR(), structHash)
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(compromisedPrivateKey, digest);
+
+        vm.startPrank(DESTINATION);
+        token.permit(COMPROMISED, DESTINATION, amount, deadline, v, r, s);
+        token.transferFrom(COMPROMISED, DESTINATION, amount);
+        vm.stopPrank();
+
+        require(token.balanceOf(DESTINATION) == amount, "permit rescue failed");
+        require(token.nonces(COMPROMISED) == 1, "permit nonce not consumed");
     }
 }

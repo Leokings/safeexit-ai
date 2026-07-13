@@ -95,18 +95,22 @@ official-docs-required OKX handoff are documented in
 
 ## Destination-paid X Layer testnet pilot
 
-The X Layer testnet rescue workspace supports a deliberately narrow real
-execution path for ERC-20 contracts whose ERC-3009 capability and EIP-712
-domain are verified onchain. The reported source signs a short-lived
-`ReceiveWithAuthorization` message in OKX Wallet without submitting a
-transaction. The designated safe destination then simulates and submits
-`receiveWithAuthorization`, receives the tokens, and pays the network fee.
+The X Layer testnet rescue workspace supports multiple destination-paid ERC-20
+routes. ERC-3009 is preferred when its capability and EIP-712 domain are
+verified onchain. The reported source signs a short-lived
+`ReceiveWithAuthorization` message and the destination submits it.
 
-The authorization signature remains in browser memory and is never sent to or
-stored by SAFEEXIT. Ordinary ERC-20s, native OKB, NFTs, approvals, airdrops,
-and positions stay blocked in this browser flow until a verified
-destination-paid adapter exists. A successful testnet pilot is not approval to
-enable mainnet execution.
+ERC-2612 is a fallback for permit-compatible tokens. The source signs a permit
+whose spender is the safe destination. SAFEEXIT verifies that exact permit
+with an RPC call, requires OKX Wallet to report atomic batch support, then asks
+the destination to atomically submit `permit` and `transferFrom` through the
+official EIP-5792 wallet methods. In both routes the source submits no
+transaction and pays no network fee.
+
+Authorization signatures remain in browser memory and are never sent to or
+stored by SAFEEXIT. ERC-20s without either route, native OKB, NFTs, approvals,
+airdrops, and positions stay blocked until a verified destination-paid adapter
+exists. A successful testnet pilot is not approval to enable mainnet execution.
 
 ## Hackathon demo
 

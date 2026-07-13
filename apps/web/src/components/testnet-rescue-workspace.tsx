@@ -14,7 +14,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { useState } from "react";
-import { createPublicClient, http, isAddress, type Hex } from "viem";
+import { createPublicClient, getAddress, http, isAddress, type Hex } from "viem";
 
 import { xLayerTestnetConfig } from "@safeexit/chain";
 import type { EvmAddress, RescueAction } from "@safeexit/shared";
@@ -26,10 +26,14 @@ import { CopyAddress } from "@/components/copy-address";
 import {
   connectOkxWallet,
   ensureXLayerTestnet,
+  getOkxCallsStatus,
   getOkxProvider,
+  requireOkxAtomicBatchCapability,
   signEip3009Authorization,
+  signErc2612Permit,
+  submitErc2612AtomicBatch,
   submitEip3009Settlement,
-  type SignedEip3009Authorization,
+  type SignedRecoveryAuthorization,
 } from "@/lib/okx-wallet";
 import {
   testnetPreflightResponseSchema,
@@ -65,6 +69,16 @@ function actionLabel(actionType: string): string {
   return actionType.toLowerCase().replaceAll("_", " ");
 }
 
+function routeLabel(standard: string): string {
+  return standard === "ERC3009_RECEIVE_WITH_AUTHORIZATION"
+    ? "ERC-3009 direct authorization"
+    : "ERC-2612 atomic permit";
+}
+
+function routeKey(route: { actionId: string; standard: string }): string {
+  return `${route.actionId}:${route.standard}`;
+}
+
 function actionTarget(action: RescueAction): EvmAddress {
   switch (action.actionType) {
     case "TRANSFER_NATIVE":
@@ -96,14 +110,17 @@ export function TestnetRescueWorkspace({
   const [tokenInput, setTokenInput] = useState(OFFICIAL_TEST_USDT0);
   const [preflight, setPreflight] = useState<TestnetPreflightResponse>();
   const [authorized, setAuthorized] = useState(false);
-  const [signed, setSigned] = useState<SignedEip3009Authorization>();
+  const [selectedRoute, setSelectedRoute] = useState<string>();
+  const [signed, setSigned] = useState<SignedRecoveryAuthorization>();
   const [busy, setBusy] = useState<"CONNECT" | "PREFLIGHT" | "SIGN" | "SETTLE" | null>(null);
   const [error, setError] = useState<string>();
   const [transactions, setTransactions] = useState<SubmittedTransaction[]>([]);
 
   const sourceConnected = connectedAccount?.toLowerCase() === source.toLowerCase();
   const destinationConnected = connectedAccount?.toLowerCase() === destination.toLowerCase();
-  const nextGaslessAction = preflight?.gaslessActions[0];
+  const nextGaslessAction =
+    preflight?.gaslessActions.find((route) => routeKey(route) === selectedRoute) ??
+    preflight?.gaslessActions[0];
 
   async function connectExpected(role: "SOURCE" | "DESTINATION") {
     setBusy("CONNECT");
@@ -144,6 +161,11 @@ export function TestnetRescueWorkspace({
     }
     const result = testnetPreflightResponseSchema.parse(body);
     setPreflight(result);
+    setSelectedRoute((current) =>
+      result.gaslessActions.some((route) => routeKey(route) === current)
+        ? current
+        : result.gaslessActions[0] ? routeKey(result.gaslessActions[0]) : undefined,
+    );
     return result;
   }
 
@@ -177,11 +199,29 @@ export function TestnetRescueWorkspace({
       }
 
       const fresh = await requestPreflight();
-      const action = fresh.gaslessActions[0];
+      const action =
+        fresh.gaslessActions.find((route) => routeKey(route) === selectedRoute) ??
+        fresh.gaslessActions[0];
       if (!action) {
-        throw new Error("No verified destination-paid ERC-3009 action is available.");
+        throw new Error("No destination-paid recovery route is available.");
       }
-      const result = await signEip3009Authorization(provider, action, account);
+      const publicClient = createPublicClient({
+        chain: xLayerTestnetConfig.chain,
+        transport: http(xLayerTestnetConfig.rpcUrls[0]),
+      });
+      const result = action.standard === "ERC3009_RECEIVE_WITH_AUTHORIZATION"
+        ? await signEip3009Authorization(provider, action, account)
+        : await (async () => {
+            const destinationAccount = getAddress(action.to);
+            await requireOkxAtomicBatchCapability(provider, destinationAccount);
+            const permit = await signErc2612Permit(provider, action, account);
+            await publicClient.call({
+              account: destinationAccount,
+              to: permit.authorization.tokenAddress,
+              data: permit.permitData,
+            });
+            return permit;
+          })();
       setSigned(result);
       setAuthorized(false);
     } catch (nextError) {
@@ -211,13 +251,38 @@ export function TestnetRescueWorkspace({
         chain: xLayerTestnetConfig.chain,
         transport: http(xLayerTestnetConfig.rpcUrls[0]),
       });
-      await publicClient.call({
-        account,
-        to: signed.authorization.tokenAddress,
-        data: signed.settlementData,
-      });
-
-      const hash = await submitEip3009Settlement(provider, signed, account);
+      let hash: Hex;
+      if (signed.standard === "ERC3009_RECEIVE_WITH_AUTHORIZATION") {
+        await publicClient.call({
+          account,
+          to: signed.authorization.tokenAddress,
+          data: signed.settlementData,
+        });
+        hash = await submitEip3009Settlement(provider, signed, account);
+      } else {
+        await publicClient.call({
+          account,
+          to: signed.authorization.tokenAddress,
+          data: signed.permitData,
+        });
+        const callsId = await submitErc2612AtomicBatch(provider, signed, account);
+        let confirmedHash: Hex | undefined;
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          const callsStatus = await getOkxCallsStatus(provider, callsId);
+          if (callsStatus.status === 200) {
+            confirmedHash = callsStatus.transactionHashes[0];
+            break;
+          }
+          if (callsStatus.status === 400 || callsStatus.status === 500) {
+            throw new Error("The OKX atomic permit batch failed before confirmation.");
+          }
+          await new Promise((resolve) => setTimeout(resolve, 2_000));
+        }
+        if (!confirmedHash) {
+          throw new Error("The OKX atomic permit batch did not confirm within two minutes.");
+        }
+        hash = confirmedHash;
+      }
       setTransactions((current) => [
         ...current,
         { actionId: signed.authorization.actionId, hash, status: "CONFIRMING" },
@@ -325,7 +390,7 @@ export function TestnetRescueWorkspace({
                         <div className="min-w-0">
                           <p className="text-sm font-semibold capitalize">{actionLabel(action.actionType)}</p>
                           <div className="mt-1"><CopyAddress address={actionTarget(action)} compact /></div>
-                          <p className="mt-2 text-xs leading-5 text-muted">{gasless ? "Verified ERC-3009 authorization. Source signature is offchain; destination submits." : blocked?.reason}</p>
+                          <p className="mt-2 text-xs leading-5 text-muted">{gasless ? `${preflight.gaslessActions.filter((item) => item.actionId === action.id).length} destination-paid route(s) detected. Source signature is offchain; destination submits.` : blocked?.reason}</p>
                           <code className="mt-1 block truncate font-mono text-[11px] text-dim">State preflight: {simulation?.status ?? "NOT RUN"}</code>
                         </div>
                         <Badge variant={gasless ? "success" : "danger"}>{gasless ? "AUTHORIZATION READY" : "BLOCKED"}</Badge>
@@ -357,6 +422,29 @@ export function TestnetRescueWorkspace({
                   </Button>
                 </div>
               </div>
+              {preflight && preflight.gaslessActions.length > 0 && (
+                <div className="mt-5">
+                  <p className="mb-2 font-mono text-[10px] uppercase text-dim">Recovery route</p>
+                  <div className="grid gap-2">
+                    {preflight.gaslessActions.map((route) => (
+                      <button
+                        key={`${route.actionId}:${route.standard}`}
+                        type="button"
+                        onClick={() => {
+                          setSelectedRoute(routeKey(route));
+                          setSigned(undefined);
+                        }}
+                        className={`flex items-center justify-between gap-4 border px-3 py-3 text-left text-sm ${nextGaslessAction && routeKey(nextGaslessAction) === routeKey(route) ? "border-accent bg-accent/5" : "border-border bg-background"}`}
+                      >
+                        <span>{routeLabel(route.standard)}</span>
+                        <Badge variant={route.capabilityStatus === "VERIFIED" ? "success" : "info"}>
+                          {route.capabilityStatus === "VERIFIED" ? "VERIFIED" : "VERIFY ON SIGN"}
+                        </Badge>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
                 <span className="text-muted">Current OKX account</span>
                 {connectedAccount ? <CopyAddress address={connectedAccount} compact /> : <Badge variant="neutral">Not connected</Badge>}
@@ -385,7 +473,7 @@ export function TestnetRescueWorkspace({
               <div className="flex justify-between gap-4"><span className="text-muted">Network</span><span>X Layer testnet</span></div>
               <div className="space-y-2"><span className="block text-muted">Source signs</span><CopyAddress address={source} compact /></div>
               <div className="space-y-2"><span className="block text-muted">Destination receives and pays gas</span><CopyAddress address={destination} compact /></div>
-              <div className="flex justify-between gap-4"><span className="text-muted">Standard</span><span className="text-right">{nextGaslessAction ? "ERC-3009" : "None verified"}</span></div>
+              <div className="flex justify-between gap-4"><span className="text-muted">Route</span><span className="text-right">{nextGaslessAction ? routeLabel(nextGaslessAction.standard) : "None verified"}</span></div>
               {nextGaslessAction && <div className="space-y-2"><span className="block text-muted">Token contract</span><CopyAddress address={nextGaslessAction.tokenAddress} compact /></div>}
               <div className="flex justify-between gap-4"><span className="text-muted">Authorization</span><Badge variant={signed ? "success" : "neutral"}>{signed ? "SIGNED IN MEMORY" : "NOT SIGNED"}</Badge></div>
               <div className="flex justify-between gap-4"><span className="text-muted">Preflight block</span><span className="font-mono">{preflight?.scan.observedAtBlock ?? "--"}</span></div>

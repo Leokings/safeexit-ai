@@ -16,14 +16,14 @@ import {
   simulateRescuePlan,
   ViemLocalSimulationClient,
 } from "@safeexit/simulator";
-import { hashDomain, type Address } from "viem";
+import { encodeFunctionData, hashDomain, type Address } from "viem";
 
 import { parseDeploymentEnvironment } from "@/lib/deployment-env";
 import {
-  eip3009DomainSchema,
+  eip712DomainSchema,
   testnetPreflightRequestSchema,
   testnetPreflightResponseSchema,
-  type Eip3009Domain,
+  type Eip712Domain,
   XLAYER_TESTNET_CHAIN_ID,
 } from "@/lib/testnet-rescue";
 
@@ -95,6 +95,31 @@ const eip3009CapabilityAbi = [
   },
 ] as const;
 
+const erc2612CapabilityAbi = [
+  {
+    type: "function",
+    name: "nonces",
+    stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "permit",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "spender", type: "address" },
+      { name: "value", type: "uint256" },
+      { name: "deadline", type: "uint256" },
+      { name: "v", type: "uint8" },
+      { name: "r", type: "bytes32" },
+      { name: "s", type: "bytes32" },
+    ],
+    outputs: [],
+  },
+] as const;
+
 const eip712DomainTypes = {
   EIP712Domain: [
     { name: "name", type: "string" },
@@ -129,14 +154,13 @@ function safeDomainText(value: string, maximum: number): string {
   return value.replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, maximum);
 }
 
-async function detectEip3009Domain(
+async function readVerifiedEip712Domain(
   client: ReturnType<typeof createDedicatedPublicClient>,
   tokenAddress: Address,
-  sourceAddress: Address,
   blockNumber: bigint,
-): Promise<Eip3009Domain | undefined> {
+): Promise<Eip712Domain | undefined> {
   try {
-    const [domainFields, domainSeparator, typehash] = await Promise.all([
+    const [domainFields, domainSeparator] = await Promise.all([
       client.readContract({
         address: tokenAddress,
         abi: eip3009CapabilityAbi,
@@ -147,19 +171,6 @@ async function detectEip3009Domain(
         address: tokenAddress,
         abi: eip3009CapabilityAbi,
         functionName: "DOMAIN_SEPARATOR",
-        blockNumber,
-      }),
-      client.readContract({
-        address: tokenAddress,
-        abi: eip3009CapabilityAbi,
-        functionName: "RECEIVE_WITH_AUTHORIZATION_TYPEHASH",
-        blockNumber,
-      }),
-      client.readContract({
-        address: tokenAddress,
-        abi: eip3009CapabilityAbi,
-        functionName: "authorizationState",
-        args: [sourceAddress, zeroBytes32],
         blockNumber,
       }),
     ]);
@@ -173,8 +184,7 @@ async function detectEip3009Domain(
       !version ||
       chainId !== BigInt(XLAYER_TESTNET_CHAIN_ID) ||
       verifyingContract.toLowerCase() !== tokenAddress.toLowerCase() ||
-      extensions.length > 0 ||
-      typehash.toLowerCase() !== receiveWithAuthorizationTypehash
+      extensions.length > 0
     ) {
       return undefined;
     }
@@ -185,12 +195,93 @@ async function detectEip3009Domain(
     if (computedSeparator.toLowerCase() !== domainSeparator.toLowerCase()) {
       return undefined;
     }
-    return eip3009DomainSchema.parse({
+    return eip712DomainSchema.parse({
       name,
       version,
       chainId: XLAYER_TESTNET_CHAIN_ID,
       verifyingContract,
     });
+  } catch {
+    return undefined;
+  }
+}
+
+async function detectEip3009Domain(
+  client: ReturnType<typeof createDedicatedPublicClient>,
+  tokenAddress: Address,
+  sourceAddress: Address,
+  blockNumber: bigint,
+): Promise<Eip712Domain | undefined> {
+  const domain = await readVerifiedEip712Domain(client, tokenAddress, blockNumber);
+  if (!domain) {
+    return undefined;
+  }
+  try {
+    const typehash = await client.readContract({
+      address: tokenAddress,
+      abi: eip3009CapabilityAbi,
+      functionName: "RECEIVE_WITH_AUTHORIZATION_TYPEHASH",
+      blockNumber,
+    });
+    await client.readContract({
+      address: tokenAddress,
+      abi: eip3009CapabilityAbi,
+      functionName: "authorizationState",
+      args: [sourceAddress, zeroBytes32],
+      blockNumber,
+    });
+    return typehash.toLowerCase() === receiveWithAuthorizationTypehash
+      ? domain
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function detectErc2612Permit(
+  client: ReturnType<typeof createDedicatedPublicClient>,
+  tokenAddress: Address,
+  sourceAddress: Address,
+  destinationAddress: Address,
+  blockNumber: bigint,
+): Promise<{ domain: Eip712Domain; nonce: string } | undefined> {
+  const domain = await readVerifiedEip712Domain(client, tokenAddress, blockNumber);
+  if (!domain) {
+    return undefined;
+  }
+  try {
+    const nonce = await client.readContract({
+      address: tokenAddress,
+      abi: erc2612CapabilityAbi,
+      functionName: "nonces",
+      args: [sourceAddress],
+      blockNumber,
+    });
+    const probeData = encodeFunctionData({
+      abi: erc2612CapabilityAbi,
+      functionName: "permit",
+      args: [
+        sourceAddress,
+        destinationAddress,
+        1n,
+        9_999_999_999n,
+        27,
+        zeroBytes32,
+        zeroBytes32,
+      ],
+    });
+    try {
+      await client.call({
+        account: destinationAddress,
+        to: tokenAddress,
+        data: probeData,
+        blockNumber,
+      });
+      return undefined;
+    } catch {
+      // A signed exact permit call remains the final capability gate in the browser.
+    }
+    return { domain, nonce: nonce.toString() };
   } catch {
     return undefined;
   }
@@ -261,7 +352,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           if (!bytecode) {
             return { tokenAddress, reason: "No contract bytecode was found" } as const;
           }
-          const [name, symbol, decimals, eip3009Domain] = await Promise.all([
+          const [name, symbol, decimals, eip3009Domain, erc2612Permit] = await Promise.all([
             client.readContract({ address, abi: metadataAbi, functionName: "name", blockNumber: observedAtBlock }),
             client.readContract({ address, abi: metadataAbi, functionName: "symbol", blockNumber: observedAtBlock }),
             client.readContract({ address, abi: metadataAbi, functionName: "decimals", blockNumber: observedAtBlock }),
@@ -269,6 +360,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
               client,
               address,
               incident.sourceAddress as Address,
+              observedAtBlock,
+            ),
+            detectErc2612Permit(
+              client,
+              address,
+              incident.sourceAddress as Address,
+              incident.destinationAddress as Address,
               observedAtBlock,
             ),
           ]);
@@ -280,6 +378,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
               decimals,
             },
             ...(eip3009Domain ? { eip3009Domain } : {}),
+            ...(erc2612Permit ? { erc2612Permit } : {}),
           } as const;
         } catch {
           return { tokenAddress, reason: "Standard ERC-20 metadata reads failed" } as const;
@@ -364,18 +463,37 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         return [];
       }
       const tokenMetadata = metadataByToken.get(action.parameters.tokenAddress.toLowerCase());
-      if (!tokenMetadata || !("eip3009Domain" in tokenMetadata) || !tokenMetadata.eip3009Domain) {
+      if (!tokenMetadata) {
         return [];
       }
-      return [{
-        actionId: action.id,
-        standard: "ERC3009_RECEIVE_WITH_AUTHORIZATION" as const,
-        tokenAddress: action.parameters.tokenAddress,
-        from: action.sourceAddress,
-        to: action.parameters.recipient,
-        amount: action.parameters.amount,
-        domain: tokenMetadata.eip3009Domain,
-      }];
+      const routes = [];
+      if ("eip3009Domain" in tokenMetadata && tokenMetadata.eip3009Domain) {
+        routes.push({
+          actionId: action.id,
+          standard: "ERC3009_RECEIVE_WITH_AUTHORIZATION" as const,
+          capabilityStatus: "VERIFIED" as const,
+          tokenAddress: action.parameters.tokenAddress,
+          from: action.sourceAddress,
+          to: action.parameters.recipient,
+          amount: action.parameters.amount,
+          domain: tokenMetadata.eip3009Domain,
+        });
+      }
+      if ("erc2612Permit" in tokenMetadata && tokenMetadata.erc2612Permit) {
+        routes.push({
+          actionId: action.id,
+          standard: "ERC2612_PERMIT_ATOMIC_BATCH" as const,
+          capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED" as const,
+          tokenAddress: action.parameters.tokenAddress,
+          from: action.sourceAddress,
+          to: action.parameters.recipient,
+          amount: action.parameters.amount,
+          nonce: tokenMetadata.erc2612Permit.nonce,
+          domain: tokenMetadata.erc2612Permit.domain,
+          requiredWalletCapability: "ATOMIC_BATCH" as const,
+        });
+      }
+      return routes;
     });
     const gaslessActionIds = new Set(gaslessActions.map((action) => action.actionId));
     const blockedActions = plan.actions.flatMap((action) => {
@@ -388,17 +506,17 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           : undefined;
       const verifiedEip3009 =
         tokenMetadata &&
-        "eip3009Domain" in tokenMetadata &&
-        Boolean(tokenMetadata.eip3009Domain);
+        (("eip3009Domain" in tokenMetadata && Boolean(tokenMetadata.eip3009Domain)) ||
+          ("erc2612Permit" in tokenMetadata && Boolean(tokenMetadata.erc2612Permit)));
       return [{
         actionId: action.id,
         reason:
           action.actionType === "TRANSFER_NATIVE"
             ? "Native rescue requires a verified sponsored EIP-7702 or private atomic bundle path."
             : action.actionType === "TRANSFER_ERC20" && verifiedEip3009
-              ? "The token supports ERC-3009, but its current-state transfer preflight did not succeed."
+              ? "The token supports a destination-paid authorization, but its current-state transfer preflight did not succeed."
               : action.actionType === "TRANSFER_ERC20"
-                ? "The token does not expose a verified ERC-3009 receiveWithAuthorization domain."
+                ? "The token does not expose a verified ERC-3009 or ERC-2612 destination-paid route."
                 : "This asset type has no verified destination-paid gasless adapter.",
       }];
     });

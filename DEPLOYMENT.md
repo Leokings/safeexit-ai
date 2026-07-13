@@ -140,11 +140,14 @@ agent lifecycle stops at `WAITING_FOR_USER`.
 
 ## X Layer testnet destination-paid pilot
 
-For an incident created on chain ID `1952`, the rescue dashboard can scan an
-explicit ERC-20 manifest and enable execution only when the token's ERC-3009
-type hash, EIP-712 domain, domain separator, and authorization-state method are
-verified through pinned RPC reads. The source signs typed data locally. The
-safe destination submits `receiveWithAuthorization` and pays testnet gas.
+For an incident created on chain ID `1952`, the rescue dashboard scans an
+explicit ERC-20 manifest and ranks destination-paid routes. ERC-3009 requires
+verified type-hash, EIP-712 domain, domain separator, and authorization-state
+reads. ERC-2612 requires a verified EIP-712 domain and nonce read, then remains
+provisional until the exact signed permit succeeds and OKX Wallet reports
+atomic batch support. The destination submits either
+`receiveWithAuthorization` or an atomic `permit` plus `transferFrom` batch and
+pays all testnet gas.
 
 No server credential, relayer key, or private key is used. The short-lived
 signature remains only in the browser tab. Source-funded transactions are
@@ -158,8 +161,9 @@ control has received an independent security review.
   is explicitly switched to `LIVE_READONLY`.
 - Only the fixed local developer incident is accepted by the hosted analyzer.
 - No mainnet wallet signing, relayer, private transaction, paymaster, Permit2,
-  protocol withdrawal, or OKX execution integration is enabled. Testnet
-  execution is limited to verified ERC-3009 destination-paid settlement.
+  protocol withdrawal, or OKX server-side execution integration is enabled.
+  Testnet execution is limited to ERC-3009 and signature-verified ERC-2612
+  destination-paid settlement through the user-controlled OKX Wallet.
 - The in-process rate limiter is defense in depth only. Configure an edge or
   shared rate limiter before accepting untrusted public traffic at scale.
 - Recovery remains best effort because a blockchain cannot distinguish two

@@ -10,6 +10,7 @@ import {
 import {
   XLAYER_TESTNET_CHAIN_HEX,
   XLAYER_TESTNET_CHAIN_ID,
+  type Erc2612RescueAction,
   type GaslessRescueAction,
 } from "./testnet-rescue";
 
@@ -35,9 +36,38 @@ export type Eip3009Authorization = {
 };
 
 export type SignedEip3009Authorization = {
+  standard: "ERC3009_RECEIVE_WITH_AUTHORIZATION";
   authorization: Eip3009Authorization;
   signature: Hex;
   settlementData: Hex;
+};
+
+export type Erc2612PermitAuthorization = {
+  actionId: string;
+  tokenAddress: `0x${string}`;
+  owner: `0x${string}`;
+  spender: `0x${string}`;
+  value: string;
+  nonce: bigint;
+  deadline: bigint;
+  domain: Erc2612RescueAction["domain"];
+};
+
+export type SignedErc2612Permit = {
+  standard: "ERC2612_PERMIT_ATOMIC_BATCH";
+  authorization: Erc2612PermitAuthorization;
+  signature: Hex;
+  permitData: Hex;
+  transferFromData: Hex;
+};
+
+export type SignedRecoveryAuthorization =
+  | SignedEip3009Authorization
+  | SignedErc2612Permit;
+
+export type OkxCallsStatus = {
+  status: 100 | 200 | 400 | 500;
+  transactionHashes: Hex[];
 };
 
 declare global {
@@ -77,6 +107,45 @@ const receiveWithAuthorizationAbi = [
   },
 ] as const;
 
+const permitTypes = {
+  Permit: [
+    { name: "owner", type: "address" },
+    { name: "spender", type: "address" },
+    { name: "value", type: "uint256" },
+    { name: "nonce", type: "uint256" },
+    { name: "deadline", type: "uint256" },
+  ],
+} as const;
+
+const erc2612SettlementAbi = [
+  {
+    type: "function",
+    name: "permit",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "spender", type: "address" },
+      { name: "value", type: "uint256" },
+      { name: "deadline", type: "uint256" },
+      { name: "v", type: "uint8" },
+      { name: "r", type: "bytes32" },
+      { name: "s", type: "bytes32" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "transferFrom",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "from", type: "address" },
+      { name: "to", type: "address" },
+      { name: "value", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+] as const;
+
 function providerErrorCode(error: unknown): number | undefined {
   if (!error || typeof error !== "object") {
     return undefined;
@@ -102,6 +171,13 @@ function assertSignature(value: unknown): asserts value is Hex {
   if (typeof value !== "string" || !/^0x[a-fA-F0-9]{130}$/.test(value)) {
     throw new Error("OKX Wallet did not return a valid 65-byte authorization signature");
   }
+}
+
+function signatureParts(signature: Hex) {
+  assertSignature(signature);
+  const parsed = parseSignature(signature);
+  const v = parsed.v ?? BigInt((parsed.yParity ?? 0) + 27);
+  return { v: Number(v), r: parsed.r, s: parsed.s };
 }
 
 function typedDataFor(authorization: Eip3009Authorization) {
@@ -232,9 +308,7 @@ export function encodeEip3009Settlement(
   authorization: Eip3009Authorization,
   signature: Hex,
 ): Hex {
-  assertSignature(signature);
-  const parsed = parseSignature(signature);
-  const v = parsed.v ?? BigInt((parsed.yParity ?? 0) + 27);
+  const { v, r, s } = signatureParts(signature);
   return encodeFunctionData({
     abi: receiveWithAuthorizationAbi,
     functionName: "receiveWithAuthorization",
@@ -245,9 +319,9 @@ export function encodeEip3009Settlement(
       authorization.validAfter,
       authorization.validBefore,
       authorization.nonce,
-      Number(v),
-      parsed.r,
-      parsed.s,
+      v,
+      r,
+      s,
     ],
   });
 }
@@ -275,10 +349,229 @@ export async function signEip3009Authorization(
     throw new Error("The authorization signature does not recover to the reported source");
   }
   return {
+    standard: "ERC3009_RECEIVE_WITH_AUTHORIZATION",
     authorization,
     signature: result,
     settlementData: encodeEip3009Settlement(authorization, result),
   };
+}
+
+function erc2612TypedDataFor(authorization: Erc2612PermitAuthorization) {
+  return {
+    domain: {
+      name: authorization.domain.name,
+      version: authorization.domain.version,
+      chainId: authorization.domain.chainId,
+      verifyingContract: getAddress(authorization.domain.verifyingContract),
+    },
+    types: permitTypes,
+    primaryType: "Permit" as const,
+    message: {
+      owner: authorization.owner,
+      spender: authorization.spender,
+      value: BigInt(authorization.value),
+      nonce: authorization.nonce,
+      deadline: authorization.deadline,
+    },
+  };
+}
+
+function erc2612TypedDataRpcPayload(authorization: Erc2612PermitAuthorization): string {
+  const typedData = erc2612TypedDataFor(authorization);
+  return JSON.stringify({
+    ...typedData,
+    types: {
+      EIP712Domain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "uint256" },
+        { name: "verifyingContract", type: "address" },
+      ],
+      ...typedData.types,
+    },
+    message: {
+      ...typedData.message,
+      value: typedData.message.value.toString(),
+      nonce: typedData.message.nonce.toString(),
+      deadline: typedData.message.deadline.toString(),
+    },
+  });
+}
+
+export function createErc2612PermitAuthorization(
+  action: Erc2612RescueAction,
+  options: { now?: Date } = {},
+): Erc2612PermitAuthorization {
+  if (action.domain.chainId !== XLAYER_TESTNET_CHAIN_ID) {
+    throw new Error("Only X Layer testnet permit authorizations are enabled");
+  }
+  if (action.tokenAddress.toLowerCase() !== action.domain.verifyingContract.toLowerCase()) {
+    throw new Error("The verified signing domain does not match the token contract");
+  }
+  if (action.from.toLowerCase() === action.to.toLowerCase()) {
+    throw new Error("Source and destination must be different");
+  }
+  const now = BigInt(Math.floor((options.now ?? new Date()).getTime() / 1_000));
+  return {
+    actionId: action.actionId,
+    tokenAddress: getAddress(action.tokenAddress),
+    owner: getAddress(action.from),
+    spender: getAddress(action.to),
+    value: action.amount,
+    nonce: BigInt(action.nonce),
+    deadline: now + 300n,
+    domain: action.domain,
+  };
+}
+
+export function encodeErc2612PermitSettlement(
+  authorization: Erc2612PermitAuthorization,
+  signature: Hex,
+): Pick<SignedErc2612Permit, "permitData" | "transferFromData"> {
+  const { v, r, s } = signatureParts(signature);
+  return {
+    permitData: encodeFunctionData({
+      abi: erc2612SettlementAbi,
+      functionName: "permit",
+      args: [
+        authorization.owner,
+        authorization.spender,
+        BigInt(authorization.value),
+        authorization.deadline,
+        v,
+        r,
+        s,
+      ],
+    }),
+    transferFromData: encodeFunctionData({
+      abi: erc2612SettlementAbi,
+      functionName: "transferFrom",
+      args: [
+        authorization.owner,
+        authorization.spender,
+        BigInt(authorization.value),
+      ],
+    }),
+  };
+}
+
+export async function signErc2612Permit(
+  provider: OkxInjectedProvider,
+  action: Erc2612RescueAction,
+  connectedAccount: `0x${string}`,
+  options: { now?: Date } = {},
+): Promise<SignedErc2612Permit> {
+  if (connectedAccount.toLowerCase() !== action.from.toLowerCase()) {
+    throw new Error("Connected account does not match the permit owner");
+  }
+  const authorization = createErc2612PermitAuthorization(action, options);
+  const result = await provider.request({
+    method: "eth_signTypedData_v4",
+    params: [connectedAccount, erc2612TypedDataRpcPayload(authorization)],
+  });
+  assertSignature(result);
+  const recovered = await recoverTypedDataAddress({
+    ...erc2612TypedDataFor(authorization),
+    signature: result,
+  });
+  if (recovered.toLowerCase() !== authorization.owner.toLowerCase()) {
+    throw new Error("The permit signature does not recover to the reported source");
+  }
+  return {
+    standard: "ERC2612_PERMIT_ATOMIC_BATCH",
+    authorization,
+    signature: result,
+    ...encodeErc2612PermitSettlement(authorization, result),
+  };
+}
+
+export async function requireOkxAtomicBatchCapability(
+  provider: OkxInjectedProvider,
+  account: `0x${string}`,
+): Promise<void> {
+  const result = await provider.request({
+    method: "wallet_getCapabilities",
+    params: [account, [XLAYER_TESTNET_CHAIN_HEX]],
+  });
+  if (!result || typeof result !== "object") {
+    throw new Error("OKX Wallet did not return atomic batch capabilities");
+  }
+  const capabilities = Object.entries(result).find(
+    ([chainId]) => chainId.toLowerCase() === XLAYER_TESTNET_CHAIN_HEX,
+  )?.[1];
+  const atomicStatus =
+    capabilities && typeof capabilities === "object" && "atomic" in capabilities
+      ? (capabilities.atomic as { status?: unknown }).status
+      : undefined;
+  if (atomicStatus !== "supported" && atomicStatus !== "ready") {
+    throw new Error("OKX Wallet does not report atomic batch support on X Layer testnet");
+  }
+}
+
+export async function submitErc2612AtomicBatch(
+  provider: OkxInjectedProvider,
+  signed: SignedErc2612Permit,
+  connectedAccount: `0x${string}`,
+): Promise<string> {
+  if (connectedAccount.toLowerCase() !== signed.authorization.spender.toLowerCase()) {
+    throw new Error("Only the designated safe destination can submit this permit batch");
+  }
+  const now = BigInt(Math.floor(Date.now() / 1_000));
+  if (now >= signed.authorization.deadline) {
+    throw new Error("The source permit has expired; create a fresh permit");
+  }
+  const chainId = await provider.request({ method: "eth_chainId" });
+  if (typeof chainId !== "string" || chainId.toLowerCase() !== XLAYER_TESTNET_CHAIN_HEX) {
+    throw new Error("OKX Wallet is not connected to X Layer testnet");
+  }
+  await requireOkxAtomicBatchCapability(provider, connectedAccount);
+  const result = await provider.request({
+    method: "wallet_sendCalls",
+    params: [{
+      version: "2.0.0",
+      from: connectedAccount,
+      chainId: XLAYER_TESTNET_CHAIN_HEX,
+      atomicRequired: true,
+      calls: [
+        { to: signed.authorization.tokenAddress, data: signed.permitData, value: "0x0" },
+        { to: signed.authorization.tokenAddress, data: signed.transferFromData, value: "0x0" },
+      ],
+    }],
+  });
+  if (typeof result !== "string" || !/^0x[a-fA-F0-9]{2,512}$/.test(result)) {
+    throw new Error("OKX Wallet did not return a valid atomic call identifier");
+  }
+  return result;
+}
+
+export async function getOkxCallsStatus(
+  provider: OkxInjectedProvider,
+  callsId: string,
+): Promise<OkxCallsStatus> {
+  const result = await provider.request({
+    method: "wallet_getCallsStatus",
+    params: [callsId],
+  });
+  if (!result || typeof result !== "object" || !("status" in result)) {
+    throw new Error("OKX Wallet returned an invalid atomic call status");
+  }
+  const status = Number(result.status);
+  if (status !== 100 && status !== 200 && status !== 400 && status !== 500) {
+    throw new Error("OKX Wallet returned an unknown atomic call status");
+  }
+  const receipts = "receipts" in result && Array.isArray(result.receipts)
+    ? result.receipts
+    : [];
+  const transactionHashes = receipts.flatMap((receipt) => {
+    if (!receipt || typeof receipt !== "object" || !("transactionHash" in receipt)) {
+      return [];
+    }
+    const hash = receipt.transactionHash;
+    return typeof hash === "string" && /^0x[a-fA-F0-9]{64}$/.test(hash)
+      ? [hash as Hex]
+      : [];
+  });
+  return { status, transactionHashes };
 }
 
 export async function submitEip3009Settlement(

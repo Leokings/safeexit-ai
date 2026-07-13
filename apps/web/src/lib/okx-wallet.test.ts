@@ -4,8 +4,12 @@ import { describe, expect, it } from "vitest";
 import {
   connectOkxWallet,
   createEip3009Authorization,
+  createErc2612PermitAuthorization,
   ensureXLayerTestnet,
+  getOkxCallsStatus,
   signEip3009Authorization,
+  signErc2612Permit,
+  submitErc2612AtomicBatch,
   submitEip3009Settlement,
   type OkxInjectedProvider,
 } from "./okx-wallet";
@@ -27,6 +31,7 @@ const token = "0x9e29b3AADA05BF2d2c827Af80BD28dC0b9B4fb0c" as const;
 const action = gaslessRescueActionSchema.parse({
   actionId: "action:test",
   standard: "ERC3009_RECEIVE_WITH_AUTHORIZATION",
+  capabilityStatus: "VERIFIED",
   tokenAddress: token,
   from: source,
   to: destination,
@@ -37,6 +42,24 @@ const action = gaslessRescueActionSchema.parse({
     chainId: 1_952,
     verifyingContract: token,
   },
+});
+
+const permitAction = gaslessRescueActionSchema.parse({
+  actionId: "action:permit-test",
+  standard: "ERC2612_PERMIT_ATOMIC_BATCH",
+  capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED",
+  tokenAddress: token,
+  from: source,
+  to: destination,
+  amount: "1250000",
+  nonce: "7",
+  domain: {
+    name: "USD₮0",
+    version: "1",
+    chainId: 1_952,
+    verifyingContract: token,
+  },
+  requiredWalletCapability: "ATOMIC_BATCH",
 });
 
 const receiveWithAuthorizationTypes = {
@@ -50,10 +73,21 @@ const receiveWithAuthorizationTypes = {
   ],
 } as const;
 
+const permitTypes = {
+  Permit: [
+    { name: "owner", type: "address" },
+    { name: "spender", type: "address" },
+    { name: "value", type: "uint256" },
+    { name: "nonce", type: "uint256" },
+    { name: "deadline", type: "uint256" },
+  ],
+} as const;
+
 class FakeProvider implements OkxInjectedProvider {
   readonly calls: { method: string; params?: readonly unknown[] }[] = [];
   chainId = "0x1";
   rejectSwitchWith4902 = false;
+  atomicStatus: "supported" | "ready" | "unsupported" = "supported";
 
   constructor(
     readonly account = sourceAccount,
@@ -88,27 +122,58 @@ class FakeProvider implements OkxInjectedProvider {
           chainId: number;
           verifyingContract: `0x${string}`;
         };
-        primaryType: string;
+        primaryType: "ReceiveWithAuthorization" | "Permit";
         message: {
-          from: `0x${string}`;
-          to: `0x${string}`;
+          from?: `0x${string}`;
+          to?: `0x${string}`;
+          owner?: `0x${string}`;
+          spender?: `0x${string}`;
           value: string;
-          validAfter: string;
-          validBefore: string;
-          nonce: `0x${string}`;
+          validAfter?: string;
+          validBefore?: string;
+          nonce: string;
+          deadline?: string;
         };
       };
+      if (payload.primaryType === "Permit") {
+        return this.account.signTypedData({
+          domain: payload.domain,
+          types: permitTypes,
+          primaryType: "Permit",
+          message: {
+            owner: payload.message.owner!,
+            spender: payload.message.spender!,
+            value: BigInt(payload.message.value),
+            nonce: BigInt(payload.message.nonce),
+            deadline: BigInt(payload.message.deadline!),
+          },
+        });
+      }
       return this.account.signTypedData({
         domain: payload.domain,
         types: receiveWithAuthorizationTypes,
         primaryType: "ReceiveWithAuthorization",
         message: {
-          ...payload.message,
+          from: payload.message.from!,
+          to: payload.message.to!,
+          nonce: payload.message.nonce as `0x${string}`,
           value: BigInt(payload.message.value),
-          validAfter: BigInt(payload.message.validAfter),
-          validBefore: BigInt(payload.message.validBefore),
+          validAfter: BigInt(payload.message.validAfter!),
+          validBefore: BigInt(payload.message.validBefore!),
         },
       });
+    }
+    if (request.method === "wallet_getCapabilities") {
+      return { "0x7a0": { atomic: { status: this.atomicStatus } } };
+    }
+    if (request.method === "wallet_sendCalls") {
+      return "0x1234";
+    }
+    if (request.method === "wallet_getCallsStatus") {
+      return {
+        status: 200,
+        receipts: [{ transactionHash: this.transactionHash }],
+      };
     }
     if (request.method === "eth_sendTransaction") {
       return this.transactionHash;
@@ -201,6 +266,80 @@ describe("OKX injected wallet guardrails", () => {
       submitEip3009Settlement(settlementProvider, signed, source),
     ).rejects.toThrow("Only the designated safe destination");
     expect(settlementProvider.calls).toHaveLength(0);
+  });
+
+  it("creates and signs an ERC-2612 permit to the destination", async () => {
+    if (permitAction.standard !== "ERC2612_PERMIT_ATOMIC_BATCH") {
+      throw new Error("Expected an ERC-2612 action fixture");
+    }
+    const authorization = createErc2612PermitAuthorization(permitAction, {
+      now: new Date("2026-07-13T12:00:00.000Z"),
+    });
+    expect(authorization.spender).toBe(destination);
+    expect(authorization.nonce).toBe(7n);
+    expect(authorization.deadline).toBe(1_783_944_300n);
+
+    const provider = new FakeProvider();
+    const signed = await signErc2612Permit(provider, permitAction, source, {
+      now: new Date("2026-07-13T12:00:00.000Z"),
+    });
+    expect(signed.permitData.startsWith("0xd505accf")).toBe(true);
+    expect(signed.transferFromData.startsWith("0x23b872dd")).toBe(true);
+  });
+
+  it("requires destination atomic support for permit settlement", async () => {
+    if (permitAction.standard !== "ERC2612_PERMIT_ATOMIC_BATCH") {
+      throw new Error("Expected an ERC-2612 action fixture");
+    }
+    const sourceProvider = new FakeProvider();
+    const signed = await signErc2612Permit(sourceProvider, permitAction, source);
+    const destinationProvider = new FakeProvider(destinationAccount);
+    destinationProvider.chainId = "0x7a0";
+
+    await expect(
+      submitErc2612AtomicBatch(destinationProvider, signed, destination),
+    ).resolves.toBe("0x1234");
+    expect(destinationProvider.calls.map((call) => call.method)).toEqual([
+      "eth_chainId",
+      "wallet_getCapabilities",
+      "wallet_sendCalls",
+    ]);
+    const sendRequest = destinationProvider.calls[2];
+    expect(sendRequest?.params).toEqual([expect.objectContaining({
+      from: destination,
+      chainId: "0x7a0",
+      atomicRequired: true,
+      calls: [
+        { to: signed.authorization.tokenAddress, data: signed.permitData, value: "0x0" },
+        { to: signed.authorization.tokenAddress, data: signed.transferFromData, value: "0x0" },
+      ],
+    })]);
+  });
+
+  it("blocks permit settlement when atomic batching is unavailable", async () => {
+    if (permitAction.standard !== "ERC2612_PERMIT_ATOMIC_BATCH") {
+      throw new Error("Expected an ERC-2612 action fixture");
+    }
+    const signed = await signErc2612Permit(new FakeProvider(), permitAction, source);
+    const destinationProvider = new FakeProvider(destinationAccount);
+    destinationProvider.chainId = "0x7a0";
+    destinationProvider.atomicStatus = "unsupported";
+
+    await expect(
+      submitErc2612AtomicBatch(destinationProvider, signed, destination),
+    ).rejects.toThrow("does not report atomic batch support");
+    expect(destinationProvider.calls.map((call) => call.method)).toEqual([
+      "eth_chainId",
+      "wallet_getCapabilities",
+    ]);
+  });
+
+  it("parses confirmed OKX atomic call receipts", async () => {
+    const provider = new FakeProvider(destinationAccount);
+    await expect(getOkxCallsStatus(provider, "0x1234")).resolves.toEqual({
+      status: 200,
+      transactionHashes: [`0x${"a".repeat(64)}`],
+    });
   });
 });
 
