@@ -403,22 +403,22 @@ export function TestnetRescueWorkspace({
 
             <section>
               <div className="border-b border-border pb-4">
-                <p className="font-mono text-[10px] uppercase text-info">03 / Two-wallet execution</p>
-                <h2 className="mt-2 text-xl font-semibold">Sign from source, settle from destination</h2>
+                <p className="font-mono text-[10px] uppercase text-info">03 / Sequential account handoff</p>
+                <h2 className="mt-2 text-xl font-semibold">One active OKX account at a time</h2>
               </div>
               <div className="mt-5 grid gap-5 sm:grid-cols-2">
                 <div className="border-l-2 border-info bg-info/5 p-4">
-                  <div className="flex items-center justify-between gap-3"><span className="text-sm font-semibold">Source account</span><Badge variant={sourceConnected ? "success" : "neutral"}>{sourceConnected ? "MATCHED" : "SIGNER"}</Badge></div>
-                  <p className="mt-3 text-xs leading-5 text-muted">Signs typed data only. No transaction or gas payment is requested from this wallet.</p>
-                  <Button type="button" className="mt-4 w-full" variant="secondary" onClick={() => void connectExpected("SOURCE")} disabled={busy !== null}>
-                    <Wallet className="size-4" /> Connect source
+                  <div className="flex items-center justify-between gap-3"><span className="text-sm font-semibold">1. Source account</span><Badge variant={signed ? "success" : sourceConnected ? "info" : "neutral"}>{signed ? "SIGNED" : sourceConnected ? "ACTIVE" : "STEP 1"}</Badge></div>
+                  <p className="mt-3 text-xs leading-5 text-muted">Make the source active in OKX Wallet and sign typed data. It does not remain connected and pays no gas.</p>
+                  <Button type="button" className="mt-4 w-full" variant="secondary" onClick={() => void connectExpected("SOURCE")} disabled={Boolean(signed) || busy !== null}>
+                    <Wallet className="size-4" /> Use source account
                   </Button>
                 </div>
                 <div className="border-l-2 border-accent bg-accent/5 p-4">
-                  <div className="flex items-center justify-between gap-3"><span className="text-sm font-semibold">Safe destination</span><Badge variant={destinationConnected ? "success" : "neutral"}>{destinationConnected ? "MATCHED" : "RELAYER"}</Badge></div>
-                  <p className="mt-3 text-xs leading-5 text-muted">Submits the signed authorization and pays X Layer network gas after exact-call simulation.</p>
-                  <Button type="button" className="mt-4 w-full" variant="secondary" onClick={() => void connectExpected("DESTINATION")} disabled={busy !== null}>
-                    <Wallet className="size-4" /> Connect destination
+                  <div className="flex items-center justify-between gap-3"><span className="text-sm font-semibold">2. Safe destination</span><Badge variant={destinationConnected ? "success" : signed ? "info" : "neutral"}>{destinationConnected ? "ACTIVE" : signed ? "SWITCH NOW" : "AFTER SIGN"}</Badge></div>
+                  <p className="mt-3 text-xs leading-5 text-muted">After signing, switch the active OKX account to the destination. Keep this tab open so the authorization stays in memory.</p>
+                  <Button type="button" className="mt-4 w-full" variant="secondary" onClick={() => void connectExpected("DESTINATION")} disabled={!signed || busy !== null}>
+                    <Wallet className="size-4" /> Check destination account
                   </Button>
                 </div>
               </div>
@@ -492,10 +492,10 @@ export function TestnetRescueWorkspace({
               </>
             ) : (
               <>
-                <p className="mt-5 flex items-start gap-2 text-xs leading-5 text-accent"><ShieldCheck className="mt-0.5 size-3.5 shrink-0" />Authorization signed locally. Switch OKX Wallet to the displayed destination account.</p>
-                <Button type="button" className="mt-5 w-full" size="lg" onClick={() => void settleAuthorization()} disabled={!destinationConnected || busy !== null}>
+                <p className="mt-5 flex items-start gap-2 text-xs leading-5 text-accent"><ShieldCheck className="mt-0.5 size-3.5 shrink-0" />Authorization signed locally. Without refreshing this page, switch OKX Wallet to the displayed destination account.</p>
+                <Button type="button" className="mt-5 w-full" size="lg" onClick={() => void settleAuthorization()} disabled={busy !== null}>
                   {busy === "SETTLE" ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
-                  Settle from destination
+                  Check destination and settle
                 </Button>
               </>
             )}

@@ -112,6 +112,11 @@ stored by SAFEEXIT. ERC-20s without either route, native OKB, NFTs, approvals,
 airdrops, and positions stay blocked until a verified destination-paid adapter
 exists. A successful testnet pilot is not approval to enable mainnet execution.
 
+One injected wallet exposes one active account at a time. The browser flow is
+therefore sequential: activate the source and sign, keep the tab open, switch
+OKX Wallet to the safe destination, then submit settlement. Both accounts do
+not need to remain connected simultaneously.
+
 ## Hackathon demo
 
 The three-minute walkthrough uses only developer-created contracts and public
