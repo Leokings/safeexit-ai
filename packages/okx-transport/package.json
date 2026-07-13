@@ -1,16 +1,17 @@
 {
-  "name": "@safeexit/agent",
+  "name": "@safeexit/okx-transport",
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@safeexit/agent-service": "*",
-    "@safeexit/ai": "*",
-    "@safeexit/buyer-runtime": "*",
-    "@safeexit/okx-transport": "*",
-    "@safeexit/shared": "*"
+    "@safeexit/shared": "*",
+    "zod": "4.4.3"
   }
 }

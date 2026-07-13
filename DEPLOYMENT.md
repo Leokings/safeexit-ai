@@ -33,6 +33,7 @@ SAFEEXIT_DEMO_MODE=HOSTED_REPLAY
 SAFEEXIT_AGENT_MODE=HOSTED_REPLAY
 SAFEEXIT_AGENT_STORE=DATABASE
 SAFEEXIT_AGENT_API_KEY=<at-least-32-random-characters>
+SAFEEXIT_OKX_PROVIDER_AGENT_ID=<registered numeric ASP agent ID>
 SAFEEXIT_RATE_LIMIT_MAX_REQUESTS=20
 SAFEEXIT_RATE_LIMIT_WINDOW_MS=60000
 ```
@@ -40,6 +41,9 @@ SAFEEXIT_RATE_LIMIT_WINDOW_MS=60000
 `SAFEEXIT_AGENT_API_KEY` is a temporary server-to-server credential for the
 SAFEEXIT API. It is not an OKX wallet secret and must never have a
 `NEXT_PUBLIC_` prefix.
+
+`SAFEEXIT_OKX_PROVIDER_AGENT_ID` pins normalized handoffs to one registered ASP.
+It is an identity number, not a wallet credential.
 
 ### Live read-only production mode
 
@@ -121,6 +125,22 @@ POST /api/agent/jobs/{id}/monitor
 GET  /api/agent/jobs/{id}
 ```
 
+The provider-side normalized A2A bridge exposes two additional authenticated
+SAFEEXIT endpoints:
+
+```text
+POST /api/agent/okx/prepare
+POST /api/agent/okx/buyer-report
+```
+
+These are not claimed OKX callback endpoints. After the official runtime emits
+`job_accepted`, the provider runtime maps the accepted task fields into
+`safeexit-okx-a2a-v1` and calls `prepare`. Repeated calls with the same OKX job
+ID are idempotent; changing the wallet scope under an existing ID is rejected.
+The returned signing-package JSON is delivered through the official A2A task
+flow. After local buyer execution, only the receipt report is mapped into
+`buyer-report`; source signatures must never be included.
+
 Analysis, planning, simulation, and monitoring accept the strict body
 `{ "schemaVersion": "safeexit-agent-api-v1" }`.
 
@@ -184,6 +204,11 @@ optional human audit handoff. Keep
 `OFFICIAL_DOCS_REQUIRED` until that adapter has tests against the official
 contract.
 
+The installed OKX runtime currently supplies encrypted A2A task sessions and
+the marketplace lifecycle. SAFEEXIT's normalized bridge starts only after task
+acceptance and leaves delivery/payment transitions to that runtime. It must not
+process a buyer inquiry as an accepted work order.
+
 Never provide an OKX prompt or agent with a seed phrase, private key, or raw
 wallet credential. SAFEEXIT can prepare a signing package and remains at
 `WAITING_FOR_USER` until the buyer-local runtime completes settlement. The
@@ -233,7 +258,11 @@ control has received an independent security review.
 - The agent API can issue strict signing packages in `LIVE_READONLY`, and the
   provider-neutral buyer runtime can collect local signatures, assemble and
   post-simulate settlement, submit through EIP-1193, and return receipt-only
-  reports. An official OKX A2A/Agentic Wallet transport adapter is not connected.
+  reports. An OKX-native Agentic Wallet destination-execution adapter is not
+  connected.
+- The normalized provider bridge is connected to SAFEEXIT's hosted API, but the
+  operator's OKX runtime still performs marketplace acceptance and encrypted
+  delivery. SAFEEXIT does not expose a public unauthenticated webhook.
 - Native OKB remains blocked. `@safeexit/adapters` defines the mandatory proof
   for EIP-7702 sponsorship and private atomic bundles, but exposes neither as
   executable until official X Layer integration details and an independent

@@ -25,4 +25,14 @@ export {
   buyerExecutionReportSchema,
 } from "@safeexit/buyer-runtime";
 
-export const agentAppPhase = "BUYER_LOCAL_RUNTIME_AVAILABLE" as const;
+export {
+  OkxA2AProviderBridge,
+  OkxProviderBridgeError,
+  SAFEEXIT_AUTHORIZATION_STATEMENT,
+  okxA2ABuyerReportRequestSchema,
+  okxA2ACompletionDeliverableSchema,
+  okxA2ASigningDeliverableSchema,
+  okxA2ATaskRequestSchema,
+} from "@safeexit/okx-transport";
+
+export const agentAppPhase = "OKX_A2A_PROVIDER_BRIDGE_AVAILABLE" as const;

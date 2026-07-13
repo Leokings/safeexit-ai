@@ -72,6 +72,25 @@ function validatePlanScope(incident: Incident, scan: WalletScan, plan: RescuePla
   }
 }
 
+function validateIdempotentIncidentScope(
+  existing: AgentServiceJob,
+  requested: Incident | undefined,
+): void {
+  if (!existing.incident && !requested) return;
+  if (
+    !existing.incident ||
+    !requested ||
+    existing.incident.chainId !== requested.chainId ||
+    existing.incident.sourceAddress.toLowerCase() !== requested.sourceAddress.toLowerCase() ||
+    existing.incident.destinationAddress.toLowerCase() !== requested.destinationAddress.toLowerCase() ||
+    existing.incident.ownershipAttestation.accepted !== requested.ownershipAttestation.accepted ||
+    existing.incident.ownershipAttestation.statementVersion !==
+      requested.ownershipAttestation.statementVersion
+  ) {
+    throw new Error("An existing request ID cannot be reused for a different incident scope");
+  }
+}
+
 export class AgentIncidentService {
   private readonly store: AgentServiceJobStore;
   private readonly analyzer: IncidentAnalyzerPort;
@@ -99,6 +118,13 @@ export class AgentIncidentService {
 
   async createIncident(value: CreateIncidentInput): Promise<AgentServiceJob> {
     const input = createIncidentInputSchema.parse(value);
+    if (input.requestId) {
+      const existing = await this.store.getByRequestId(input.requestId);
+      if (existing) {
+        validateIdempotentIncidentScope(existing, input.incident);
+        return existing;
+      }
+    }
     const at = this.now();
     const id = this.idFactory();
     let job = agentServiceJobSchema.parse({
@@ -124,7 +150,18 @@ export class AgentIncidentService {
     if (!job.incident) {
       job = transitionJob(job, "WAITING_FOR_SOURCE", "SOURCE_REQUIRED", at);
     }
-    return this.store.save(job);
+    try {
+      return await this.store.save(job);
+    } catch (error) {
+      if (input.requestId) {
+        const existing = await this.store.getByRequestId(input.requestId);
+        if (existing) {
+          validateIdempotentIncidentScope(existing, input.incident);
+          return existing;
+        }
+      }
+      throw error;
+    }
   }
 
   async analyseIncident(jobId: string, incident?: Incident): Promise<AgentServiceJob> {
@@ -255,6 +292,21 @@ export class AgentIncidentService {
     reportValue: BuyerExecutionReport,
   ): Promise<AgentServiceJob> {
     const job = await this.requireJob(jobId);
+    const report = buyerExecutionReportSchema.parse(reportValue);
+    if (job.status === "COMPLETED") {
+      this.validateBuyerReportScope(job, report);
+      const observedHashes = new Set(
+        job.monitor?.transactionHashes.map((hash) => hash.toLowerCase()) ?? [],
+      );
+      const exactVerifiedRetry =
+        job.monitor?.phase === "COMPLETED" &&
+        observedHashes.size === report.transactionHashes.length &&
+        report.transactionHashes.every((hash) => observedHashes.has(hash.toLowerCase()));
+      if (!exactVerifiedRetry) {
+        throw new Error("Completed buyer report retry does not match verified receipts");
+      }
+      return job;
+    }
     if (
       !["WAITING_FOR_USER", "SIGNING", "EXECUTING"].includes(job.status) ||
       !job.signingPackage ||
@@ -262,7 +314,6 @@ export class AgentIncidentService {
     ) {
       throw new Error(`Buyer execution reporting is not available while job is ${job.status}`);
     }
-    const report = buyerExecutionReportSchema.parse(reportValue);
     this.validateBuyerReportScope(job, report);
     const observation = rescueMonitorObservationSchema.parse(
       await this.executionVerifier.verify(job, report),

@@ -65,7 +65,7 @@ export const OKX_AI_INTEGRATION_BOUNDARIES = [
     status: "OFFICIAL_DOCS_REQUIRED",
     implemented: false,
     reason:
-      "No task-hall, matching, discovery, messaging, callback, or transport API is assumed.",
+      "SAFEEXIT accepts a strict normalized provider handoff after the official A2A runtime accepts a task, but does not implement task-hall discovery, XMTP, callbacks, or an OKX wire protocol.",
     officialDocsUrls: [
       "https://web3.okx.com/onchainos/dev-docs/okxai/asp-introduction",
       "https://web3.okx.com/onchainos/dev-docs/okxai/how-to-become-a2a",

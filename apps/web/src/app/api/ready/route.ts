@@ -27,6 +27,12 @@ export async function GET(): Promise<Response> {
     if (config.agentMode !== "DISABLED" && !config.agentApiKey) {
       throw new Error("SAFEEXIT_AGENT_API_KEY is required when the agent service is enabled");
     }
+    if (config.agentMode !== "DISABLED") {
+      if (!config.okxProviderAgentId) {
+        throw new Error("SAFEEXIT_OKX_PROVIDER_AGENT_ID is required for the A2A bridge");
+      }
+      checks.okxProviderBridge = `configured:${config.okxProviderAgentId}`;
+    }
     if (config.agentMode !== "DISABLED" && config.agentStore === "DATABASE") {
       await checkDatabaseConnection();
       checks.database = "connected";

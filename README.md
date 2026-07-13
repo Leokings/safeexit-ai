@@ -98,6 +98,21 @@ Deployment variables, database migration steps, API smoke tests, and the
 official-docs-required OKX handoff are documented in
 [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
+## Normalized OKX A2A provider bridge
+
+`@safeexit/okx-transport` adds an authenticated provider bridge for work that
+the official OKX runtime has already moved to `job_accepted`. It pins each OKX
+job to one idempotent SAFEEXIT request, validates the exact ownership statement,
+and returns a strict signing-package deliverable. A separate endpoint accepts
+only the buyer's receipt report and completes the job after independent onchain
+proof.
+
+The bridge does not implement or imitate OKX marketplace discovery, XMTP,
+payment, task acceptance, or delivery. Those remain in the official runtime.
+It also does not expose an Agentic Wallet credential or let an Agentic Wallet
+sign for the compromised source EOA. See
+[`packages/okx-transport/README.md`](packages/okx-transport/README.md).
+
 ## Destination-paid X Layer testnet pilot
 
 The X Layer testnet rescue workspace supports multiple destination-paid asset

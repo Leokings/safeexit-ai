@@ -19,6 +19,7 @@ import {
 
 const source = evmAddressSchema.parse("0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
 const destination = evmAddressSchema.parse("0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65");
+const otherDestination = evmAddressSchema.parse("0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc");
 const token = evmAddressSchema.parse("0x5FbDB2315678afecb367f032d93F642f64180aa3");
 const planHash = `0x${"3".repeat(64)}`;
 const txHash = `0x${"a".repeat(64)}`;
@@ -308,6 +309,28 @@ describe("agent service lifecycle", () => {
     expect(analysing.scan?.id).toBe(scan.id);
   });
 
+  it("returns the existing job when a request ID is retried with the same scope", async () => {
+    const { service } = createService();
+    const first = await service.createIncident({ requestId: "okx:5196:job-1", incident });
+    const retry = await service.createIncident({
+      requestId: "okx:5196:job-1",
+      incident: { ...incident, id: "incident:retry" },
+    });
+
+    expect(retry.id).toBe(first.id);
+    expect(retry.incident?.id).toBe(incident.id);
+  });
+
+  it("rejects request ID reuse with a different wallet scope", async () => {
+    const { service } = createService();
+    await service.createIncident({ requestId: "okx:5196:job-2", incident });
+
+    await expect(service.createIncident({
+      requestId: "okx:5196:job-2",
+      incident: { ...incident, destinationAddress: otherDestination },
+    })).rejects.toThrow("cannot be reused for a different incident scope");
+  });
+
   it("runs the complete provider-neutral rescue lifecycle", async () => {
     const { service } = createService({
       observations: [
@@ -401,6 +424,29 @@ describe("agent service lifecycle", () => {
 
     expect(completed.status).toBe("COMPLETED");
     expect(completed.monitor?.transactionHashes).toEqual([txHash]);
+  });
+
+  it("returns the completed job for an exact buyer-report retry", async () => {
+    const { service } = createService();
+    await prepareWaitingForUser(service);
+    await service.getSigningPackage("job:test");
+    const first = await service.recordBuyerExecutionReport("job:test", buyerReport());
+    const retry = await service.recordBuyerExecutionReport("job:test", buyerReport());
+
+    expect(retry.id).toBe(first.id);
+    expect(retry.revision).toBe(first.revision);
+  });
+
+  it("rejects a changed receipt hash after buyer-report completion", async () => {
+    const { service } = createService();
+    await prepareWaitingForUser(service);
+    await service.getSigningPackage("job:test");
+    await service.recordBuyerExecutionReport("job:test", buyerReport());
+
+    await expect(service.recordBuyerExecutionReport("job:test", {
+      ...buyerReport(),
+      transactionHashes: [`0x${"b".repeat(64)}`],
+    })).rejects.toThrow("does not match verified receipts");
   });
 
   it("rejects a buyer report for another signing package", async () => {

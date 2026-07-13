@@ -28,6 +28,20 @@ export class PrismaAgentServiceJobStore implements AgentServiceJobStore {
     return agentServiceJobSchema.parse(record.state);
   }
 
+  async getByRequestId(requestId: string): Promise<AgentServiceJob | undefined> {
+    const record = await this.client.agentJob.findUnique({
+      where: { requestId },
+      select: { state: true },
+    });
+    if (!record) {
+      return undefined;
+    }
+    if (!record.state) {
+      throw new Error("Agent job does not contain a recoverable lifecycle snapshot");
+    }
+    return agentServiceJobSchema.parse(record.state);
+  }
+
   async save(value: AgentServiceJob): Promise<AgentServiceJob> {
     const job = agentServiceJobSchema.parse(value);
     await this.repository.saveAgentJob(job);

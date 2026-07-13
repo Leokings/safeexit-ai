@@ -35,10 +35,19 @@ describe("deployment environment", () => {
       OKX_WEB3_SECRET_KEY: "secret-key",
       OKX_WEB3_PASSPHRASE: "passphrase",
       XLAYER_MAINNET_RPC_URL: "https://xlayer.example/rpc",
+      SAFEEXIT_OKX_PROVIDER_AGENT_ID: "5196",
     });
     expect(config.agentMode).toBe("LIVE_READONLY");
     expect(config.okxWeb3ApiKey).toBe("api-key");
     expect(config.xLayerMainnetRpcUrl).toBe("https://xlayer.example/rpc");
+    expect(config.okxProviderAgentId).toBe("5196");
+  });
+
+  it("rejects a malformed OKX provider agent ID", () => {
+    expect(() => parseDeploymentEnvironment({
+      NODE_ENV: "production",
+      SAFEEXIT_OKX_PROVIDER_AGENT_ID: "agent-5196",
+    })).toThrow();
   });
 
   it("marks the hosted fixture as non-executable replay data", () => {

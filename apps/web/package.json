@@ -15,6 +15,7 @@
     "@safeexit/ai": "*",
     "@safeexit/chain": "*",
     "@safeexit/execution": "*",
+    "@safeexit/okx-transport": "*",
     "@safeexit/planner": "*",
     "@safeexit/persistence": "*",
     "@safeexit/scanner": "*",
