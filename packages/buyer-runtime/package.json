@@ -1,15 +1,18 @@
 {
-  "name": "@safeexit/agent",
+  "name": "@safeexit/buyer-runtime",
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@safeexit/agent-service": "*",
-    "@safeexit/ai": "*",
-    "@safeexit/buyer-runtime": "*",
-    "@safeexit/shared": "*"
+    "@safeexit/shared": "*",
+    "viem": "2.55.0",
+    "zod": "4.4.3"
   }
 }

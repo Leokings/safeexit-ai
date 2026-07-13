@@ -116,6 +116,7 @@ POST /api/agent/jobs/{id}/analyse
 POST /api/agent/jobs/{id}/plan
 POST /api/agent/jobs/{id}/simulate
 POST /api/agent/jobs/{id}/signing-package
+POST /api/agent/jobs/{id}/buyer-report
 POST /api/agent/jobs/{id}/monitor
 GET  /api/agent/jobs/{id}
 ```
@@ -129,6 +130,38 @@ EIP-712 typed data and a declarative settlement sequence, not signatures,
 private credentials, raw calldata, or an unrestricted call list. The buyer's
 local runtime must re-confirm the fixed addresses, collect source signatures,
 perform post-signature simulation, and submit settlement from the destination.
+
+After confirmed destination submission, the buyer runtime may return only the
+strict receipt report to `buyer-report`:
+
+```json
+{
+  "schemaVersion": "safeexit-agent-api-v1",
+  "report": {
+    "schemaVersion": "safeexit-buyer-report-v1",
+    "packageId": "signing-package-id",
+    "jobId": "job-id",
+    "incidentId": "incident-id",
+    "planId": "plan-id",
+    "planHash": "0x...",
+    "actionId": "action-id",
+    "route": "ERC2612_PERMIT_ATOMIC_BATCH",
+    "chainId": 196,
+    "sourceAddress": "0x...",
+    "destinationAddress": "0x...",
+    "status": "COMPLETED",
+    "simulationProviderId": "eth_simulateV1",
+    "simulatedAt": "2026-07-13T00:00:00.000Z",
+    "transactionHashes": ["0x..."],
+    "completedAt": "2026-07-13T00:01:00.000Z"
+  }
+}
+```
+
+SAFEEXIT rejects reports outside the issued package scope and independently
+loads successful chain receipts. A job completes only when the receipts contain
+the exact committed ERC-20 or ERC-721 transfer from source to destination.
+Signatures and settlement calldata are never returned to the hosted service.
 
 The dashboard is optional and is not created with the job. Request it only for
 a manual audit handoff:
@@ -153,8 +186,11 @@ contract.
 
 Never provide an OKX prompt or agent with a seed phrase, private key, or raw
 wallet credential. SAFEEXIT can prepare a signing package and remains at
-`WAITING_FOR_USER`; the audited buyer-local signing, atomic settlement, and
-receipt-verification runtime remains future work.
+`WAITING_FOR_USER` until the buyer-local runtime completes settlement. The
+provider-neutral local signer, atomic settlement, post-signature simulation,
+and receipt-verification core are implemented. Mapping them to the official
+OKX A2A transport and an Agentic Wallet destination adapter remains
+official-docs-required and is not represented as connected.
 
 ## X Layer testnet destination-paid pilot
 
@@ -194,9 +230,10 @@ control has received an independent security review.
   Testnet execution is limited to ERC-3009, signature-verified ERC-2612,
   strict DAI-style permits, or ERC-4494 destination-paid settlement through
   the user-controlled OKX Wallet.
-- The agent API can issue strict signing packages in `LIVE_READONLY`, but the
-  buyer-agent wallet bridge that collects signatures, assembles settlement,
-  submits it, and returns deterministically verified receipts is not connected.
+- The agent API can issue strict signing packages in `LIVE_READONLY`, and the
+  provider-neutral buyer runtime can collect local signatures, assemble and
+  post-simulate settlement, submit through EIP-1193, and return receipt-only
+  reports. An official OKX A2A/Agentic Wallet transport adapter is not connected.
 - Native OKB remains blocked. `@safeexit/adapters` defines the mandatory proof
   for EIP-7702 sponsorship and private atomic bundles, but exposes neither as
   executable until official X Layer integration details and an independent

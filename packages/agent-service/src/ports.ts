@@ -6,6 +6,7 @@ import type {
   RescueMonitorObservation,
 } from "./schemas";
 import type { SigningPackage } from "./signing-package";
+import type { BuyerExecutionReport } from "./buyer-report";
 
 export interface IncidentAnalyzerPort {
   analyse(incident: Incident): Promise<WalletScan>;
@@ -25,6 +26,10 @@ export interface DashboardLocatorPort {
 
 export interface SigningPackageBuilderPort {
   build(job: AgentServiceJob): Promise<SigningPackage>;
+}
+
+export interface BuyerExecutionVerifierPort {
+  verify(job: AgentServiceJob, report: BuyerExecutionReport): Promise<RescueMonitorObservation>;
 }
 
 // Monitoring observes local signatures, submissions, and receipts. It does not execute them.

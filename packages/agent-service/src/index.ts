@@ -5,5 +5,6 @@ export * from "./store";
 export * from "./service";
 export * from "./a2a";
 export * from "./api";
+export * from "./buyer-report";
 export * from "./official-boundaries";
 export * from "./signing-package";

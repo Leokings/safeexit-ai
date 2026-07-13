@@ -36,6 +36,10 @@ Any non-terminal operational state can fail only where declared in
 - `getDashboardUrl`: resolves a SAFEEXIT-owned dashboard URL through an injected
   locator only when explicitly requested. Agent jobs are dashboardless by
   default, and this URL is not an OKX marketplace URL.
+- `recordBuyerExecutionReport`: accepts a receipt-only report scoped exactly to
+  the issued signing package, then delegates chain proof to the injected
+  execution verifier before completing the job. It accepts no signature or
+  calldata.
 - `monitorRescue`: reads signature, execution, and receipt observations through
   a monitor port. It has no signing or broadcasting capability.
 
@@ -51,8 +55,9 @@ The buyer runtime must independently render the committed source and
 destination, obtain confirmation, request the source signature, perform the
 required post-signature simulation, assemble only the declared operation
 sequence, and submit from the destination wallet. Signatures must not be sent
-back to SAFEEXIT. The repository does not yet contain that OKX Agentic Wallet or
-wallet-extension runtime.
+back to SAFEEXIT. `@safeexit/buyer-runtime` implements this provider-neutral
+local flow for EIP-1193 wallets, including post-signature `eth_simulateV1` and
+EIP-5792 atomic batches. It is not an OKX Agentic Wallet server adapter.
 
 ## Conceptual A2A boundary
 

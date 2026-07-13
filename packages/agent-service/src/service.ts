@@ -11,6 +11,7 @@ import {
 
 import { transitionJob, type TransitionPatch } from "./lifecycle";
 import type {
+  BuyerExecutionVerifierPort,
   DashboardLocatorPort,
   IncidentAnalyzerPort,
   RescueMonitorPort,
@@ -18,6 +19,7 @@ import type {
   RescuePlanSimulatorPort,
   SigningPackageBuilderPort,
 } from "./ports";
+import { buyerExecutionReportSchema, type BuyerExecutionReport } from "./buyer-report";
 import {
   agentServiceJobSchema,
   agentSimulationReportSchema,
@@ -38,6 +40,7 @@ export type AgentIncidentServiceOptions = {
   simulator: RescuePlanSimulatorPort;
   dashboard: DashboardLocatorPort;
   signingPackages: SigningPackageBuilderPort;
+  executionVerifier: BuyerExecutionVerifierPort;
   monitor: RescueMonitorPort;
   clock?: () => Date;
   idFactory?: () => string;
@@ -76,6 +79,7 @@ export class AgentIncidentService {
   private readonly simulator: RescuePlanSimulatorPort;
   private readonly dashboard: DashboardLocatorPort;
   private readonly signingPackages: SigningPackageBuilderPort;
+  private readonly executionVerifier: BuyerExecutionVerifierPort;
   private readonly monitor: RescueMonitorPort;
   private readonly clock: () => Date;
   private readonly idFactory: () => string;
@@ -87,6 +91,7 @@ export class AgentIncidentService {
     this.simulator = options.simulator;
     this.dashboard = options.dashboard;
     this.signingPackages = options.signingPackages;
+    this.executionVerifier = options.executionVerifier;
     this.monitor = options.monitor;
     this.clock = options.clock ?? (() => new Date());
     this.idFactory = options.idFactory ?? (() => `job:${crypto.randomUUID()}`);
@@ -245,6 +250,30 @@ export class AgentIncidentService {
     }
   }
 
+  async recordBuyerExecutionReport(
+    jobId: string,
+    reportValue: BuyerExecutionReport,
+  ): Promise<AgentServiceJob> {
+    const job = await this.requireJob(jobId);
+    if (
+      !["WAITING_FOR_USER", "SIGNING", "EXECUTING"].includes(job.status) ||
+      !job.signingPackage ||
+      !job.plan
+    ) {
+      throw new Error(`Buyer execution reporting is not available while job is ${job.status}`);
+    }
+    const report = buyerExecutionReportSchema.parse(reportValue);
+    this.validateBuyerReportScope(job, report);
+    const observation = rescueMonitorObservationSchema.parse(
+      await this.executionVerifier.verify(job, report),
+    );
+    this.validateObservation(job.plan, observation);
+    if (observation.phase !== "COMPLETED") {
+      throw new Error("A verified buyer execution report must produce a completed observation");
+    }
+    return this.advanceToObservation(job, observation);
+  }
+
   async getJob(jobId: string): Promise<AgentServiceJob> {
     return this.requireJob(jobId);
   }
@@ -397,6 +426,28 @@ export class AgentIncidentService {
       value.amount !== action.parameters.amount
     ) {
       throw new Error("Token signing package does not match its rescue action");
+    }
+  }
+
+  private validateBuyerReportScope(
+    job: AgentServiceJob,
+    report: BuyerExecutionReport,
+  ): void {
+    const signingPackage = job.signingPackage;
+    if (
+      !signingPackage ||
+      report.jobId !== job.id ||
+      report.packageId !== signingPackage.packageId ||
+      report.incidentId !== signingPackage.incidentId ||
+      report.planId !== signingPackage.planId ||
+      report.planHash.toLowerCase() !== signingPackage.planHash.toLowerCase() ||
+      report.actionId !== signingPackage.actionId ||
+      report.route !== signingPackage.route ||
+      report.chainId !== signingPackage.chainId ||
+      report.sourceAddress.toLowerCase() !== signingPackage.sourceAddress.toLowerCase() ||
+      report.destinationAddress.toLowerCase() !== signingPackage.destinationAddress.toLowerCase()
+    ) {
+      throw new Error("Buyer execution report does not match the issued signing package");
     }
   }
 

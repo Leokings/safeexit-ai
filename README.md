@@ -2,8 +2,9 @@
 
 The current foundation contains the TypeScript monorepo, shared domain schemas,
 verified chain configuration, deterministic standard-token scanners, and an
-opt-in official OKX Wallet API balance-discovery adapter. Mainnet signing and
-submission remain disabled.
+opt-in official OKX Wallet API balance-discovery adapter, and a buyer-local
+signing and settlement runtime. Mainnet execution remains disabled pending an
+independent security review and official wallet transport integration.
 
 ## Deterministic scanning
 
@@ -79,9 +80,11 @@ Production mode serves the verified demo as a clearly labelled read-only
 replay. The local fixed executor is never exposed in hosted mode. A
 bearer-authenticated, provider-neutral agent lifecycle is available under
 `/api/agent/jobs`; it supports create, analyze, plan, simulate, strict signing
-package delivery, monitor, and status operations but cannot sign or broadcast
-transactions. Jobs are dashboardless by default; an audit URL is created only
-through the explicit dashboard endpoint.
+package delivery, buyer receipt reporting, monitor, and status operations. The
+hosted service cannot sign or broadcast transactions: source authorization and
+destination-paid settlement stay in the buyer's local runtime. Jobs are
+dashboardless by default; an audit URL is created only through the explicit
+dashboard endpoint.
 
 An opt-in `LIVE_READONLY` agent mode replaces fixture analysis with real X Layer
 mainnet reads. It discovers non-risk ERC-20 candidates through the official OKX
@@ -231,15 +234,20 @@ itself as a deterministic fallback and remains fully usable without credentials.
 
 `@safeexit/agent-service` adds the provider-neutral incident job lifecycle and
 the methods `createIncident`, `analyseIncident`, `generatePlan`, `simulatePlan`,
-`getSigningPackage`, `getDashboardUrl`, and `monitorRescue`. Scanner, planner,
-simulator, signing-package, dashboard, and monitor behavior are injected ports.
-There is no execution or wallet port.
+`getSigningPackage`, `recordBuyerExecutionReport`, `getDashboardUrl`, and
+`monitorRescue`. Scanner, planner, simulator, signing-package, receipt
+verification, dashboard, and monitor behavior are injected ports. The hosted
+service has no signing or wallet-execution port.
 
 Signing packages are short-lived strict schemas, not generic unsigned
 transactions. They commit to the confirmed source and destination, plan hash,
 pinned block, simulation, route, asset, and exact operation sequence. The buyer
-runtime must request EIP-712 signatures locally and pay settlement gas from the
-destination. SAFEEXIT accepts neither signatures nor arbitrary calldata.
+runtime requests EIP-712 signatures locally, verifies the recovered signer,
+post-simulates the assembled call sequence, and pays settlement gas from the
+destination. It supports ERC-3009, ERC-2612, DAI-style permit, and ERC-4494
+routes. SAFEEXIT accepts neither signatures nor arbitrary calldata. It accepts
+only a receipt-only completion report, then independently proves the exact
+committed transfer from chain receipts before completing the job.
 
 The package also contains versioned conceptual A2A request/response schemas.
 They are SAFEEXIT contracts, not claimed OKX wire formats. ASP registration,

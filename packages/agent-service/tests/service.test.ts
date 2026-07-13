@@ -12,6 +12,7 @@ import {
   conceptualA2ARequestSchema,
   toConceptualA2AResponse,
   type AgentSimulationReport,
+  type BuyerExecutionReport,
   type RescueMonitorObservation,
   type SigningPackage,
 } from "../src";
@@ -216,6 +217,27 @@ function observation(
   };
 }
 
+function buyerReport(): BuyerExecutionReport {
+  return {
+    schemaVersion: "safeexit-buyer-report-v1",
+    packageId: "signing-package:test",
+    jobId: "job:test",
+    incidentId: incident.id,
+    planId: plan.id,
+    planHash,
+    actionId: "action:transfer",
+    route: "ERC2612_PERMIT_ATOMIC_BATCH",
+    chainId: incident.chainId,
+    sourceAddress: source,
+    destinationAddress: destination,
+    status: "COMPLETED",
+    simulationProviderId: "buyer-local-eth-simulate-v1",
+    simulatedAt: now,
+    transactionHashes: [txHash],
+    completedAt: now,
+  };
+}
+
 type ServiceOptions = {
   analyzerError?: Error;
   simulationStatus?: AgentSimulationReport["status"];
@@ -243,6 +265,15 @@ function createService(options: ServiceOptions = {}) {
     dashboard: new SafeExitDashboardLocator("http://localhost:3001"),
     signingPackages: {
       build: async () => options.signingPackage ?? signingPackage(),
+    },
+    executionVerifier: {
+      verify: async (_job, report) => ({
+        phase: "COMPLETED",
+        completedActionIds: [report.actionId],
+        failedActionIds: [],
+        transactionHashes: report.transactionHashes,
+        observedAt: report.completedAt,
+      }),
     },
     monitor: {
       observe: async () => pendingObservations.shift() ?? observation("WAITING_FOR_USER"),
@@ -359,6 +390,28 @@ describe("agent service lifecycle", () => {
         },
       }).success,
     ).toBe(false);
+  });
+
+  it("accepts a scoped buyer report only after verifier confirmation", async () => {
+    const { service } = createService();
+    await prepareWaitingForUser(service);
+    await service.getSigningPackage("job:test");
+
+    const completed = await service.recordBuyerExecutionReport("job:test", buyerReport());
+
+    expect(completed.status).toBe("COMPLETED");
+    expect(completed.monitor?.transactionHashes).toEqual([txHash]);
+  });
+
+  it("rejects a buyer report for another signing package", async () => {
+    const { service } = createService();
+    await prepareWaitingForUser(service);
+    await service.getSigningPackage("job:test");
+
+    await expect(service.recordBuyerExecutionReport("job:test", {
+      ...buyerReport(),
+      packageId: "signing-package:other",
+    })).rejects.toThrow("does not match the issued signing package");
   });
 
   it("records analysis adapter failures as FAILED", async () => {

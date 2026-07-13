@@ -4,6 +4,7 @@ import { chainIdSchema, evmAddressSchema, incidentSchema } from "@safeexit/share
 
 import { agentServiceJobSchema } from "./schemas";
 import { signingPackageSchema } from "./signing-package";
+import { buyerExecutionReportSchema } from "./buyer-report";
 
 const identifierSchema = z.string().min(1).max(256);
 
@@ -53,9 +54,15 @@ export const signingPackageResponseSchema = z.strictObject({
   signingPackage: signingPackageSchema,
 });
 
+export const buyerExecutionReportRequestSchema = z.strictObject({
+  schemaVersion: z.literal("safeexit-agent-api-v1"),
+  report: buyerExecutionReportSchema,
+});
+
 export type CreateAgentJobRequest = z.infer<typeof createAgentJobRequestSchema>;
 export type AnalyseAgentJobRequest = z.infer<typeof analyseAgentJobRequestSchema>;
 export type AgentJobActionRequest = z.infer<typeof agentJobActionRequestSchema>;
 export type AgentJobResponse = z.infer<typeof agentJobResponseSchema>;
 export type SigningPackageRequest = z.infer<typeof signingPackageRequestSchema>;
 export type SigningPackageResponse = z.infer<typeof signingPackageResponseSchema>;
+export type BuyerExecutionReportRequest = z.infer<typeof buyerExecutionReportRequestSchema>;

@@ -56,6 +56,7 @@ import { createDemoAiContext } from "./demo-ai-context";
 import { demoIncident } from "./demo-incident";
 import { parseDeploymentEnvironment } from "./deployment-env";
 import { LivePermitSigningPackageBuilder } from "./live-signing-package-builder";
+import { LiveBuyerExecutionVerifier } from "./live-buyer-report-verifier";
 
 const replayGas: Record<RescueAction["actionType"], string> = {
   CLAIM_SUPPORTED_AIRDROP: "34873",
@@ -442,6 +443,10 @@ export function getAgentIncidentService(): AgentIncidentService {
         xLayerMainnetConfig,
         config.xLayerMainnetRpcUrl,
       ),
+      executionVerifier: new LiveBuyerExecutionVerifier(
+        xLayerMainnetConfig,
+        config.xLayerMainnetRpcUrl,
+      ),
       monitor: new ReviewOnlyMonitor(),
     });
   } else {
@@ -454,6 +459,11 @@ export function getAgentIncidentService(): AgentIncidentService {
       signingPackages: {
         build: async () => {
           throw new Error("Hosted replay does not issue production signing packages");
+        },
+      },
+      executionVerifier: {
+        verify: async () => {
+          throw new Error("Hosted replay does not verify buyer execution reports");
         },
       },
       monitor: new ReviewOnlyMonitor(),

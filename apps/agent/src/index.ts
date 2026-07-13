@@ -15,4 +15,14 @@ export {
   toConceptualA2AResponse,
 } from "@safeexit/agent-service";
 
-export const agentAppPhase = "ASP_INTEGRATION_PREPARATION" as const;
+export {
+  BuyerRescueRuntime,
+  BuyerRuntimeError,
+  Eip1193DestinationWallet,
+  Eip1193LocalSourceSigner,
+  EthSimulateV1AtomicSimulator,
+  buyerConfirmationSchema,
+  buyerExecutionReportSchema,
+} from "@safeexit/buyer-runtime";
+
+export const agentAppPhase = "BUYER_LOCAL_RUNTIME_AVAILABLE" as const;
