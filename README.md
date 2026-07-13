@@ -95,8 +95,8 @@ official-docs-required OKX handoff are documented in
 
 ## Destination-paid X Layer testnet pilot
 
-The X Layer testnet rescue workspace supports multiple destination-paid ERC-20
-routes. ERC-3009 is preferred when its capability and EIP-712 domain are
+The X Layer testnet rescue workspace supports multiple destination-paid asset
+routes. ERC-3009 is preferred for fungible tokens when its capability and EIP-712 domain are
 verified onchain. The reported source signs a short-lived
 `ReceiveWithAuthorization` message and the destination submits it.
 
@@ -107,10 +107,21 @@ the destination to atomically submit `permit` and `transferFrom` through the
 official EIP-5792 wallet methods. In both routes the source submits no
 transaction and pays no network fee.
 
+ERC-721 NFTs can use an ERC-4494 fallback when the explicit collection/token ID
+is owned by the source and the collection reports the ERC-4494 interface plus a
+verifiable EIP-712 domain and nonce. The source signs the NFT permit; the
+destination atomically submits `permit` and `transferFrom` and pays gas.
+
 Authorization signatures remain in browser memory and are never sent to or
-stored by SAFEEXIT. ERC-20s without either route, native OKB, NFTs, approvals,
-airdrops, and positions stay blocked until a verified destination-paid adapter
-exists. A successful testnet pilot is not approval to enable mainnet execution.
+stored by SAFEEXIT. Assets without a verified permit route, native OKB,
+ERC-1155 assets, approvals, airdrops, and positions stay blocked until a
+verified destination-paid adapter exists. A successful testnet pilot is not
+approval to enable mainnet execution.
+
+Native OKB recovery remains non-executable. The adapter package records
+fail-closed requirements for an audited EIP-7702 sponsor or an official X Layer
+private atomic relay, including bytecode allowlisting, signed target/value/gas
+bounds, pinned simulation, no public-mempool fallback, and revocation handling.
 
 One injected wallet exposes one active account at a time. The browser flow is
 therefore sequential: activate the source and sign, keep the tab open, switch

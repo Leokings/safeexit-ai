@@ -11,6 +11,7 @@ import {
   XLAYER_TESTNET_CHAIN_HEX,
   XLAYER_TESTNET_CHAIN_ID,
   type Erc2612RescueAction,
+  type Erc4494RescueAction,
   type GaslessRescueAction,
 } from "./testnet-rescue";
 
@@ -61,9 +62,29 @@ export type SignedErc2612Permit = {
   transferFromData: Hex;
 };
 
+export type Erc4494PermitAuthorization = {
+  actionId: string;
+  collectionAddress: `0x${string}`;
+  owner: `0x${string}`;
+  spender: `0x${string}`;
+  tokenId: bigint;
+  nonce: bigint;
+  deadline: bigint;
+  domain: Erc4494RescueAction["domain"];
+};
+
+export type SignedErc4494Permit = {
+  standard: "ERC4494_PERMIT_ATOMIC_BATCH";
+  authorization: Erc4494PermitAuthorization;
+  signature: Hex;
+  permitData: Hex;
+  transferFromData: Hex;
+};
+
 export type SignedRecoveryAuthorization =
   | SignedEip3009Authorization
-  | SignedErc2612Permit;
+  | SignedErc2612Permit
+  | SignedErc4494Permit;
 
 export type OkxCallsStatus = {
   status: 100 | 200 | 400 | 500;
@@ -117,6 +138,15 @@ const permitTypes = {
   ],
 } as const;
 
+const nftPermitTypes = {
+  Permit: [
+    { name: "spender", type: "address" },
+    { name: "tokenId", type: "uint256" },
+    { name: "nonce", type: "uint256" },
+    { name: "deadline", type: "uint256" },
+  ],
+} as const;
+
 const erc2612SettlementAbi = [
   {
     type: "function",
@@ -143,6 +173,32 @@ const erc2612SettlementAbi = [
       { name: "value", type: "uint256" },
     ],
     outputs: [{ name: "", type: "bool" }],
+  },
+] as const;
+
+const erc4494SettlementAbi = [
+  {
+    type: "function",
+    name: "permit",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "spender", type: "address" },
+      { name: "tokenId", type: "uint256" },
+      { name: "deadline", type: "uint256" },
+      { name: "signature", type: "bytes" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "transferFrom",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "from", type: "address" },
+      { name: "to", type: "address" },
+      { name: "tokenId", type: "uint256" },
+    ],
+    outputs: [],
   },
 ] as const;
 
@@ -485,6 +541,127 @@ export async function signErc2612Permit(
   };
 }
 
+function erc4494TypedDataFor(authorization: Erc4494PermitAuthorization) {
+  return {
+    domain: {
+      name: authorization.domain.name,
+      version: authorization.domain.version,
+      chainId: authorization.domain.chainId,
+      verifyingContract: getAddress(authorization.domain.verifyingContract),
+    },
+    types: nftPermitTypes,
+    primaryType: "Permit" as const,
+    message: {
+      spender: authorization.spender,
+      tokenId: authorization.tokenId,
+      nonce: authorization.nonce,
+      deadline: authorization.deadline,
+    },
+  };
+}
+
+function erc4494TypedDataRpcPayload(authorization: Erc4494PermitAuthorization): string {
+  const typedData = erc4494TypedDataFor(authorization);
+  return JSON.stringify({
+    ...typedData,
+    types: {
+      EIP712Domain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "uint256" },
+        { name: "verifyingContract", type: "address" },
+      ],
+      ...typedData.types,
+    },
+    message: {
+      ...typedData.message,
+      tokenId: typedData.message.tokenId.toString(),
+      nonce: typedData.message.nonce.toString(),
+      deadline: typedData.message.deadline.toString(),
+    },
+  });
+}
+
+export function createErc4494PermitAuthorization(
+  action: Erc4494RescueAction,
+  options: { now?: Date } = {},
+): Erc4494PermitAuthorization {
+  if (action.domain.chainId !== XLAYER_TESTNET_CHAIN_ID) {
+    throw new Error("Only X Layer testnet NFT permit authorizations are enabled");
+  }
+  if (action.collectionAddress.toLowerCase() !== action.domain.verifyingContract.toLowerCase()) {
+    throw new Error("The verified signing domain does not match the NFT collection");
+  }
+  if (action.from.toLowerCase() === action.to.toLowerCase()) {
+    throw new Error("Source and destination must be different");
+  }
+  const now = BigInt(Math.floor((options.now ?? new Date()).getTime() / 1_000));
+  return {
+    actionId: action.actionId,
+    collectionAddress: getAddress(action.collectionAddress),
+    owner: getAddress(action.from),
+    spender: getAddress(action.to),
+    tokenId: BigInt(action.tokenId),
+    nonce: BigInt(action.nonce),
+    deadline: now + 300n,
+    domain: action.domain,
+  };
+}
+
+export function encodeErc4494PermitSettlement(
+  authorization: Erc4494PermitAuthorization,
+  signature: Hex,
+): Pick<SignedErc4494Permit, "permitData" | "transferFromData"> {
+  assertSignature(signature);
+  return {
+    permitData: encodeFunctionData({
+      abi: erc4494SettlementAbi,
+      functionName: "permit",
+      args: [
+        authorization.spender,
+        authorization.tokenId,
+        authorization.deadline,
+        signature,
+      ],
+    }),
+    transferFromData: encodeFunctionData({
+      abi: erc4494SettlementAbi,
+      functionName: "transferFrom",
+      args: [authorization.owner, authorization.spender, authorization.tokenId],
+    }),
+  };
+}
+
+export async function signErc4494Permit(
+  provider: OkxInjectedProvider,
+  action: Erc4494RescueAction,
+  connectedAccount: `0x${string}`,
+  options: { now?: Date } = {},
+): Promise<SignedErc4494Permit> {
+  if (connectedAccount.toLowerCase() !== action.from.toLowerCase()) {
+    throw new Error("Connected account does not match the NFT owner");
+  }
+  const authorization = createErc4494PermitAuthorization(action, options);
+  const result = await provider.request({
+    method: "eth_signTypedData_v4",
+    params: [connectedAccount, erc4494TypedDataRpcPayload(authorization)],
+  });
+  assertSignature(result);
+  const recovered = await recoverTypedDataAddress({
+    ...erc4494TypedDataFor(authorization),
+    signature: result,
+  });
+  if (recovered.toLowerCase() !== authorization.owner.toLowerCase()) {
+    throw new Error("The NFT permit signature does not recover to the reported source");
+  }
+  return {
+    standard: "ERC4494_PERMIT_ATOMIC_BATCH",
+    authorization,
+    signature: result,
+    ...encodeErc4494PermitSettlement(authorization, result),
+  };
+}
+
 export async function requireOkxAtomicBatchCapability(
   provider: OkxInjectedProvider,
   account: `0x${string}`,
@@ -540,6 +717,42 @@ export async function submitErc2612AtomicBatch(
   });
   if (typeof result !== "string" || !/^0x[a-fA-F0-9]{2,512}$/.test(result)) {
     throw new Error("OKX Wallet did not return a valid atomic call identifier");
+  }
+  return result;
+}
+
+export async function submitErc4494AtomicBatch(
+  provider: OkxInjectedProvider,
+  signed: SignedErc4494Permit,
+  connectedAccount: `0x${string}`,
+): Promise<string> {
+  if (connectedAccount.toLowerCase() !== signed.authorization.spender.toLowerCase()) {
+    throw new Error("Only the designated safe destination can submit this NFT permit batch");
+  }
+  const now = BigInt(Math.floor(Date.now() / 1_000));
+  if (now >= signed.authorization.deadline) {
+    throw new Error("The source NFT permit has expired; create a fresh permit");
+  }
+  const chainId = await provider.request({ method: "eth_chainId" });
+  if (typeof chainId !== "string" || chainId.toLowerCase() !== XLAYER_TESTNET_CHAIN_HEX) {
+    throw new Error("OKX Wallet is not connected to X Layer testnet");
+  }
+  await requireOkxAtomicBatchCapability(provider, connectedAccount);
+  const result = await provider.request({
+    method: "wallet_sendCalls",
+    params: [{
+      version: "2.0.0",
+      from: connectedAccount,
+      chainId: XLAYER_TESTNET_CHAIN_HEX,
+      atomicRequired: true,
+      calls: [
+        { to: signed.authorization.collectionAddress, data: signed.permitData, value: "0x0" },
+        { to: signed.authorization.collectionAddress, data: signed.transferFromData, value: "0x0" },
+      ],
+    }],
+  });
+  if (typeof result !== "string" || !/^0x[a-fA-F0-9]{2,512}$/.test(result)) {
+    throw new Error("OKX Wallet did not return a valid NFT atomic call identifier");
   }
   return result;
 }

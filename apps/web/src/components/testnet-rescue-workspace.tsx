@@ -31,7 +31,9 @@ import {
   requireOkxAtomicBatchCapability,
   signEip3009Authorization,
   signErc2612Permit,
+  signErc4494Permit,
   submitErc2612AtomicBatch,
+  submitErc4494AtomicBatch,
   submitEip3009Settlement,
   type SignedRecoveryAuthorization,
 } from "@/lib/okx-wallet";
@@ -65,14 +67,53 @@ function tokenAddresses(value: string): `0x${string}`[] {
   return unique as `0x${string}`[];
 }
 
+function erc721Assets(value: string): Array<{
+  collectionAddress: `0x${string}`;
+  tokenId: string;
+}> {
+  const lines = value.split(/[\r\n,]+/).map((item) => item.trim()).filter(Boolean);
+  const assets = lines.map((line) => {
+    const match = /^(0x[a-fA-F0-9]{40}):(0|[1-9]\d*)$/.exec(line);
+    if (!match || !match[1] || !match[2] || !isAddress(match[1])) {
+      throw new Error(`Invalid ERC-721 entry: ${line}. Use collection:tokenId.`);
+    }
+    return { collectionAddress: getAddress(match[1]), tokenId: match[2] };
+  });
+  const unique = [
+    ...new Map(
+      assets.map((asset) => [
+        `${asset.collectionAddress.toLowerCase()}:${asset.tokenId}`,
+        asset,
+      ]),
+    ).values(),
+  ];
+  if (unique.length > 8) {
+    throw new Error("A maximum of 8 ERC-721 assets can be scanned at once");
+  }
+  return unique;
+}
+
 function actionLabel(actionType: string): string {
   return actionType.toLowerCase().replaceAll("_", " ");
 }
 
 function routeLabel(standard: string): string {
-  return standard === "ERC3009_RECEIVE_WITH_AUTHORIZATION"
-    ? "ERC-3009 direct authorization"
-    : "ERC-2612 atomic permit";
+  switch (standard) {
+    case "ERC3009_RECEIVE_WITH_AUTHORIZATION":
+      return "ERC-3009 direct authorization";
+    case "ERC2612_PERMIT_ATOMIC_BATCH":
+      return "ERC-2612 atomic permit";
+    case "ERC4494_PERMIT_ATOMIC_BATCH":
+      return "ERC-4494 NFT atomic permit";
+    default:
+      return "Unsupported recovery route";
+  }
+}
+
+function routeContract(route: TestnetPreflightResponse["gaslessActions"][number]): EvmAddress {
+  return route.standard === "ERC4494_PERMIT_ATOMIC_BATCH"
+    ? route.collectionAddress
+    : route.tokenAddress;
 }
 
 function routeKey(route: { actionId: string; standard: string }): string {
@@ -108,6 +149,7 @@ export function TestnetRescueWorkspace({
 }) {
   const [connectedAccount, setConnectedAccount] = useState<`0x${string}`>();
   const [tokenInput, setTokenInput] = useState(OFFICIAL_TEST_USDT0);
+  const [nftInput, setNftInput] = useState("");
   const [preflight, setPreflight] = useState<TestnetPreflightResponse>();
   const [authorized, setAuthorized] = useState(false);
   const [selectedRoute, setSelectedRoute] = useState<string>();
@@ -149,7 +191,10 @@ export function TestnetRescueWorkspace({
     const response = await fetch(`/api/rescue/${encodeURIComponent(incidentId)}/preflight`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tokenAddresses: tokenAddresses(tokenInput) }),
+      body: JSON.stringify({
+        tokenAddresses: tokenAddresses(tokenInput),
+        erc721Assets: erc721Assets(nftInput),
+      }),
     });
     const body: unknown = await response.json();
     if (!response.ok) {
@@ -209,19 +254,28 @@ export function TestnetRescueWorkspace({
         chain: xLayerTestnetConfig.chain,
         transport: http(xLayerTestnetConfig.rpcUrls[0]),
       });
-      const result = action.standard === "ERC3009_RECEIVE_WITH_AUTHORIZATION"
-        ? await signEip3009Authorization(provider, action, account)
-        : await (async () => {
-            const destinationAccount = getAddress(action.to);
-            await requireOkxAtomicBatchCapability(provider, destinationAccount);
-            const permit = await signErc2612Permit(provider, action, account);
-            await publicClient.call({
-              account: destinationAccount,
-              to: permit.authorization.tokenAddress,
-              data: permit.permitData,
-            });
-            return permit;
-          })();
+      let result: SignedRecoveryAuthorization;
+      if (action.standard === "ERC3009_RECEIVE_WITH_AUTHORIZATION") {
+        result = await signEip3009Authorization(provider, action, account);
+      } else {
+        const destinationAccount = getAddress(action.to);
+        await requireOkxAtomicBatchCapability(provider, destinationAccount);
+        if (action.standard === "ERC2612_PERMIT_ATOMIC_BATCH") {
+          result = await signErc2612Permit(provider, action, account);
+          await publicClient.call({
+            account: destinationAccount,
+            to: result.authorization.tokenAddress,
+            data: result.permitData,
+          });
+        } else {
+          result = await signErc4494Permit(provider, action, account);
+          await publicClient.call({
+            account: destinationAccount,
+            to: result.authorization.collectionAddress,
+            data: result.permitData,
+          });
+        }
+      }
       setSigned(result);
       setAuthorized(false);
     } catch (nextError) {
@@ -259,7 +313,7 @@ export function TestnetRescueWorkspace({
           data: signed.settlementData,
         });
         hash = await submitEip3009Settlement(provider, signed, account);
-      } else {
+      } else if (signed.standard === "ERC2612_PERMIT_ATOMIC_BATCH") {
         await publicClient.call({
           account,
           to: signed.authorization.tokenAddress,
@@ -280,6 +334,29 @@ export function TestnetRescueWorkspace({
         }
         if (!confirmedHash) {
           throw new Error("The OKX atomic permit batch did not confirm within two minutes.");
+        }
+        hash = confirmedHash;
+      } else {
+        await publicClient.call({
+          account,
+          to: signed.authorization.collectionAddress,
+          data: signed.permitData,
+        });
+        const callsId = await submitErc4494AtomicBatch(provider, signed, account);
+        let confirmedHash: Hex | undefined;
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          const callsStatus = await getOkxCallsStatus(provider, callsId);
+          if (callsStatus.status === 200) {
+            confirmedHash = callsStatus.transactionHashes[0];
+            break;
+          }
+          if (callsStatus.status === 400 || callsStatus.status === 500) {
+            throw new Error("The OKX atomic NFT permit batch failed before confirmation.");
+          }
+          await new Promise((resolve) => setTimeout(resolve, 2_000));
+        }
+        if (!confirmedHash) {
+          throw new Error("The OKX atomic NFT permit batch did not confirm within two minutes.");
         }
         hash = confirmedHash;
       }
@@ -349,7 +426,7 @@ export function TestnetRescueWorkspace({
             <section>
               <div className="border-b border-border pb-4">
                 <p className="font-mono text-[10px] uppercase text-info">01 / Deterministic scan</p>
-                <h2 className="mt-2 text-xl font-semibold">Verify a gasless token path</h2>
+                <h2 className="mt-2 text-xl font-semibold">Verify destination-paid asset paths</h2>
               </div>
               <label className="mt-5 block">
                 <span className="mb-2 block text-sm font-semibold">Known ERC-20 contracts</span>
@@ -362,6 +439,18 @@ export function TestnetRescueWorkspace({
                   className="w-full resize-y rounded-md border border-border-strong bg-background p-3 font-mono text-sm text-foreground placeholder:text-dim focus:border-accent focus:outline focus:outline-1"
                 />
                 <span className="mt-2 block text-xs leading-5 text-muted">Pre-filled with official X Layer testnet USD₮0. SAFEEXIT verifies its ERC-3009 domain onchain before enabling authorization.</span>
+              </label>
+              <label className="mt-5 block">
+                <span className="mb-2 block text-sm font-semibold">Known ERC-721 assets</span>
+                <textarea
+                  value={nftInput}
+                  onChange={(event) => setNftInput(event.target.value)}
+                  rows={3}
+                  placeholder="0xCollection:tokenId one per line"
+                  spellCheck={false}
+                  className="w-full resize-y rounded-md border border-border-strong bg-background p-3 font-mono text-sm text-foreground placeholder:text-dim focus:border-accent focus:outline focus:outline-1"
+                />
+                <span className="mt-2 block text-xs leading-5 text-muted">Only explicitly listed token IDs are checked. ERC-4494 support and ownership are verified onchain before signing.</span>
               </label>
               <Button type="button" className="mt-4" variant="secondary" onClick={() => void refreshPreflight()} disabled={busy !== null}>
                 {busy === "PREFLIGHT" ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
@@ -474,7 +563,8 @@ export function TestnetRescueWorkspace({
               <div className="space-y-2"><span className="block text-muted">Source signs</span><CopyAddress address={source} compact /></div>
               <div className="space-y-2"><span className="block text-muted">Destination receives and pays gas</span><CopyAddress address={destination} compact /></div>
               <div className="flex justify-between gap-4"><span className="text-muted">Route</span><span className="text-right">{nextGaslessAction ? routeLabel(nextGaslessAction.standard) : "None verified"}</span></div>
-              {nextGaslessAction && <div className="space-y-2"><span className="block text-muted">Token contract</span><CopyAddress address={nextGaslessAction.tokenAddress} compact /></div>}
+              {nextGaslessAction && <div className="space-y-2"><span className="block text-muted">Asset contract</span><CopyAddress address={routeContract(nextGaslessAction)} compact /></div>}
+              {nextGaslessAction?.standard === "ERC4494_PERMIT_ATOMIC_BATCH" && <div className="flex justify-between gap-4"><span className="text-muted">Token ID</span><span className="font-mono">{nextGaslessAction.tokenId}</span></div>}
               <div className="flex justify-between gap-4"><span className="text-muted">Authorization</span><Badge variant={signed ? "success" : "neutral"}>{signed ? "SIGNED IN MEMORY" : "NOT SIGNED"}</Badge></div>
               <div className="flex justify-between gap-4"><span className="text-muted">Preflight block</span><span className="font-mono">{preflight?.scan.observedAtBlock ?? "--"}</span></div>
             </div>

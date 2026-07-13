@@ -31,6 +31,9 @@ contract SafeExitDemoTest {
     bytes32 private constant PERMIT_TYPEHASH = keccak256(
         "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
     );
+    bytes32 private constant NFT_PERMIT_TYPEHASH = keccak256(
+        "Permit(address spender,uint256 tokenId,uint256 nonce,uint256 deadline)"
+    );
 
     RescueToken private token;
     DemoNFT private nft;
@@ -113,5 +116,31 @@ contract SafeExitDemoTest {
 
         require(token.balanceOf(DESTINATION) == amount, "permit rescue failed");
         require(token.nonces(COMPROMISED) == 1, "permit nonce not consumed");
+    }
+
+    function testDestinationPaysForNftPermitRescue() public {
+        uint256 compromisedPrivateKey =
+            0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
+        uint256 deadline = block.timestamp + 5 minutes;
+        bytes32 structHash = keccak256(
+            abi.encode(NFT_PERMIT_TYPEHASH, DESTINATION, 1, nft.nonces(1), deadline)
+        );
+        bytes32 digest = keccak256(
+            abi.encodePacked("\x19\x01", nft.DOMAIN_SEPARATOR(), structHash)
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(compromisedPrivateKey, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.startPrank(DESTINATION);
+        nft.permit(DESTINATION, 1, deadline, signature);
+        nft.transferFrom(COMPROMISED, DESTINATION, 1);
+        vm.stopPrank();
+
+        require(nft.ownerOf(1) == DESTINATION, "NFT permit rescue failed");
+        require(nft.nonces(1) == 1, "NFT transfer nonce not consumed");
+
+        vm.prank(DESTINATION);
+        vm.expectRevert();
+        nft.permit(DESTINATION, 1, deadline, signature);
     }
 }

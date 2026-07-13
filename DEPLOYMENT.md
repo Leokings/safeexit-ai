@@ -140,14 +140,19 @@ agent lifecycle stops at `WAITING_FOR_USER`.
 
 ## X Layer testnet destination-paid pilot
 
-For an incident created on chain ID `1952`, the rescue dashboard scans an
-explicit ERC-20 manifest and ranks destination-paid routes. ERC-3009 requires
+For an incident created on chain ID `1952`, the rescue dashboard scans explicit
+ERC-20 and ERC-721 manifests and ranks destination-paid routes. ERC-3009 requires
 verified type-hash, EIP-712 domain, domain separator, and authorization-state
 reads. ERC-2612 requires a verified EIP-712 domain and nonce read, then remains
 provisional until the exact signed permit succeeds and OKX Wallet reports
 atomic batch support. The destination submits either
 `receiveWithAuthorization` or an atomic `permit` plus `transferFrom` batch and
 pays all testnet gas.
+
+ERC-4494 NFT routes additionally require pinned ownership, EIP-165 interface
+support, a verifiable EIP-712 domain, and the token-specific nonce. The exact
+signed permit must recover to the source owner before OKX Wallet receives an
+atomic `permit` plus `transferFrom` request from the destination.
 
 No server credential, relayer key, or private key is used. The short-lived
 signature remains only in the browser tab. Source-funded transactions are
@@ -163,7 +168,12 @@ control has received an independent security review.
 - No mainnet wallet signing, relayer, private transaction, paymaster, Permit2,
   protocol withdrawal, or OKX server-side execution integration is enabled.
   Testnet execution is limited to ERC-3009 and signature-verified ERC-2612
-  destination-paid settlement through the user-controlled OKX Wallet.
+  or ERC-4494 destination-paid settlement through the user-controlled OKX
+  Wallet.
+- Native OKB remains blocked. `@safeexit/adapters` defines the mandatory proof
+  for EIP-7702 sponsorship and private atomic bundles, but exposes neither as
+  executable until official X Layer integration details and an independent
+  delegate-contract audit are available.
 - The in-process rate limiter is defense in depth only. Configure an edge or
   shared rate limiter before accepting untrusted public traffic at scale.
 - Recovery remains best effort because a blockchain cannot distinguish two

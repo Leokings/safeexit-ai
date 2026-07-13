@@ -24,6 +24,7 @@ import {
   testnetPreflightRequestSchema,
   testnetPreflightResponseSchema,
   type Eip712Domain,
+  type GaslessRescueAction,
   XLAYER_TESTNET_CHAIN_ID,
 } from "@/lib/testnet-rescue";
 
@@ -50,6 +51,16 @@ const metadataAbi = [
     stateMutability: "view",
     inputs: [],
     outputs: [{ name: "", type: "uint8" }],
+  },
+] as const;
+
+const nftMetadataAbi = [
+  {
+    type: "function",
+    name: "name",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
   },
 ] as const;
 
@@ -120,6 +131,35 @@ const erc2612CapabilityAbi = [
   },
 ] as const;
 
+const erc4494CapabilityAbi = [
+  {
+    type: "function",
+    name: "supportsInterface",
+    stateMutability: "view",
+    inputs: [{ name: "interfaceId", type: "bytes4" }],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    type: "function",
+    name: "nonces",
+    stateMutability: "view",
+    inputs: [{ name: "tokenId", type: "uint256" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "permit",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "spender", type: "address" },
+      { name: "tokenId", type: "uint256" },
+      { name: "deadline", type: "uint256" },
+      { name: "signature", type: "bytes" },
+    ],
+    outputs: [],
+  },
+] as const;
+
 const eip712DomainTypes = {
   EIP712Domain: [
     { name: "name", type: "string" },
@@ -132,6 +172,8 @@ const eip712DomainTypes = {
 const receiveWithAuthorizationTypehash =
   "0xd099cc98ef71107a616c4f0f941f04c322d8e254fe26b3c6668db87aae413de8";
 const zeroBytes32 = `0x${"00".repeat(32)}` as const;
+const invalidSignature = `0x${"00".repeat(65)}` as const;
+const erc4494InterfaceId = "0x5604e225";
 
 const securityConfig = parseApiSecurityEnvironment(process.env);
 const rateLimiter = new InMemoryRateLimiter(
@@ -287,6 +329,59 @@ async function detectErc2612Permit(
   }
 }
 
+async function detectErc4494Permit(
+  client: ReturnType<typeof createDedicatedPublicClient>,
+  collectionAddress: Address,
+  tokenId: bigint,
+  destinationAddress: Address,
+  blockNumber: bigint,
+): Promise<{ domain: Eip712Domain; nonce: string } | undefined> {
+  const domain = await readVerifiedEip712Domain(client, collectionAddress, blockNumber);
+  if (!domain) {
+    return undefined;
+  }
+  try {
+    const [supported, nonce] = await Promise.all([
+      client.readContract({
+        address: collectionAddress,
+        abi: erc4494CapabilityAbi,
+        functionName: "supportsInterface",
+        args: [erc4494InterfaceId],
+        blockNumber,
+      }),
+      client.readContract({
+        address: collectionAddress,
+        abi: erc4494CapabilityAbi,
+        functionName: "nonces",
+        args: [tokenId],
+        blockNumber,
+      }),
+    ]);
+    if (!supported) {
+      return undefined;
+    }
+    const probeData = encodeFunctionData({
+      abi: erc4494CapabilityAbi,
+      functionName: "permit",
+      args: [destinationAddress, tokenId, 9_999_999_999n, invalidSignature],
+    });
+    try {
+      await client.call({
+        account: destinationAddress,
+        to: collectionAddress,
+        data: probeData,
+        blockNumber,
+      });
+      return undefined;
+    } catch {
+      // The exact signed permit call is still required before browser settlement.
+    }
+    return { domain, nonce: nonce.toString() };
+  } catch {
+    return undefined;
+  }
+}
+
 function json(body: unknown, status: number, headers: Record<string, string> = {}): Response {
   return Response.json(body, {
     status,
@@ -344,6 +439,14 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     const uniqueTokens = [
       ...new Map(input.tokenAddresses.map((address) => [address.toLowerCase(), address])).values(),
     ];
+    const uniqueNfts = [
+      ...new Map(
+        (input.erc721Assets ?? []).map((asset) => [
+          `${asset.collectionAddress.toLowerCase()}:${asset.tokenId}`,
+          asset,
+        ]),
+      ).values(),
+    ];
     const metadata = await Promise.all(
       uniqueTokens.map(async (tokenAddress) => {
         try {
@@ -385,9 +488,54 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         }
       }),
     );
+    const nftMetadata = await Promise.all(
+      uniqueNfts.map(async (asset) => {
+        const address = asset.collectionAddress as Address;
+        const tokenId = BigInt(asset.tokenId);
+        try {
+          const bytecode = await client.getCode({ address, blockNumber: observedAtBlock });
+          if (!bytecode) {
+            return { ...asset, reason: "No collection contract bytecode was found" } as const;
+          }
+          const [name, erc4494Permit] = await Promise.all([
+            client.readContract({
+              address,
+              abi: nftMetadataAbi,
+              functionName: "name",
+              blockNumber: observedAtBlock,
+            }).catch(() => "Unlabelled ERC-721"),
+            detectErc4494Permit(
+              client,
+              address,
+              tokenId,
+              incident.destinationAddress as Address,
+              observedAtBlock,
+            ),
+          ]);
+          return {
+            query: {
+              collectionAddress: asset.collectionAddress,
+              tokenId,
+              name: safeMetadata(name, 128, "Unlabelled ERC-721"),
+            },
+            ...(erc4494Permit ? { erc4494Permit } : {}),
+          } as const;
+        } catch {
+          return { ...asset, reason: "Standard ERC-721 capability reads failed" } as const;
+        }
+      }),
+    );
     const manifestTokens = metadata.flatMap((entry) => ("query" in entry ? [entry.query] : []));
     const omittedMetadata = metadata.flatMap((entry) =>
       "reason" in entry ? [`${entry.tokenAddress}: ${entry.reason}.`] : [],
+    );
+    const manifestNfts = nftMetadata.flatMap((entry) =>
+      "query" in entry ? [entry.query] : [],
+    );
+    const omittedNftMetadata = nftMetadata.flatMap((entry) =>
+      "reason" in entry
+        ? [`${entry.collectionAddress}:${entry.tokenId}: ${entry.reason}.`]
+        : [],
     );
     const reader = new ViemStandardReadClient("x-layer-testnet-rpc", client);
     const scanner = new DeterministicWalletScanner({
@@ -399,15 +547,16 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       chainId: incident.chainId,
       address: incident.sourceAddress,
       observedAtBlock,
-      manifest: { erc20Assets: manifestTokens },
+      manifest: { erc20Assets: manifestTokens, erc721Assets: manifestNfts },
     });
     const scan = walletScanSchema.parse({
       ...report.scan,
       status: "PARTIAL",
       warnings: [
         ...report.scan.warnings,
-        "X Layer testnet signing pilot: discovery is limited to native balance and the submitted ERC-20 manifest.",
+        "X Layer testnet signing pilot: discovery is limited to native balance and the submitted ERC-20/ERC-721 manifest.",
         ...omittedMetadata,
+        ...omittedNftMetadata,
       ],
     });
     await repository.saveWalletScan(scan);
@@ -453,13 +602,47 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           : [],
       ),
     );
+    const metadataByNft = new Map(
+      nftMetadata.flatMap((entry) =>
+        "query" in entry
+          ? [[`${entry.query.collectionAddress.toLowerCase()}:${entry.query.tokenId.toString()}`, entry] as const]
+          : [],
+      ),
+    );
     const successfulActionIds = new Set(
       simulation.results
         .filter((result) => result.status === "SUCCEEDED")
         .map((result) => result.actionId),
     );
-    const gaslessActions = plan.actions.flatMap((action) => {
-      if (action.actionType !== "TRANSFER_ERC20" || !successfulActionIds.has(action.id)) {
+    const gaslessActions = plan.actions.flatMap<GaslessRescueAction>((action) => {
+      if (!successfulActionIds.has(action.id)) {
+        return [];
+      }
+      if (action.actionType === "TRANSFER_ERC721") {
+        const collectionMetadata = metadataByNft.get(
+          `${action.parameters.collectionAddress.toLowerCase()}:${action.parameters.tokenId}`,
+        );
+        if (
+          !collectionMetadata ||
+          !("erc4494Permit" in collectionMetadata) ||
+          !collectionMetadata.erc4494Permit
+        ) {
+          return [];
+        }
+        return [{
+          actionId: action.id,
+          standard: "ERC4494_PERMIT_ATOMIC_BATCH" as const,
+          capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED" as const,
+          collectionAddress: action.parameters.collectionAddress,
+          from: action.sourceAddress,
+          to: action.parameters.recipient,
+          tokenId: action.parameters.tokenId,
+          nonce: collectionMetadata.erc4494Permit.nonce,
+          domain: collectionMetadata.erc4494Permit.domain,
+          requiredWalletCapability: "ATOMIC_BATCH" as const,
+        }];
+      }
+      if (action.actionType !== "TRANSFER_ERC20") {
         return [];
       }
       const tokenMetadata = metadataByToken.get(action.parameters.tokenAddress.toLowerCase());
@@ -504,6 +687,12 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         action.actionType === "TRANSFER_ERC20"
           ? metadataByToken.get(action.parameters.tokenAddress.toLowerCase())
           : undefined;
+      const nftMetadataEntry =
+        action.actionType === "TRANSFER_ERC721"
+          ? metadataByNft.get(
+              `${action.parameters.collectionAddress.toLowerCase()}:${action.parameters.tokenId}`,
+            )
+          : undefined;
       const verifiedEip3009 =
         tokenMetadata &&
         (("eip3009Domain" in tokenMetadata && Boolean(tokenMetadata.eip3009Domain)) ||
@@ -513,6 +702,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         reason:
           action.actionType === "TRANSFER_NATIVE"
             ? "Native rescue requires a verified sponsored EIP-7702 or private atomic bundle path."
+            : action.actionType === "TRANSFER_ERC721" && nftMetadataEntry &&
+                "erc4494Permit" in nftMetadataEntry && nftMetadataEntry.erc4494Permit
+              ? "The NFT supports ERC-4494, but its current-state transfer preflight did not succeed."
+              : action.actionType === "TRANSFER_ERC721"
+                ? "The NFT does not expose a verified ERC-4494 destination-paid permit route."
             : action.actionType === "TRANSFER_ERC20" && verifiedEip3009
               ? "The token supports a destination-paid authorization, but its current-state transfer preflight did not succeed."
               : action.actionType === "TRANSFER_ERC20"

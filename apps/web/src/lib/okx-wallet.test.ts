@@ -5,11 +5,14 @@ import {
   connectOkxWallet,
   createEip3009Authorization,
   createErc2612PermitAuthorization,
+  createErc4494PermitAuthorization,
   ensureXLayerTestnet,
   getOkxCallsStatus,
   signEip3009Authorization,
   signErc2612Permit,
+  signErc4494Permit,
   submitErc2612AtomicBatch,
+  submitErc4494AtomicBatch,
   submitEip3009Settlement,
   type OkxInjectedProvider,
 } from "./okx-wallet";
@@ -27,6 +30,7 @@ const destinationAccount = privateKeyToAccount(
 const source = sourceAccount.address;
 const destination = destinationAccount.address;
 const token = "0x9e29b3AADA05BF2d2c827Af80BD28dC0b9B4fb0c" as const;
+const collection = "0x3333333333333333333333333333333333333333" as const;
 
 const action = gaslessRescueActionSchema.parse({
   actionId: "action:test",
@@ -62,6 +66,24 @@ const permitAction = gaslessRescueActionSchema.parse({
   requiredWalletCapability: "ATOMIC_BATCH",
 });
 
+const nftPermitAction = gaslessRescueActionSchema.parse({
+  actionId: "action:nft-permit-test",
+  standard: "ERC4494_PERMIT_ATOMIC_BATCH",
+  capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED",
+  collectionAddress: collection,
+  from: source,
+  to: destination,
+  tokenId: "42",
+  nonce: "3",
+  domain: {
+    name: "SAFEEXIT Demo NFT",
+    version: "1",
+    chainId: 1_952,
+    verifyingContract: collection,
+  },
+  requiredWalletCapability: "ATOMIC_BATCH",
+});
+
 const receiveWithAuthorizationTypes = {
   ReceiveWithAuthorization: [
     { name: "from", type: "address" },
@@ -78,6 +100,15 @@ const permitTypes = {
     { name: "owner", type: "address" },
     { name: "spender", type: "address" },
     { name: "value", type: "uint256" },
+    { name: "nonce", type: "uint256" },
+    { name: "deadline", type: "uint256" },
+  ],
+} as const;
+
+const nftPermitTypes = {
+  Permit: [
+    { name: "spender", type: "address" },
+    { name: "tokenId", type: "uint256" },
     { name: "nonce", type: "uint256" },
     { name: "deadline", type: "uint256" },
   ],
@@ -129,6 +160,7 @@ class FakeProvider implements OkxInjectedProvider {
           owner?: `0x${string}`;
           spender?: `0x${string}`;
           value: string;
+          tokenId?: string;
           validAfter?: string;
           validBefore?: string;
           nonce: string;
@@ -136,6 +168,19 @@ class FakeProvider implements OkxInjectedProvider {
         };
       };
       if (payload.primaryType === "Permit") {
+        if (payload.message.tokenId !== undefined) {
+          return this.account.signTypedData({
+            domain: payload.domain,
+            types: nftPermitTypes,
+            primaryType: "Permit",
+            message: {
+              spender: payload.message.spender!,
+              tokenId: BigInt(payload.message.tokenId),
+              nonce: BigInt(payload.message.nonce),
+              deadline: BigInt(payload.message.deadline!),
+            },
+          });
+        }
         return this.account.signTypedData({
           domain: payload.domain,
           types: permitTypes,
@@ -341,6 +386,47 @@ describe("OKX injected wallet guardrails", () => {
       transactionHashes: [`0x${"a".repeat(64)}`],
     });
   });
+
+  it("signs an ERC-4494 permit that binds the NFT and destination", async () => {
+    if (nftPermitAction.standard !== "ERC4494_PERMIT_ATOMIC_BATCH") {
+      throw new Error("Expected an ERC-4494 action fixture");
+    }
+    const authorization = createErc4494PermitAuthorization(nftPermitAction, {
+      now: new Date("2026-07-13T12:00:00.000Z"),
+    });
+    expect(authorization.spender).toBe(destination);
+    expect(authorization.tokenId).toBe(42n);
+    expect(authorization.nonce).toBe(3n);
+
+    const signed = await signErc4494Permit(
+      new FakeProvider(),
+      nftPermitAction,
+      source,
+      { now: new Date("2026-07-13T12:00:00.000Z") },
+    );
+    expect(signed.permitData.startsWith("0x745a41bc")).toBe(true);
+    expect(signed.transferFromData.startsWith("0x23b872dd")).toBe(true);
+  });
+
+  it("submits NFT permit and transfer as one destination-paid atomic batch", async () => {
+    if (nftPermitAction.standard !== "ERC4494_PERMIT_ATOMIC_BATCH") {
+      throw new Error("Expected an ERC-4494 action fixture");
+    }
+    const signed = await signErc4494Permit(new FakeProvider(), nftPermitAction, source);
+    const destinationProvider = new FakeProvider(destinationAccount);
+    destinationProvider.chainId = "0x7a0";
+
+    await expect(
+      submitErc4494AtomicBatch(destinationProvider, signed, destination),
+    ).resolves.toBe("0x1234");
+    expect(destinationProvider.calls[2]?.params).toEqual([expect.objectContaining({
+      atomicRequired: true,
+      calls: [
+        { to: collection, data: signed.permitData, value: "0x0" },
+        { to: collection, data: signed.transferFromData, value: "0x0" },
+      ],
+    })]);
+  });
 });
 
 describe("testnet preflight request", () => {
@@ -358,5 +444,16 @@ describe("testnet preflight request", () => {
     expect(() =>
       testnetPreflightRequestSchema.parse({ tokenAddresses: ["not-an-address"] }),
     ).toThrow();
+  });
+
+  it("accepts explicit ERC-721 collection and token ID pairs", () => {
+    expect(testnetPreflightRequestSchema.parse({
+      tokenAddresses: [],
+      erc721Assets: [{ collectionAddress: collection, tokenId: "42" }],
+    }).erc721Assets).toEqual([{ collectionAddress: collection, tokenId: "42" }]);
+    expect(() => testnetPreflightRequestSchema.parse({
+      tokenAddresses: [],
+      erc721Assets: [{ collectionAddress: collection, tokenId: "-1" }],
+    })).toThrow();
   });
 });
