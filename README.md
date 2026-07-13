@@ -76,9 +76,8 @@ The workspace uses npm workspaces under `apps/*` and `packages/*`.
 
 ## Hosted service preparation
 
-Production mode serves the verified demo as a clearly labelled read-only
-replay. The local fixed executor is never exposed in hosted mode. A
-bearer-authenticated, provider-neutral agent lifecycle is available under
+Production has no fixture or replay mode. A bearer-authenticated,
+provider-neutral agent lifecycle is available under
 `/api/agent/jobs`; it supports create, analyze, plan, simulate, strict signing
 package delivery, buyer receipt reporting, monitor, and status operations. The
 hosted service cannot sign or broadcast transactions: source authorization and
@@ -112,6 +111,32 @@ payment, task acceptance, or delivery. Those remain in the official runtime.
 It also does not expose an Agentic Wallet credential or let an Agentic Wallet
 sign for the compromised source EOA. See
 [`packages/okx-transport/README.md`](packages/okx-transport/README.md).
+
+## Direct paid OKX API service
+
+The production fast path is `POST /api/agent/okx/prepare-paid`. It uses the
+official OKX x402 Next.js middleware at a fixed `$0.10` price on X Layer
+mainnet. After payment verification, the endpoint runs scanner, planner, and
+simulation code directly and returns a strict signing package in the same HTTP
+request. It also returns an explanation-only incident analysis. In hosted AI
+mode, DeepSeek may select an intent and existing evidence IDs; deterministic
+code still writes the response and remains the sole source of executable plan
+data. No negotiation loop, polling worker, or encrypted report file is
+involved.
+
+Buyer agents should call this A2MCP endpoint directly. They should not publish
+an A2A task and wait for marketplace events for deterministic preparation.
+The payment wallet and `SAFEEXIT_X402_PAY_TO_ADDRESS` must be different
+addresses; self-payments are rejected before facilitator verification.
+
+The existing agent-to-agent service remains useful for non-standard incident
+support. Deterministic preparation should be listed separately as an API
+service so ordinary rescues do not inherit conversational task latency.
+Payment does not grant execution authority: source signing stays local and the
+destination still performs post-signature simulation and pays settlement gas.
+Model failure, timeout, invalid output, or token-budget overflow falls back to
+the deterministic explanation without changing the signing package. AI usage
+is persisted per SAFEEXIT job for cost accounting.
 
 ## Destination-paid X Layer testnet pilot
 
@@ -154,82 +179,6 @@ therefore sequential: activate the source and sign, keep the tab open, switch
 OKX Wallet to the safe destination, then submit settlement. Both accounts do
 not need to remain connected simultaneously.
 
-## Hackathon demo
-
-The three-minute walkthrough uses only developer-created contracts and public
-Anvil accounts. It demonstrates detection, planning, snapshot simulation,
-decoded review, fixed local signing, execution progress, and final-state
-verification.
-
-### Prepare once
-
-Prerequisites are Node.js 24, `npm install`, and Foundry. The scripts also
-detect workspace-local Foundry binaries in `.tools/foundry`.
-
-```powershell
-npm run demo:prepare
-npm run dev
-```
-
-`demo:prepare` starts a managed hidden Anvil process on `127.0.0.1:8545`, runs
-the Solidity tests, deploys the fixed contracts, seeds the incident, executes
-the complete rescue on an Anvil snapshot, records real gas receipts, verifies
-the final effects, and reverts to the original at-risk state. Open
-`http://localhost:3000/demo`, or use the alternate port printed by Next.js.
-
-### Three-minute story
-
-1. **0:00 - Incident scan:** show `CRITICAL INCIDENT`, 100 SRT, Demo NFT #1,
-   the 50 SRT claimable reward, and the 25 SRT fixed attacker allowance.
-2. **0:30 - AI analysis:** show that every statement cites structured evidence
-   and that AI cannot edit the action list.
-3. **0:55 - Rescue plan:** review claim, ERC-20 transfer, NFT transfer, then
-   approval revocation with dependencies.
-4. **1:20 - Simulation:** show the four real snapshot receipts, measured gas,
-   final-state checks, blocked sweep, and successful snapshot restore.
-5. **1:50 - Review and sign:** confirm source, destination, target contracts,
-   and the authorization statement. Select **Execute fixed Anvil rescue**.
-6. **2:15 - Execution:** watch the four confirmed transactions, then present
-   the final incident report showing 150 SRT and NFT #1 at the destination,
-   zero claimable reward, zero allowance, and zero SRT at the source.
-
-The execution API is disabled in production and for non-local hosts. It can
-spawn only `scripts/demo/run-rescue.ps1`, which refuses chains other than
-`31337` and uses fixed public Anvil accounts, contract addresses, recipient,
-and action signatures. It accepts no RPC URL, wallet, key, calldata, or target
-from the browser.
-
-### Demo commands
-
-```powershell
-npm run demo:prepare  # restart, reseed, and resimulate the managed fixture
-npm run demo:seed     # seed a separately started fresh Anvil chain
-npm run demo:rescue   # terminal fallback for the same fixed rescue
-npm run demo:stop     # stop only the managed SAFEEXIT Anvil process
-npm run contracts:test
-```
-
-`demo:attacker` is an optional failure-path demonstration that can target only
-the fixed developer wallet and sink. It invalidates the seeded walkthrough, so
-run `npm run demo:prepare` afterward.
-
-The mnemonic and private keys in `scripts/demo/common.ps1` are Anvil's public
-development fixtures. Never fund or reuse them.
-
-### Limitations
-
-- Recovery is best effort. An EVM chain cannot distinguish the legitimate owner
-  from another party holding the same private key.
-- The fixed multi-asset demo executor is localhost-only. The separate X Layer
-  testnet pilot supports only verified ERC-3009, ERC-2612, strict DAI-style,
-  and ERC-4494 destination-paid routes.
-- Permit2 discovery, arbitrary protocol positions, production simulation,
-  private submission, paymasters, and OKX-specific execution are not connected.
-- Snapshot success does not guarantee production execution. Gas, ordering,
-  chain state, protocol behavior, and attacker behavior can change.
-- `/` and non-demo `/rescue/[id]` remain review drafts and never claim to scan,
-  sign, or broadcast a production transaction.
-
 ## Phase 7 grounded explanation layer
 
 `@safeexit/ai` accepts only validated `Incident`, `WalletScan`, `RescuePlan`,
@@ -242,8 +191,9 @@ incident snapshot. They cannot author facts, transaction targets, calldata,
 recipients, chain IDs, or execution requests. Display text is produced by the
 grounded renderer and cites the source records used.
 
-No external model provider is configured. The demo chat therefore identifies
-itself as a deterministic fallback and remains fully usable without credentials.
+Production uses a bounded Vercel AI Gateway model when configured. Model
+failure falls back to the deterministic grounded renderer and never changes
+the executable plan.
 
 ## Phase 8 agent-service preparation
 
@@ -289,10 +239,11 @@ npx prisma migrate deploy
 
 `POST /api/incidents` is the first persisted API boundary. It requires the
 ownership confirmation, accepts only strict JSON, enforces a body limit and a
-per-process rate limit, and returns `503 PERSISTENCE_NOT_CONFIGURED` when no
-database is configured. It never falls back to fake persistence. Production
-deployments with multiple instances should replace the in-memory limiter with
-a trusted shared rate-limit adapter at the deployment edge.
+shared PostgreSQL rate limit in production, and returns `503` when persistence
+or request protection is unavailable. It never falls back to fake persistence.
+The agent, paid x402, incident, and preflight boundaries use the same fail-closed
+shared store with separate scopes; development and tests retain an in-memory
+implementation.
 
 The web app applies CSP, clickjacking protection, MIME-sniffing protection,
 referrer policy, permissions policy, and production HSTS. Security logging

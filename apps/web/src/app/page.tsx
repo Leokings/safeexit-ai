@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import {
-  ArrowRight,
   CheckCircle2,
   Eye,
   FileSearch,
@@ -12,7 +10,6 @@ import {
 
 import { StartRescueForm } from "@/components/start-rescue-form";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = {
   title: "Start Rescue",
@@ -76,20 +73,6 @@ export default function HomePage() {
                     {item}
                   </div>
                 ))}
-              </div>
-
-              <div className="mt-8 border-t border-border pt-6">
-                <p className="mb-3 font-mono text-[10px] uppercase text-dim">Verified local fixture</p>
-                <p className="mb-4 text-sm leading-6 text-muted">
-                  Inspect the Anvil scenario built in Phase 5 without connecting a production
-                  wallet.
-                </p>
-                <Button asChild variant="secondary" className="w-full justify-between">
-                  <Link href="/demo">
-                    Open demo scenario
-                    <ArrowRight className="size-4" />
-                  </Link>
-                </Button>
               </div>
             </div>
           </aside>

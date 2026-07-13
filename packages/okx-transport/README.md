@@ -19,13 +19,14 @@ Required task fields are:
   `SAFEEXIT_AUTHORIZATION_STATEMENT`
 
 X Layer testnet tasks (`chainId: 1952`) additionally require an explicit
-`assetManifest.erc20TokenAddresses` list with one to eight contracts. SAFEEXIT
-reads metadata and balances for only those contracts at a pinned testnet block.
-The manifest is rejected on mainnet, where the existing OKX-backed discovery
-path is used instead.
+`assetManifest` accepts a bounded batch of ERC-20 contract addresses and
+explicit ERC-721/ERC-1155 `collectionAddress` plus `tokenId` entries. SAFEEXIT
+reads only those identified assets at a pinned block. Testnet requires the
+manifest. Mainnet can merge it with OKX-backed ERC-20 discovery so explicitly
+requested contracts are not omitted when an indexer does not return them.
 
-The canonical testnet manifest is committed into the persisted incident scope.
-Reusing an OKX job ID with a different token list is rejected by the same
+The canonical manifest is committed into the persisted incident scope.
+Reusing an OKX job ID with a different asset list is rejected by the same
 idempotency guard that protects source, destination, and chain binding.
 
 Unknown fields are rejected. Private keys, seed phrases, credentials,
@@ -45,6 +46,28 @@ signatures, and arbitrary calldata have no accepted field.
 
 Both endpoints use the existing server-only `SAFEEXIT_AGENT_API_KEY` bearer
 credential. `SAFEEXIT_OKX_PROVIDER_AGENT_ID` pins requests to the registered ASP.
+
+## Paid direct flow
+
+`POST /api/agent/okx/prepare-paid` exposes the deterministic preparation
+pipeline as a standardized paid API service. The official OKX x402 middleware
+verifies and settles the `$0.10` payment on X Layer before returning the
+resource. The public request uses `safeexit-okx-x402-v1`; it does not accept a
+provider override, marketplace job ID, source signature, or credential.
+
+The bridge derives its internal idempotency scope from `requestId` and the
+configured provider identity, then returns
+`safeexit-okx-x402-deliverable-v1`. The hosted route may attach a bounded
+`incidentAnalysis` whose authority is explicitly `EXPLANATION_ONLY`; its
+executable plan source is always `DETERMINISTIC`. Model failure falls back to
+deterministic grounded output and cannot alter the signing package. This path
+avoids negotiation, event polling, and file delivery. The agent-to-agent path
+remains available for custom incident work.
+
+Buyer integrations must invoke the endpoint directly and use a payment wallet
+that is different from the provider payout address. SAFEEXIT rejects
+self-payment credentials before settlement so an invalid test fails quickly
+instead of entering the marketplace watch lifecycle.
 
 The bridge does not submit an ASP listing and does not claim that an Agentic
 Wallet can sign for a separate compromised EOA. Native-asset recovery remains

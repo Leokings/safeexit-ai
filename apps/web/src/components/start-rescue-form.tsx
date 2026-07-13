@@ -3,7 +3,12 @@
 import { useRouter } from "next/navigation";
 import { ArrowRight, ShieldCheck, TriangleAlert } from "lucide-react";
 import { FormEvent, useState } from "react";
-import { isAddress } from "viem";
+import { getAddress, isAddress } from "viem";
+
+import {
+  evmAddressSchema,
+  type RescueAssetManifest,
+} from "@safeexit/shared";
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -12,14 +17,95 @@ import { Button } from "@/components/ui/button";
 type FormErrors = {
   source?: string;
   destination?: string;
+  assets?: string;
   authorization?: string;
 };
+
+function parseContractAddresses(
+  value: string,
+): RescueAssetManifest["erc20TokenAddresses"] {
+  const entries = value.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean);
+  const invalid = entries.find((entry) => !isAddress(entry));
+  if (invalid) {
+    throw new Error(`Invalid ERC-20 contract address: ${invalid}`);
+  }
+  return [
+    ...new Map(
+      entries.map((entry) => [
+        entry.toLowerCase(),
+        evmAddressSchema.parse(getAddress(entry)),
+      ]),
+    ).values(),
+  ];
+}
+
+function parseNftAssets(
+  value: string,
+  standard: "ERC-721" | "ERC-1155",
+): RescueAssetManifest["erc721Assets"] {
+  const entries = value.split(/[\r\n,]+/).map((item) => item.trim()).filter(Boolean);
+  const assets = entries.map((entry) => {
+    const match = /^(0x[a-fA-F0-9]{40}):(0|[1-9]\d*)$/.exec(entry);
+    if (!match?.[1] || !match[2] || !isAddress(match[1])) {
+      throw new Error(`Invalid ${standard} entry: ${entry}. Use contract:tokenId.`);
+    }
+    return {
+      collectionAddress: evmAddressSchema.parse(getAddress(match[1])),
+      tokenId: match[2],
+    };
+  });
+  return [
+    ...new Map(
+      assets.map((asset) => [
+        `${asset.collectionAddress.toLowerCase()}:${asset.tokenId}`,
+        asset,
+      ]),
+    ).values(),
+  ];
+}
+
+function parseAssetManifest(
+  erc20Input: string,
+  erc721Input: string,
+  erc1155Input: string,
+): RescueAssetManifest {
+  const manifest = {
+    erc20TokenAddresses: parseContractAddresses(erc20Input),
+    erc721Assets: parseNftAssets(erc721Input, "ERC-721"),
+    erc1155Assets: parseNftAssets(erc1155Input, "ERC-1155"),
+  };
+  if (
+    manifest.erc20TokenAddresses.length === 0 &&
+    manifest.erc721Assets.length === 0 &&
+    manifest.erc1155Assets.length === 0
+  ) {
+    throw new Error("Enter at least one asset contract to rescue.");
+  }
+  if (
+    manifest.erc20TokenAddresses.length > 8 ||
+    manifest.erc721Assets.length > 8 ||
+    manifest.erc1155Assets.length > 8
+  ) {
+    throw new Error("Enter no more than 8 assets of any one token standard.");
+  }
+  const total =
+    manifest.erc20TokenAddresses.length +
+    manifest.erc721Assets.length +
+    manifest.erc1155Assets.length;
+  if (total > 16) {
+    throw new Error("Enter no more than 16 assets in one rescue incident.");
+  }
+  return manifest;
+}
 
 export function StartRescueForm() {
   const router = useRouter();
   const [source, setSource] = useState("");
   const [destination, setDestination] = useState("");
   const [chainId, setChainId] = useState("1952");
+  const [erc20Input, setErc20Input] = useState("");
+  const [erc721Input, setErc721Input] = useState("");
+  const [erc1155Input, setErc1155Input] = useState("");
   const [authorized, setAuthorized] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
@@ -40,9 +126,15 @@ export function StartRescueForm() {
     if (!authorized) {
       nextErrors.authorization = "Authorisation confirmation is required.";
     }
+    let assetManifest: RescueAssetManifest | undefined;
+    try {
+      assetManifest = parseAssetManifest(erc20Input, erc721Input, erc1155Input);
+    } catch (error) {
+      nextErrors.assets = error instanceof Error ? error.message : "Asset list is invalid.";
+    }
 
     setErrors(nextErrors);
-    if (Object.keys(nextErrors).length > 0) {
+    if (Object.keys(nextErrors).length > 0 || !assetManifest) {
       return;
     }
 
@@ -56,6 +148,7 @@ export function StartRescueForm() {
           chainId: Number(chainId),
           sourceAddress: source,
           destinationAddress: destination,
+          assetManifest,
           authorizationConfirmed: true,
         }),
       });
@@ -113,6 +206,54 @@ export function StartRescueForm() {
           <option value="196">X Layer mainnet - read-only</option>
         </select>
       </label>
+
+      <div className="mt-6 border-t border-border pt-5">
+        <div className="mb-4">
+          <p className="text-sm font-semibold">Assets to rescue</p>
+          <p className="mt-1 text-xs leading-5 text-muted">
+            Paste every known contract in this incident. SAFEEXIT verifies each entry onchain before it can enter a rescue plan.
+          </p>
+        </div>
+        <label className="block">
+          <span className="mb-2 block text-xs font-semibold uppercase text-dim">ERC-20 contracts</span>
+          <textarea
+            value={erc20Input}
+            onChange={(event) => setErc20Input(event.target.value)}
+            rows={3}
+            placeholder="0x... one contract per line"
+            spellCheck={false}
+            aria-invalid={Boolean(errors.assets)}
+            className="w-full resize-y rounded-md border border-border-strong bg-background p-3 font-mono text-sm text-foreground placeholder:text-dim focus:border-accent focus:outline focus:outline-1"
+          />
+        </label>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <span className="mb-2 block text-xs font-semibold uppercase text-dim">ERC-721 assets</span>
+            <textarea
+              value={erc721Input}
+              onChange={(event) => setErc721Input(event.target.value)}
+              rows={3}
+              placeholder="0xCollection:tokenId"
+              spellCheck={false}
+              aria-invalid={Boolean(errors.assets)}
+              className="w-full resize-y rounded-md border border-border-strong bg-background p-3 font-mono text-sm text-foreground placeholder:text-dim focus:border-accent focus:outline focus:outline-1"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-xs font-semibold uppercase text-dim">ERC-1155 assets</span>
+            <textarea
+              value={erc1155Input}
+              onChange={(event) => setErc1155Input(event.target.value)}
+              rows={3}
+              placeholder="0xCollection:tokenId"
+              spellCheck={false}
+              aria-invalid={Boolean(errors.assets)}
+              className="w-full resize-y rounded-md border border-border-strong bg-background p-3 font-mono text-sm text-foreground placeholder:text-dim focus:border-accent focus:outline focus:outline-1"
+            />
+          </label>
+        </div>
+        <p className="mt-2 min-h-5 text-xs text-danger">{errors.assets}</p>
+      </div>
 
       <div className="mt-6 border-y border-border py-5">
         <label className="flex cursor-pointer items-start gap-3">

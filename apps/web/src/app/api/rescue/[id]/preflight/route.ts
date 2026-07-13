@@ -1,16 +1,17 @@
-import { createHash } from "node:crypto";
-
 import { createDedicatedPublicClient, xLayerTestnetConfig } from "@safeexit/chain";
 import { getPrismaClient, PrismaSafeExitRepository } from "@safeexit/persistence";
 import { computePlanIntegrityHash, DeterministicRescuePlanner } from "@safeexit/planner";
 import { DeterministicWalletScanner, ViemStandardReadClient } from "@safeexit/scanner";
 import {
   ApiInputError,
-  InMemoryRateLimiter,
-  parseApiSecurityEnvironment,
   parseJsonBody,
 } from "@safeexit/security";
-import { rescuePlanSchema, walletScanSchema, type RescuePlan } from "@safeexit/shared";
+import {
+  rescuePlanSchema,
+  walletScanSchema,
+  type RescueAssetManifest,
+  type RescuePlan,
+} from "@safeexit/shared";
 import {
   LocalSimulationProvider,
   simulateRescuePlan,
@@ -25,6 +26,7 @@ import {
 } from "viem";
 
 import { parseDeploymentEnvironment } from "@/lib/deployment-env";
+import { rateLimitPublicRequest } from "@/lib/agent-http";
 import {
   eip712DomainSchema,
   testnetPreflightRequestSchema,
@@ -224,18 +226,6 @@ const zeroBytes32 = `0x${"00".repeat(32)}` as const;
 const invalidSignature = `0x${"00".repeat(65)}` as const;
 const erc4494InterfaceId = "0x5604e225";
 
-const securityConfig = parseApiSecurityEnvironment(process.env);
-const rateLimiter = new InMemoryRateLimiter(
-  Math.min(securityConfig.maxRequests, 10),
-  securityConfig.windowMs,
-);
-
-function clientKey(request: Request): string {
-  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const address = forwarded || request.headers.get("x-real-ip") || "unknown";
-  return createHash("sha256").update(address.slice(0, 256)).digest("hex");
-}
-
 function safeMetadata(value: string, maximum: number, fallback: string): string {
   const printable = value.replace(/[^\x20-\x7E]/g, "").trim().slice(0, maximum);
   return printable || fallback;
@@ -243,6 +233,27 @@ function safeMetadata(value: string, maximum: number, fallback: string): string 
 
 function safeDomainText(value: string, maximum: number): string {
   return value.replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, maximum);
+}
+
+function manifestKeys(manifest: RescueAssetManifest): string[] {
+  return [
+    ...manifest.erc20TokenAddresses.map(
+      (address) => `erc20:${address.toLowerCase()}`,
+    ),
+    ...manifest.erc721Assets.map(
+      (asset) => `erc721:${asset.collectionAddress.toLowerCase()}:${asset.tokenId}`,
+    ),
+    ...manifest.erc1155Assets.map(
+      (asset) => `erc1155:${asset.collectionAddress.toLowerCase()}:${asset.tokenId}`,
+    ),
+  ].sort();
+}
+
+function sameManifest(
+  expected: RescueAssetManifest,
+  supplied: RescueAssetManifest,
+): boolean {
+  return JSON.stringify(manifestKeys(expected)) === JSON.stringify(manifestKeys(supplied));
 }
 
 async function readVerifiedEip712Domain(
@@ -529,14 +540,25 @@ function json(body: unknown, status: number, headers: Record<string, string> = {
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function POST(request: Request, context: RouteContext): Promise<Response> {
-  const decision = rateLimiter.consume(clientKey(request));
-  const rateHeaders = {
-    "RateLimit-Limit": String(decision.limit),
-    "RateLimit-Remaining": String(decision.remaining),
-    "RateLimit-Reset": String(Math.ceil(decision.resetAt / 1_000)),
-  };
-  if (!decision.allowed) {
-    return json({ code: "RATE_LIMITED", message: "Too many preflight requests" }, 429, rateHeaders);
+  let rateHeaders: Record<string, string> = {};
+  try {
+    const rateLimit = await rateLimitPublicRequest(request, "preflight", 10);
+    rateHeaders = rateLimit.headers;
+    if (!rateLimit.allowed) {
+      return json(
+        { code: "RATE_LIMITED", message: "Too many preflight requests" },
+        429,
+        rateHeaders,
+      );
+    }
+  } catch {
+    return json(
+      {
+        code: "RATE_LIMIT_UNAVAILABLE",
+        message: "Preflight request protection is temporarily unavailable",
+      },
+      503,
+    );
   }
 
   try {
@@ -552,6 +574,24 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     if (incident.chainId !== XLAYER_TESTNET_CHAIN_ID) {
       return json(
         { code: "TESTNET_ONLY", message: "Browser signing is restricted to X Layer testnet" },
+        409,
+        rateHeaders,
+      );
+    }
+    const suppliedManifest: RescueAssetManifest = {
+      erc20TokenAddresses: input.tokenAddresses,
+      erc721Assets: input.erc721Assets,
+      erc1155Assets: input.erc1155Assets,
+    };
+    if (
+      incident.assetManifest &&
+      !sameManifest(incident.assetManifest, suppliedManifest)
+    ) {
+      return json(
+        {
+          code: "ASSET_SCOPE_MISMATCH",
+          message: "Preflight assets must exactly match the incident asset manifest",
+        },
         409,
         rateHeaders,
       );
@@ -579,6 +619,14 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     const uniqueNfts = [
       ...new Map(
         (input.erc721Assets ?? []).map((asset) => [
+          `${asset.collectionAddress.toLowerCase()}:${asset.tokenId}`,
+          asset,
+        ]),
+      ).values(),
+    ];
+    const uniqueErc1155Assets = [
+      ...new Map(
+        input.erc1155Assets.map((asset) => [
           `${asset.collectionAddress.toLowerCase()}:${asset.tokenId}`,
           asset,
         ]),
@@ -677,6 +725,20 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         }
       }),
     );
+    const erc1155Metadata = await Promise.all(
+      uniqueErc1155Assets.map(async (asset) => {
+        const address = asset.collectionAddress as Address;
+        const bytecode = await client.getCode({ address, blockNumber: observedAtBlock });
+        return bytecode
+          ? {
+              query: {
+                collectionAddress: asset.collectionAddress,
+                tokenId: BigInt(asset.tokenId),
+              },
+            } as const
+          : { ...asset, reason: "No collection contract bytecode was found" } as const;
+      }),
+    );
     const manifestTokens = metadata.flatMap((entry) => ("query" in entry ? [entry.query] : []));
     const omittedMetadata = metadata.flatMap((entry) =>
       "reason" in entry ? [`${entry.tokenAddress}: ${entry.reason}.`] : [],
@@ -685,6 +747,14 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       "query" in entry ? [entry.query] : [],
     );
     const omittedNftMetadata = nftMetadata.flatMap((entry) =>
+      "reason" in entry
+        ? [`${entry.collectionAddress}:${entry.tokenId}: ${entry.reason}.`]
+        : [],
+    );
+    const manifestErc1155Assets = erc1155Metadata.flatMap((entry) =>
+      "query" in entry ? [entry.query] : [],
+    );
+    const omittedErc1155Metadata = erc1155Metadata.flatMap((entry) =>
       "reason" in entry
         ? [`${entry.collectionAddress}:${entry.tokenId}: ${entry.reason}.`]
         : [],
@@ -699,16 +769,21 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       chainId: incident.chainId,
       address: incident.sourceAddress,
       observedAtBlock,
-      manifest: { erc20Assets: manifestTokens, erc721Assets: manifestNfts },
+      manifest: {
+        erc20Assets: manifestTokens,
+        erc721Assets: manifestNfts,
+        erc1155Assets: manifestErc1155Assets,
+      },
     });
     const scan = walletScanSchema.parse({
       ...report.scan,
       status: "PARTIAL",
       warnings: [
         ...report.scan.warnings,
-        "X Layer testnet signing pilot: discovery is limited to native balance and the submitted ERC-20/ERC-721 manifest.",
+        "X Layer testnet signing pilot: discovery is limited to native balance and the submitted ERC-20/ERC-721/ERC-1155 manifest.",
         ...omittedMetadata,
         ...omittedNftMetadata,
+        ...omittedErc1155Metadata,
       ],
     });
     await repository.saveWalletScan(scan);

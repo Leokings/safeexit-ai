@@ -17,7 +17,11 @@ import { useState } from "react";
 import { createPublicClient, getAddress, http, isAddress, type Hex } from "viem";
 
 import { xLayerTestnetConfig } from "@safeexit/chain";
-import type { EvmAddress, RescueAction } from "@safeexit/shared";
+import type {
+  EvmAddress,
+  RescueAction,
+  RescueAssetManifest,
+} from "@safeexit/shared";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,8 +47,6 @@ import {
   testnetPreflightResponseSchema,
   type TestnetPreflightResponse,
 } from "@/lib/testnet-rescue";
-
-const OFFICIAL_TEST_USDT0 = "0x9e29b3aada05bf2d2c827af80bd28dc0b9b4fb0c";
 
 type SubmittedTransaction = {
   actionId: string;
@@ -93,6 +95,21 @@ function erc721Assets(value: string): Array<{
     throw new Error("A maximum of 8 ERC-721 assets can be scanned at once");
   }
   return unique;
+}
+
+function erc1155Assets(value: string): Array<{
+  collectionAddress: `0x${string}`;
+  tokenId: string;
+}> {
+  return erc721Assets(value);
+}
+
+function nftAssetInput(
+  assets: RescueAssetManifest["erc721Assets"] | undefined,
+): string {
+  return (assets ?? [])
+    .map((asset) => `${asset.collectionAddress}:${asset.tokenId}`)
+    .join("\n");
 }
 
 function actionLabel(actionType: string): string {
@@ -146,14 +163,23 @@ export function TestnetRescueWorkspace({
   incidentId,
   source,
   destination,
+  assetManifest,
 }: {
   incidentId: string;
   source: EvmAddress;
   destination: EvmAddress;
+  assetManifest?: RescueAssetManifest;
 }) {
   const [connectedAccount, setConnectedAccount] = useState<`0x${string}`>();
-  const [tokenInput, setTokenInput] = useState(OFFICIAL_TEST_USDT0);
-  const [nftInput, setNftInput] = useState("");
+  const [tokenInput, setTokenInput] = useState(
+    () => assetManifest?.erc20TokenAddresses.join("\n") ?? "",
+  );
+  const [nftInput, setNftInput] = useState(
+    () => nftAssetInput(assetManifest?.erc721Assets),
+  );
+  const [erc1155Input, setErc1155Input] = useState(
+    () => nftAssetInput(assetManifest?.erc1155Assets),
+  );
   const [preflight, setPreflight] = useState<TestnetPreflightResponse>();
   const [authorized, setAuthorized] = useState(false);
   const [selectedRoute, setSelectedRoute] = useState<string>();
@@ -161,6 +187,7 @@ export function TestnetRescueWorkspace({
   const [busy, setBusy] = useState<"CONNECT" | "PREFLIGHT" | "SIGN" | "SETTLE" | null>(null);
   const [error, setError] = useState<string>();
   const [transactions, setTransactions] = useState<SubmittedTransaction[]>([]);
+  const manifestLocked = Boolean(assetManifest);
 
   const sourceConnected = connectedAccount?.toLowerCase() === source.toLowerCase();
   const destinationConnected = connectedAccount?.toLowerCase() === destination.toLowerCase();
@@ -198,6 +225,7 @@ export function TestnetRescueWorkspace({
       body: JSON.stringify({
         tokenAddresses: tokenAddresses(tokenInput),
         erc721Assets: erc721Assets(nftInput),
+        erc1155Assets: erc1155Assets(erc1155Input),
       }),
     });
     const body: unknown = await response.json();
@@ -467,18 +495,20 @@ export function TestnetRescueWorkspace({
                 <textarea
                   value={tokenInput}
                   onChange={(event) => setTokenInput(event.target.value)}
+                  readOnly={manifestLocked}
                   rows={3}
                   placeholder="0x... one address per line"
                   spellCheck={false}
                   className="w-full resize-y rounded-md border border-border-strong bg-background p-3 font-mono text-sm text-foreground placeholder:text-dim focus:border-accent focus:outline focus:outline-1"
                 />
-                <span className="mt-2 block text-xs leading-5 text-muted">Pre-filled with official X Layer testnet USD₮0. SAFEEXIT verifies its ERC-3009 domain onchain before enabling authorization.</span>
+                <span className="mt-2 block text-xs leading-5 text-muted">Every submitted contract is verified independently at the same pinned block before authorization is enabled.</span>
               </label>
               <label className="mt-5 block">
                 <span className="mb-2 block text-sm font-semibold">Known ERC-721 assets</span>
                 <textarea
                   value={nftInput}
                   onChange={(event) => setNftInput(event.target.value)}
+                  readOnly={manifestLocked}
                   rows={3}
                   placeholder="0xCollection:tokenId one per line"
                   spellCheck={false}
@@ -486,6 +516,24 @@ export function TestnetRescueWorkspace({
                 />
                 <span className="mt-2 block text-xs leading-5 text-muted">Only explicitly listed token IDs are checked. ERC-4494 support and ownership are verified onchain before signing.</span>
               </label>
+              <label className="mt-5 block">
+                <span className="mb-2 block text-sm font-semibold">Known ERC-1155 assets</span>
+                <textarea
+                  value={erc1155Input}
+                  onChange={(event) => setErc1155Input(event.target.value)}
+                  readOnly={manifestLocked}
+                  rows={3}
+                  placeholder="0xCollection:tokenId one per line"
+                  spellCheck={false}
+                  className="w-full resize-y rounded-md border border-border-strong bg-background p-3 font-mono text-sm text-foreground placeholder:text-dim focus:border-accent focus:outline focus:outline-1"
+                />
+                <span className="mt-2 block text-xs leading-5 text-muted">ERC-1155 balances are verified onchain. Assets remain blocked unless a destination-paid recovery adapter is available.</span>
+              </label>
+              {manifestLocked && (
+                <p className="mt-4 text-xs leading-5 text-info">
+                  This batch is committed to the incident. Start a new incident to change its asset contracts.
+                </p>
+              )}
               <Button type="button" className="mt-4" variant="secondary" onClick={() => void refreshPreflight()} disabled={busy !== null}>
                 {busy === "PREFLIGHT" ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
                 Run fresh preflight

@@ -6,6 +6,10 @@ const identifierSchema = z.string().min(1).max(256);
 const timestampSchema = z.string().datetime({ offset: true });
 const blockNumberSchema = z.string().regex(/^(0|[1-9]\d*)$/);
 const baseUnitAmountSchema = z.string().regex(/^(0|[1-9]\d*)$/);
+const positiveBaseUnitAmountSchema = baseUnitAmountSchema.refine(
+  (value) => BigInt(value) > 0n,
+  "Amount must be greater than zero",
+);
 const hashSchema = z.string().regex(/^0x[a-fA-F0-9]{64}$/);
 const bytes32Schema = hashSchema;
 
@@ -125,7 +129,7 @@ const eip3009SigningRequestSchema = z.strictObject({
     message: z.strictObject({
       from: evmAddressSchema,
       to: evmAddressSchema,
-      value: baseUnitAmountSchema,
+      value: positiveBaseUnitAmountSchema,
       validAfter: baseUnitAmountSchema,
       validBefore: baseUnitAmountSchema,
       nonce: bytes32Schema,
@@ -152,7 +156,7 @@ const erc2612SigningRequestSchema = z.strictObject({
     message: z.strictObject({
       owner: evmAddressSchema,
       spender: evmAddressSchema,
-      value: baseUnitAmountSchema,
+      value: positiveBaseUnitAmountSchema,
       nonce: baseUnitAmountSchema,
       deadline: baseUnitAmountSchema,
     }),
@@ -219,7 +223,7 @@ const eip3009PackageSchema = z.strictObject({
   ...packageCommonShape,
   route: z.literal("ERC3009_RECEIVE_WITH_AUTHORIZATION"),
   tokenAddress: evmAddressSchema,
-  amount: baseUnitAmountSchema,
+  amount: positiveBaseUnitAmountSchema,
   sourceSigningRequests: z.tuple([eip3009SigningRequestSchema]),
   destinationSettlement: z.strictObject({
     ...settlementCommonShape,
@@ -232,7 +236,7 @@ const erc2612PackageSchema = z.strictObject({
   ...packageCommonShape,
   route: z.literal("ERC2612_PERMIT_ATOMIC_BATCH"),
   tokenAddress: evmAddressSchema,
-  amount: baseUnitAmountSchema,
+  amount: positiveBaseUnitAmountSchema,
   sourceSigningRequests: z.tuple([erc2612SigningRequestSchema]),
   destinationSettlement: z.strictObject({
     ...settlementCommonShape,
@@ -248,7 +252,7 @@ const daiPermitPackageSchema = z.strictObject({
   ...packageCommonShape,
   route: z.literal("DAI_PERMIT_ATOMIC_BATCH"),
   tokenAddress: evmAddressSchema,
-  amount: baseUnitAmountSchema,
+  amount: positiveBaseUnitAmountSchema,
   sourceSigningRequests: z.tuple([daiSigningRequestSchema, daiSigningRequestSchema]),
   destinationSettlement: z.strictObject({
     ...settlementCommonShape,
@@ -288,6 +292,13 @@ export const signingPackageSchema = z
     const sameAddress = (left: string, right: string) =>
       left.toLowerCase() === right.toLowerCase();
     const expiry = String(Math.floor(Date.parse(value.expiresAt) / 1_000));
+    if (Date.parse(value.simulation.expiresAt) <= Date.parse(value.expiresAt)) {
+      context.addIssue({
+        code: "custom",
+        message: "Committed simulation must outlive the signing package",
+        path: ["simulation", "expiresAt"],
+      });
+    }
     if (value.sourceAddress.toLowerCase() === value.destinationAddress.toLowerCase()) {
       context.addIssue({
         code: "custom",
@@ -332,11 +343,16 @@ export const signingPackageSchema = z
     });
     if (value.route === "ERC3009_RECEIVE_WITH_AUTHORIZATION") {
       const message = value.sourceSigningRequests[0].typedData.message;
+      const validAfter = BigInt(message.validAfter);
+      const validBefore = BigInt(message.validBefore);
       if (
         !sameAddress(message.from, value.sourceAddress) ||
         !sameAddress(message.to, value.destinationAddress) ||
         message.value !== value.amount ||
-        message.validBefore !== expiry
+        message.validBefore !== expiry ||
+        validAfter >= validBefore ||
+        validBefore - validAfter > 600n ||
+        /^0x0{64}$/i.test(message.nonce)
       ) {
         context.addIssue({
           code: "custom",

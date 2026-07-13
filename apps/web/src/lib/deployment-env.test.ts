@@ -1,21 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { createHostedDemoState } from "./hosted-demo-fixture";
 import { parseDeploymentEnvironment } from "./deployment-env";
 
 describe("deployment environment", () => {
-  it("keeps local execution and the agent disabled by default in development", () => {
+  it("keeps the agent disabled by default in development", () => {
     const config = parseDeploymentEnvironment({ NODE_ENV: "development" });
-    expect(config.demoMode).toBe("LOCAL_ANVIL");
     expect(config.agentMode).toBe("DISABLED");
     expect(config.agentStore).toBe("MEMORY");
+    expect(config.x402Mode).toBe("DISABLED");
+    expect(config.aiMaxEstimatedInputTokens).toBe(12_000);
+    expect(config.aiMaxOutputTokens).toBe(256);
+    expect(config.aiTimeoutMs).toBe(8_000);
   });
 
-  it("defaults production to a read-only demo and database persistence", () => {
+  it("defaults production to a disabled agent and database persistence", () => {
     const config = parseDeploymentEnvironment({ NODE_ENV: "production" });
-    expect(config.demoMode).toBe("HOSTED_REPLAY");
     expect(config.agentMode).toBe("DISABLED");
     expect(config.agentStore).toBe("DATABASE");
+    expect(config.x402Mode).toBe("DISABLED");
   });
 
   it("requires a sufficiently long server-side agent key", () => {
@@ -35,11 +37,13 @@ describe("deployment environment", () => {
       OKX_WEB3_SECRET_KEY: "secret-key",
       OKX_WEB3_PASSPHRASE: "passphrase",
       XLAYER_MAINNET_RPC_URL: "https://xlayer.example/rpc",
+      ETHEREUM_MAINNET_RPC_URL: "https://ethereum.example/rpc",
       SAFEEXIT_OKX_PROVIDER_AGENT_ID: "5196",
     });
     expect(config.agentMode).toBe("LIVE_READONLY");
     expect(config.okxWeb3ApiKey).toBe("api-key");
     expect(config.xLayerMainnetRpcUrl).toBe("https://xlayer.example/rpc");
+    expect(config.ethereumMainnetRpcUrl).toBe("https://ethereum.example/rpc");
     expect(config.okxProviderAgentId).toBe("5196");
   });
 
@@ -50,10 +54,24 @@ describe("deployment environment", () => {
     })).toThrow();
   });
 
-  it("marks the hosted fixture as non-executable replay data", () => {
-    const state = createHostedDemoState();
-    expect(state.availability).toBe("READY");
-    expect(state.executionMode).toBe("READ_ONLY_REPLAY");
-    expect(state.actualState).toBe("AT_RISK");
+  it("parses bounded hosted-model controls and rejects excessive output", () => {
+    const config = parseDeploymentEnvironment({
+      NODE_ENV: "production",
+      SAFEEXIT_AI_MODE: "GATEWAY",
+      SAFEEXIT_AI_MODEL: "deepseek/deepseek-v4-flash",
+      SAFEEXIT_AI_MAX_ESTIMATED_INPUT_TOKENS: "8000",
+      SAFEEXIT_AI_MAX_OUTPUT_TOKENS: "128",
+      SAFEEXIT_AI_TIMEOUT_MS: "5000",
+    });
+    expect(config.aiModel).toBe("deepseek/deepseek-v4-flash");
+    expect(config.aiMaxEstimatedInputTokens).toBe(8_000);
+    expect(config.aiMaxOutputTokens).toBe(128);
+    expect(config.aiTimeoutMs).toBe(5_000);
+
+    expect(() => parseDeploymentEnvironment({
+      NODE_ENV: "production",
+      SAFEEXIT_AI_MAX_OUTPUT_TOKENS: "4096",
+    })).toThrow();
   });
+
 });

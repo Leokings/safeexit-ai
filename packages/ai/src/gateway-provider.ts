@@ -35,9 +35,24 @@ export type GatewayGeneration = {
   };
 };
 
+export const gatewayIntentBudgetSchema = z.strictObject({
+  maxEstimatedInputTokens: z.number().int().min(512).max(32_000),
+  maxOutputTokens: z.number().int().min(32).max(512),
+  timeoutMs: z.number().int().min(1_000).max(15_000),
+});
+
+export type GatewayIntentBudget = z.infer<typeof gatewayIntentBudgetSchema>;
+
+export const DEFAULT_GATEWAY_INTENT_BUDGET: GatewayIntentBudget = {
+  maxEstimatedInputTokens: 12_000,
+  maxOutputTokens: 256,
+  timeoutMs: 8_000,
+};
+
 export type GatewayGenerator = (
   modelId: string,
   input: GroundedModelInput,
+  budget: GatewayIntentBudget,
 ) => Promise<GatewayGeneration>;
 
 const gatewaySelectionSchema = z.strictObject({
@@ -46,19 +61,23 @@ const gatewaySelectionSchema = z.strictObject({
   requestedTool: aiToolNameSchema.nullable(),
 });
 
+const GATEWAY_SYSTEM_INSTRUCTIONS =
+  "Select only an allowed SAFEEXIT intent, optional allowed tool, and IDs present in availableRecordIds. Never invent blockchain state, addresses, calls, or transaction data.";
+
 async function defaultGatewayGenerator(
   modelId: string,
   input: GroundedModelInput,
+  budget: GatewayIntentBudget,
 ): Promise<GatewayGeneration> {
   const { generateText, Output } = await import("ai");
   const result = await generateText({
     model: modelId,
-    system:
-      "Select only an allowed SAFEEXIT intent, optional allowed tool, and IDs present in availableRecordIds. Never invent blockchain state, addresses, calls, or transaction data.",
+    system: GATEWAY_SYSTEM_INSTRUCTIONS,
     prompt: JSON.stringify(input),
     output: Output.object({ schema: gatewaySelectionSchema }),
-    maxOutputTokens: 512,
+    maxOutputTokens: budget.maxOutputTokens,
     temperature: 0,
+    abortSignal: AbortSignal.timeout(budget.timeoutMs),
     providerOptions: {
       openai: {
         reasoningEffort: "low",
@@ -90,8 +109,13 @@ async function defaultGatewayGenerator(
   };
 }
 
+export function estimateGatewayInputTokens(input: GroundedModelInput): number {
+  return Math.ceil((GATEWAY_SYSTEM_INSTRUCTIONS.length + JSON.stringify(input).length) / 4);
+}
+
 export class VercelGatewayIntentProvider implements GroundedIntentProvider {
   readonly id = "vercel-ai-gateway-grounded-intent-v1";
+  private readonly budget: GatewayIntentBudget;
 
   constructor(
     private readonly modelId: string,
@@ -100,16 +124,21 @@ export class VercelGatewayIntentProvider implements GroundedIntentProvider {
     private readonly generate: GatewayGenerator = defaultGatewayGenerator,
     private readonly clock: () => Date = () => new Date(),
     private readonly idFactory: () => string = () => crypto.randomUUID(),
+    budget: GatewayIntentBudget = DEFAULT_GATEWAY_INTENT_BUDGET,
   ) {
     if (!modelId.includes("/")) {
       throw new Error("AI Gateway model IDs must use provider/model format");
     }
+    this.budget = gatewayIntentBudgetSchema.parse(budget);
   }
 
   async select(value: GroundedModelInput): Promise<unknown> {
     const input = groundedModelInputSchema.parse(value);
-    const result = await this.generate(this.modelId, input);
-    const output = groundedSelectionSchema.parse(result.output);
+    const estimatedInputTokens = estimateGatewayInputTokens(input);
+    if (estimatedInputTokens > this.budget.maxEstimatedInputTokens) {
+      throw new Error("AI Gateway input exceeds the configured token budget");
+    }
+    const result = await this.generate(this.modelId, input, this.budget);
     const inputTokens = result.usage.inputTokens ?? 0;
     const outputTokens = result.usage.outputTokens ?? 0;
     await this.usageSink.record(
@@ -124,6 +153,6 @@ export class VercelGatewayIntentProvider implements GroundedIntentProvider {
         createdAt: this.clock().toISOString(),
       }),
     );
-    return output;
+    return groundedSelectionSchema.parse(result.output);
   }
 }

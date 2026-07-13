@@ -33,6 +33,8 @@ export {
   okxA2ACompletionDeliverableSchema,
   okxA2ASigningDeliverableSchema,
   okxA2ATaskRequestSchema,
+  okxX402PrepareRequestSchema,
+  okxX402SigningDeliverableSchema,
 } from "@safeexit/okx-transport";
 
-export const agentAppPhase = "OKX_A2A_PROVIDER_BRIDGE_AVAILABLE" as const;
+export const agentAppPhase = "OKX_PAID_DIRECT_PROVIDER_AVAILABLE" as const;

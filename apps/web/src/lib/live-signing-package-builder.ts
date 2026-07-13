@@ -22,6 +22,7 @@ import {
   keccak256,
   stringToHex,
   type Address,
+  type Hex,
 } from "viem";
 
 const metadataAbi = [
@@ -78,6 +79,14 @@ const eip3009Abi = [
     outputs: [{ name: "", type: "bool" }],
   },
 ] as const;
+
+const erc20BalanceAbi = [{
+  type: "function",
+  name: "balanceOf",
+  stateMutability: "view",
+  inputs: [{ name: "account", type: "address" }],
+  outputs: [{ name: "", type: "uint256" }],
+}] as const;
 
 const erc2612Abi = [
   {
@@ -198,7 +207,11 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
       throw new Error("Signing-package chain is not configured");
     }
     const now = this.clock();
-    const blockNumber = BigInt(job.plan.observedAtBlock);
+    const observedAtBlock = BigInt(job.plan.observedAtBlock);
+    const currentBlock = await this.client.getBlockNumber();
+    if (currentBlock < observedAtBlock) {
+      throw new Error("RPC head is behind the committed rescue plan block");
+    }
     for (const action of job.plan.actions) {
       if (
         action.actionType !== "TRANSFER_ERC20" ||
@@ -214,11 +227,21 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
       }
       const expiresAt = this.packageExpiry(now, simulation.expiresAt);
       const tokenAddress = action.parameters.tokenAddress as Address;
+      const currentBalance = await this.client.readContract({
+        address: tokenAddress,
+        abi: erc20BalanceAbi,
+        functionName: "balanceOf",
+        args: [job.plan.sourceAddress as Address],
+        blockNumber: currentBlock,
+      });
+      if (currentBalance < BigInt(action.parameters.amount)) {
+        throw new Error("Source token balance changed after the committed simulation");
+      }
       const capability = await this.detectCapability(
         tokenAddress,
         job.plan.sourceAddress as Address,
         job.plan.destinationAddress as Address,
-        blockNumber,
+        currentBlock,
       );
       if (!capability) {
         continue;
@@ -421,13 +444,13 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
     }
   }
 
-  private buildTokenPackage(
+  private async buildTokenPackage(
     job: ReadyAgentJob,
     action: Extract<RescueAction, { actionType: "TRANSFER_ERC20" }>,
     simulation: SimulationResult,
     capability: PermitCapability,
     expiresAt: Date,
-  ): SigningPackage {
+  ): Promise<SigningPackage> {
     const tokenAction = action;
     const common = {
       schemaVersion: "safeexit-signing-package-v1" as const,
@@ -455,6 +478,10 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
     const expiry = String(Math.floor(expiresAt.getTime() / 1_000));
     if (capability.route === "ERC3009_RECEIVE_WITH_AUTHORIZATION") {
       const now = Math.floor(this.clock().getTime() / 1_000);
+      const nonce = await this.createUnusedEip3009Nonce(
+        tokenAction.parameters.tokenAddress as Address,
+        job.plan.sourceAddress as Address,
+      );
       return {
         ...common,
         route: capability.route,
@@ -478,7 +505,7 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
               value: tokenAction.parameters.amount,
               validAfter: String(Math.max(0, now - 30)),
               validBefore: expiry,
-              nonce: `0x${randomBytes(32).toString("hex")}`,
+              nonce,
             },
           },
         }],
@@ -584,6 +611,25 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
         ],
       },
     };
+  }
+
+  private async createUnusedEip3009Nonce(
+    tokenAddress: Address,
+    sourceAddress: Address,
+  ): Promise<Hex> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const nonce = `0x${randomBytes(32).toString("hex")}` as Hex;
+      const used = await this.client.readContract({
+        address: tokenAddress,
+        abi: eip3009Abi,
+        functionName: "authorizationState",
+        args: [sourceAddress, nonce],
+      });
+      if (!used) {
+        return nonce;
+      }
+    }
+    throw new Error("Unable to issue an unused ERC-3009 authorization nonce");
   }
 
   private packageExpiry(now: Date, simulationExpiryValue: string): Date {

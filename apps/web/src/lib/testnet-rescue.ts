@@ -10,13 +10,37 @@ import {
 export const XLAYER_TESTNET_CHAIN_ID = 1_952;
 export const XLAYER_TESTNET_CHAIN_HEX = "0x7a0";
 
-export const testnetPreflightRequestSchema = z.strictObject({
-  tokenAddresses: z.array(evmAddressSchema).max(8),
-  erc721Assets: z.array(z.strictObject({
-    collectionAddress: evmAddressSchema,
-    tokenId: z.string().regex(/^(0|[1-9]\d*)$/),
-  })).max(8).optional(),
+const requestedNftSchema = z.strictObject({
+  collectionAddress: evmAddressSchema,
+  tokenId: z.string().regex(/^(0|[1-9]\d*)$/),
 });
+
+export const testnetPreflightRequestSchema = z
+  .strictObject({
+    tokenAddresses: z.array(evmAddressSchema).max(8),
+    erc721Assets: z.array(requestedNftSchema).max(8).default([]),
+    erc1155Assets: z.array(requestedNftSchema).max(8).default([]),
+  })
+  .superRefine((request, context) => {
+    const total =
+      request.tokenAddresses.length +
+      request.erc721Assets.length +
+      request.erc1155Assets.length;
+    if (total === 0) {
+      context.addIssue({
+        code: "custom",
+        message: "At least one asset must be supplied for preflight",
+        path: ["tokenAddresses"],
+      });
+    }
+    if (total > 16) {
+      context.addIssue({
+        code: "custom",
+        message: "A preflight may include at most 16 assets",
+        path: [],
+      });
+    }
+  });
 
 export const eip712DomainSchema = z.strictObject({
   name: z.string().min(1).max(128),

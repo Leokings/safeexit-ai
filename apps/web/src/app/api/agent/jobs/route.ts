@@ -19,7 +19,7 @@ export const runtime = "nodejs";
 export async function POST(request: Request): Promise<Response> {
   let headers: Record<string, string> = {};
   try {
-    headers = authorizeAgentRequest(request);
+    headers = await authorizeAgentRequest(request);
     const input = await parseJsonBody(request, createAgentJobRequestSchema);
     const now = new Date().toISOString();
     const incident = input.walletContext
@@ -28,6 +28,9 @@ export async function POST(request: Request): Promise<Response> {
           chainId: input.walletContext.chainId,
           sourceAddress: input.walletContext.sourceAddress,
           destinationAddress: input.walletContext.destinationAddress,
+          ...(input.walletContext.assetManifest
+            ? { assetManifest: input.walletContext.assetManifest }
+            : {}),
           status: "RECEIVED",
           ownershipAttestation: {
             accepted: input.walletContext.authorizationConfirmed,
@@ -38,7 +41,12 @@ export async function POST(request: Request): Promise<Response> {
           updatedAt: now,
         })
       : undefined;
-    const service = getAgentIncidentService();
+    const service = getAgentIncidentService({
+      ...(input.walletContext ? { chainId: input.walletContext.chainId } : {}),
+      ...(input.walletContext?.assetManifest
+        ? { assetManifest: input.walletContext.assetManifest }
+        : {}),
+    });
     const job = await service.createIncident({
       ...(input.requestId ? { requestId: input.requestId } : {}),
       ...(incident ? { incident } : {}),

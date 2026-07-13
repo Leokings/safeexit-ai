@@ -25,6 +25,7 @@ export function mapIncident(value: unknown) {
     chainId: BigInt(incident.chainId),
     sourceAddress: incident.sourceAddress,
     destinationAddress: incident.destinationAddress,
+    ...(incident.assetManifest ? { assetManifest: incident.assetManifest } : {}),
     status: incident.status,
     ownershipStatementVersion: incident.ownershipAttestation.statementVersion,
     ownershipAttestedAt: date(incident.ownershipAttestation.attestedAt),

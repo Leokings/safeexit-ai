@@ -35,11 +35,70 @@ export const assetValuationSchema = z.strictObject({
   observedAt: timestampSchema,
 });
 
+export const requestedNftAssetSchema = z.strictObject({
+  collectionAddress: evmAddressSchema,
+  tokenId: baseUnitAmountSchema,
+});
+
+export const rescueAssetManifestSchema = z
+  .strictObject({
+    erc20TokenAddresses: z.array(evmAddressSchema).max(8).default([]),
+    erc721Assets: z.array(requestedNftAssetSchema).max(8).default([]),
+    erc1155Assets: z.array(requestedNftAssetSchema).max(8).default([]),
+  })
+  .superRefine((manifest, context) => {
+    const total =
+      manifest.erc20TokenAddresses.length +
+      manifest.erc721Assets.length +
+      manifest.erc1155Assets.length;
+    if (total === 0) {
+      context.addIssue({
+        code: "custom",
+        message: "At least one asset contract must be supplied",
+        path: ["erc20TokenAddresses"],
+      });
+    }
+    if (total > 16) {
+      context.addIssue({
+        code: "custom",
+        message: "A rescue incident may include at most 16 explicit assets",
+        path: [],
+      });
+    }
+
+    const seen = new Set<string>();
+    const entries = [
+      ...manifest.erc20TokenAddresses.map((address, index) => ({
+        key: `erc20:${address.toLowerCase()}`,
+        path: ["erc20TokenAddresses", index] as const,
+      })),
+      ...manifest.erc721Assets.map((asset, index) => ({
+        key: `erc721:${asset.collectionAddress.toLowerCase()}:${asset.tokenId}`,
+        path: ["erc721Assets", index] as const,
+      })),
+      ...manifest.erc1155Assets.map((asset, index) => ({
+        key: `erc1155:${asset.collectionAddress.toLowerCase()}:${asset.tokenId}`,
+        path: ["erc1155Assets", index] as const,
+      })),
+    ];
+    for (const entry of entries) {
+      if (seen.has(entry.key)) {
+        context.addIssue({
+          code: "custom",
+          message: "Duplicate asset entry",
+          path: [...entry.path],
+        });
+      }
+      seen.add(entry.key);
+    }
+  });
+
 const incidentShape = {
   id: identifierSchema,
   chainId: chainIdSchema,
   sourceAddress: evmAddressSchema,
   destinationAddress: evmAddressSchema,
+  assetManifest: rescueAssetManifestSchema.optional(),
   status: incidentStatusSchema,
   ownershipAttestation: z.strictObject({
     accepted: z.literal(true),
@@ -432,6 +491,8 @@ export const agentJobSchema = z.strictObject({
 export type SupportStatus = z.infer<typeof supportStatusSchema>;
 export type IncidentStatus = z.infer<typeof incidentStatusSchema>;
 export type AssetValuation = z.infer<typeof assetValuationSchema>;
+export type RequestedNftAsset = z.infer<typeof requestedNftAssetSchema>;
+export type RescueAssetManifest = z.infer<typeof rescueAssetManifestSchema>;
 export type Incident = z.infer<typeof incidentSchema>;
 export type Asset = z.infer<typeof assetSchema>;
 export type Approval = z.infer<typeof approvalSchema>;

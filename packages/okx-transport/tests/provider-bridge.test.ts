@@ -14,10 +14,12 @@ import {
 } from "@safeexit/shared";
 
 import {
+  OKX_A2A_XLAYER_MAINNET_CHAIN_ID,
   OKX_A2A_XLAYER_TESTNET_CHAIN_ID,
   OkxA2AProviderBridge,
   SAFEEXIT_AUTHORIZATION_STATEMENT,
   okxA2ATaskRequestSchema,
+  okxX402PrepareRequestSchema,
   type OkxA2ATaskRequest,
   type SafeExitAgentLifecyclePort,
 } from "../src";
@@ -283,7 +285,7 @@ describe("OKX A2A provider bridge", () => {
     expect(() => okxA2ATaskRequestSchema.parse({ ...request, privateKey: "0xsecret" })).toThrow();
   });
 
-  it("requires a bounded explicit asset manifest only for X Layer testnet", () => {
+  it("requires a bounded explicit asset manifest for testnet and accepts X Layer mainnet batches", () => {
     const testnetRequest = {
       ...request,
       walletContext: {
@@ -292,16 +294,25 @@ describe("OKX A2A provider bridge", () => {
       },
     };
     expect(() => okxA2ATaskRequestSchema.parse(testnetRequest)).toThrow(
-      "explicit ERC-20 asset manifest",
+      "explicit asset manifest",
     );
     expect(okxA2ATaskRequestSchema.parse({
       ...testnetRequest,
       assetManifest: { erc20TokenAddresses: [token] },
     }).assetManifest?.erc20TokenAddresses).toEqual([token]);
-    expect(() => okxA2ATaskRequestSchema.parse({
+    expect(okxA2ATaskRequestSchema.parse({
       ...request,
-      assetManifest: { erc20TokenAddresses: [token] },
-    })).toThrow("restricted to X Layer testnet");
+      walletContext: {
+        ...request.walletContext,
+        chainId: OKX_A2A_XLAYER_MAINNET_CHAIN_ID,
+      },
+      assetManifest: {
+        erc20TokenAddresses: [token],
+        erc721Assets: [{ collectionAddress: destination, tokenId: "42" }],
+      },
+    }).assetManifest?.erc721Assets).toEqual([
+      { collectionAddress: destination, tokenId: "42" },
+    ]);
   });
 
   it("binds the canonical testnet manifest to the persisted incident scope", async () => {
@@ -320,7 +331,11 @@ describe("OKX A2A provider bridge", () => {
           ...request.walletContext,
           chainId: OKX_A2A_XLAYER_TESTNET_CHAIN_ID,
         },
-        assetManifest: { erc20TokenAddresses: [tokenAddress] },
+        assetManifest: {
+          erc20TokenAddresses: [tokenAddress],
+          erc721Assets: [],
+          erc1155Assets: [],
+        },
       })).rejects.toThrow("outside the normalized task scope");
       const createIncident = vi.mocked(service.createIncident);
       const input = createIncident.mock.calls[0]?.[0];
@@ -340,6 +355,48 @@ describe("OKX A2A provider bridge", () => {
     expect(result.signingPackage.route).toBe("ERC2612_PERMIT_ATOMIC_BATCH");
     expect(result.executionRequirements.sourceSignaturesMustNotBeReturned).toBe(true);
     expect(JSON.stringify(result)).not.toContain("signature\"");
+  });
+
+  it("prepares a paid direct deliverable without a conversational task round-trip", async () => {
+    const bridge = new OkxA2AProviderBridge("5196", () => new Date(now), undefined, [31_337]);
+    const service = lifecycle();
+    const paidRequest = okxX402PrepareRequestSchema.parse({
+      schemaVersion: "safeexit-okx-x402-v1",
+      transportMode: "OKX_X402",
+      requestId: "paid-request-1",
+      buyerAgentId: "100",
+      service: "compromised-wallet-rescue",
+      walletContext: request.walletContext,
+      authorization: request.authorization,
+    });
+
+    const result = await bridge.preparePaidSigningDeliverable(service, paidRequest);
+
+    expect(result.transportMode).toBe("OKX_X402");
+    expect(result.requestId).toBe("paid-request-1");
+    expect(result.signingPackage).toEqual(signingPackage);
+    expect(vi.mocked(service.createIncident).mock.calls[0]?.[0].requestId).toBe(
+      "okx:5196:x402:paid-request-1",
+    );
+  });
+
+  it("rejects credentials and provider overrides on paid direct requests", () => {
+    const base = {
+      schemaVersion: "safeexit-okx-x402-v1",
+      transportMode: "OKX_X402",
+      requestId: "paid-request-1",
+      service: "compromised-wallet-rescue",
+      walletContext: request.walletContext,
+      authorization: request.authorization,
+    };
+    expect(() => okxX402PrepareRequestSchema.parse({
+      ...base,
+      privateKey: "0xsecret",
+    })).toThrow();
+    expect(() => okxX402PrepareRequestSchema.parse({
+      ...base,
+      providerAgentId: "9999",
+    })).toThrow();
   });
 
   it("rejects a task targeting another provider agent", async () => {

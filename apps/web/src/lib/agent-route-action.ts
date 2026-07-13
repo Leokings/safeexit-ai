@@ -21,7 +21,7 @@ export async function runAgentJobAction(
 ): Promise<Response> {
   let headers: Record<string, string> = {};
   try {
-    headers = authorizeAgentRequest(request);
+    headers = await authorizeAgentRequest(request);
     const service = getAgentIncidentService();
     let job;
     if (action === "analyse") {

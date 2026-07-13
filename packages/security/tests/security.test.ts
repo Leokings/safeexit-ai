@@ -10,10 +10,17 @@ import {
   parseApiSecurityEnvironment,
   parseJsonBody,
   redactSensitive,
+  SharedRateLimiter,
 } from "../src";
 
 const source = "0x1111111111111111111111111111111111111111";
 const destination = "0x2222222222222222222222222222222222222222";
+const token = "0x3333333333333333333333333333333333333333";
+const assetManifest = {
+  erc20TokenAddresses: [token],
+  erc721Assets: [],
+  erc1155Assets: [],
+};
 
 describe("secure API validation", () => {
   it("accepts an authorised incident request", () => {
@@ -22,6 +29,7 @@ describe("secure API validation", () => {
         chainId: 196,
         sourceAddress: source,
         destinationAddress: destination,
+        assetManifest,
         authorizationConfirmed: true,
       }),
     ).toMatchObject({ chainId: 196, authorizationConfirmed: true });
@@ -33,8 +41,39 @@ describe("secure API validation", () => {
         chainId: 196,
         sourceAddress: source,
         destinationAddress: source,
+        assetManifest,
         authorizationConfirmed: true,
         privateKey: "never-store-this",
+      }),
+    ).toThrow();
+  });
+
+  it("requires a bounded explicit asset manifest", () => {
+    expect(() =>
+      createIncidentRequestSchema.parse({
+        chainId: 1_952,
+        sourceAddress: source,
+        destinationAddress: destination,
+        assetManifest: {
+          erc20TokenAddresses: [],
+          erc721Assets: [],
+          erc1155Assets: [],
+        },
+        authorizationConfirmed: true,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      createIncidentRequestSchema.parse({
+        chainId: 1_952,
+        sourceAddress: source,
+        destinationAddress: destination,
+        assetManifest: {
+          erc20TokenAddresses: [token, token.toUpperCase().replace("0X", "0x")],
+          erc721Assets: [],
+          erc1155Assets: [],
+        },
+        authorizationConfirmed: true,
       }),
     ).toThrow();
   });
@@ -92,6 +131,47 @@ describe("rate limiting", () => {
       allowed: true,
       remaining: 1,
     });
+  });
+
+  it("uses an atomic shared store decision across instances", async () => {
+    let count = 0;
+    let resetAt = new Date(11_000);
+    const increment = vi.fn(async (input: { now: Date; resetAt: Date }) => {
+      if (resetAt <= input.now) {
+        count = 0;
+        resetAt = input.resetAt;
+      }
+      count += 1;
+      return { count, resetAt };
+    });
+    const firstInstance = new SharedRateLimiter(2, 1_000, { increment });
+    const secondInstance = new SharedRateLimiter(2, 1_000, { increment });
+
+    await expect(firstInstance.consume("client", 10_000)).resolves.toMatchObject({
+      allowed: true,
+      remaining: 1,
+    });
+    await expect(secondInstance.consume("client", 10_100)).resolves.toMatchObject({
+      allowed: true,
+      remaining: 0,
+    });
+    await expect(firstInstance.consume("client", 10_200)).resolves.toMatchObject({
+      allowed: false,
+      remaining: 0,
+    });
+    await expect(secondInstance.consume("client", 11_000)).resolves.toMatchObject({
+      allowed: true,
+      remaining: 1,
+    });
+  });
+
+  it("fails closed when the shared store returns an invalid bucket", async () => {
+    const limiter = new SharedRateLimiter(2, 1_000, {
+      increment: async () => ({ count: 0, resetAt: new Date(0) }),
+    });
+    await expect(limiter.consume("client", 10_000)).rejects.toThrow(
+      "Shared rate-limit store returned an invalid bucket",
+    );
   });
 });
 

@@ -25,6 +25,11 @@ const incident = {
   chainId: 196,
   sourceAddress: source,
   destinationAddress: destination,
+  assetManifest: {
+    erc20TokenAddresses: [token],
+    erc721Assets: [],
+    erc1155Assets: [],
+  },
   status: "RECEIVED",
   ownershipAttestation: {
     accepted: true,
@@ -252,6 +257,9 @@ describe("repository validation boundary", () => {
     await repository.saveIncident(incident);
     expect(upsert).toHaveBeenCalledOnce();
     expect(upsert.mock.calls[0]?.[0].create).not.toHaveProperty("ownershipAttestation");
+    expect(upsert.mock.calls[0]?.[0].create.assetManifest).toEqual(
+      incident.assetManifest,
+    );
 
     await expect(
       repository.saveIncident({ ...incident, privateKey: "never" }),

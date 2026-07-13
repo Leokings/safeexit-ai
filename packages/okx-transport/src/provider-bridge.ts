@@ -12,10 +12,14 @@ import {
   okxA2ACompletionDeliverableSchema,
   okxA2ASigningDeliverableSchema,
   okxA2ATaskRequestSchema,
+  okxX402PrepareRequestSchema,
+  okxX402SigningDeliverableSchema,
   type OkxA2ABuyerReportRequest,
   type OkxA2ACompletionDeliverable,
   type OkxA2ASigningDeliverable,
   type OkxA2ATaskRequest,
+  type OkxX402PrepareRequest,
+  type OkxX402SigningDeliverable,
 } from "./contracts";
 import type { SafeExitAgentLifecyclePort } from "./ports";
 
@@ -31,9 +35,17 @@ function statementVersionFor(request: OkxA2ATaskRequest): string {
   if (!request.assetManifest) {
     return "safeexit-okx-a2a-auth-v1";
   }
-  const canonicalAddresses = [...new Set(
-    request.assetManifest.erc20TokenAddresses.map((address) => address.toLowerCase()),
-  )].sort();
+  const canonicalAddresses = [
+    ...request.assetManifest.erc20TokenAddresses.map(
+      (address) => `erc20:${address.toLowerCase()}`,
+    ),
+    ...request.assetManifest.erc721Assets.map(
+      (asset) => `erc721:${asset.collectionAddress.toLowerCase()}:${asset.tokenId}`,
+    ),
+    ...request.assetManifest.erc1155Assets.map(
+      (asset) => `erc1155:${asset.collectionAddress.toLowerCase()}:${asset.tokenId}`,
+    ),
+  ].sort();
   const commitment = createHash("sha256")
     .update(JSON.stringify(canonicalAddresses))
     .digest("hex")
@@ -125,6 +137,7 @@ export class OkxA2AProviderBridge {
       chainId: request.walletContext.chainId,
       sourceAddress: request.walletContext.sourceAddress,
       destinationAddress: request.walletContext.destinationAddress,
+      ...(request.assetManifest ? { assetManifest: request.assetManifest } : {}),
       status: "RECEIVED",
       ownershipAttestation: {
         accepted: true,
@@ -176,6 +189,36 @@ export class OkxA2AProviderBridge {
         sourceSignaturesMustNotBeReturned: true,
         receiptOnlyReportSchema: "safeexit-buyer-report-v1",
       },
+    });
+  }
+
+  async preparePaidSigningDeliverable(
+    lifecycle: SafeExitAgentLifecyclePort,
+    value: OkxX402PrepareRequest,
+  ): Promise<OkxX402SigningDeliverable> {
+    const request = okxX402PrepareRequestSchema.parse(value);
+    const deliverable = await this.prepareSigningDeliverable(lifecycle, {
+      schemaVersion: "safeexit-okx-a2a-v1",
+      transportMode: "SAFEEXIT_NORMALIZED",
+      okxJobId: `x402:${request.requestId}`,
+      providerAgentId: this.providerAgentId,
+      ...(request.buyerAgentId ? { buyerAgentId: request.buyerAgentId } : {}),
+      service: request.service,
+      walletContext: request.walletContext,
+      ...(request.assetManifest ? { assetManifest: request.assetManifest } : {}),
+      authorization: request.authorization,
+    });
+    return okxX402SigningDeliverableSchema.parse({
+      schemaVersion: "safeexit-okx-x402-deliverable-v1",
+      transportMode: "OKX_X402",
+      requestId: request.requestId,
+      providerAgentId: deliverable.providerAgentId,
+      safeExitJobId: deliverable.safeExitJobId,
+      status: deliverable.status,
+      createdAt: deliverable.createdAt,
+      walletContext: deliverable.walletContext,
+      signingPackage: deliverable.signingPackage,
+      executionRequirements: deliverable.executionRequirements,
     });
   }
 

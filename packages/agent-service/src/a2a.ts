@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import { chainIdSchema, evmAddressSchema } from "@safeexit/shared";
+import {
+  chainIdSchema,
+  evmAddressSchema,
+  rescueAssetManifestSchema,
+} from "@safeexit/shared";
 
 import {
   OKX_AI_INTEGRATION_BOUNDARIES,
@@ -24,6 +28,7 @@ export const conceptualA2ARequestSchema = z
           chainId: chainIdSchema,
           sourceAddress: evmAddressSchema,
           destinationAddress: evmAddressSchema,
+          assetManifest: rescueAssetManifestSchema.optional(),
           authorizationConfirmed: z.literal(true),
         })
         .optional(),

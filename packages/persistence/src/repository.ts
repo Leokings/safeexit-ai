@@ -36,6 +36,7 @@ export class PrismaSafeExitRepository {
       chainId: Number(record.chainId),
       sourceAddress: record.sourceAddress,
       destinationAddress: record.destinationAddress,
+      ...(record.assetManifest ? { assetManifest: record.assetManifest } : {}),
       status: record.status,
       ownershipAttestation: {
         accepted: true as const,

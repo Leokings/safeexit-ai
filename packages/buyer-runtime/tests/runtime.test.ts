@@ -96,7 +96,7 @@ function packageFor(route: SigningPackage["route"]): SigningPackage {
             from: sourceAccount.address,
             to: destination,
             value: "100",
-            validAfter: "0",
+            validAfter: String(Math.floor(now.getTime() / 1_000) - 30),
             validBefore: deadline,
             nonce: `0x${"88".repeat(32)}`,
           },
@@ -419,5 +419,30 @@ describe("buyer-local rescue runtime", () => {
     )).rejects.toEqual(expect.objectContaining<Partial<BuyerRuntimeError>>({
       code: "PACKAGE_EXPIRED",
     }));
+  });
+
+  it("rejects an ERC-3009 authorization whose validity window has not opened", async () => {
+    const base = packageFor("ERC3009_RECEIVE_WITH_AUTHORIZATION");
+    const request = base.sourceSigningRequests[0];
+    const signingPackage = signingPackageSchema.parse({
+      ...base,
+      sourceSigningRequests: [{
+        ...request,
+        typedData: {
+          ...request.typedData,
+          message: {
+            ...request.typedData.message,
+            validAfter: String(Math.floor(now.getTime() / 1_000) + 60),
+          },
+        },
+      }],
+    });
+    const runtime = new BuyerRescueRuntime(() => now);
+
+    await expect(runtime.authorize(
+      signingPackage,
+      confirmation(signingPackage),
+      signer(),
+    )).rejects.toMatchObject({ code: "PACKAGE_EXPIRED" });
   });
 });

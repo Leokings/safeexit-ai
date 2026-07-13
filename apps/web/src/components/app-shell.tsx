@@ -2,14 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FlaskConical, LayoutDashboard, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/", label: "Start", icon: LayoutDashboard },
-  { href: "/demo", label: "Demo", icon: FlaskConical },
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {

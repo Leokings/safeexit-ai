@@ -1,12 +1,17 @@
 import { z, type ZodType } from "zod";
 
-import { chainIdSchema, evmAddressSchema } from "@safeexit/shared";
+import {
+  chainIdSchema,
+  evmAddressSchema,
+  rescueAssetManifestSchema,
+} from "@safeexit/shared";
 
 export const createIncidentRequestSchema = z
   .strictObject({
     chainId: chainIdSchema,
     sourceAddress: evmAddressSchema,
     destinationAddress: evmAddressSchema,
+    assetManifest: rescueAssetManifestSchema,
     authorizationConfirmed: z.literal(true),
   })
   .superRefine(({ sourceAddress, destinationAddress }, context) => {

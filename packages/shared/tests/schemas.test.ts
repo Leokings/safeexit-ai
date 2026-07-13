@@ -5,6 +5,7 @@ import {
   approvalSchema,
   assetSchema,
   incidentSchema,
+  rescueAssetManifestSchema,
   rescueActionSchema,
   rescuePlanSchema,
   simulationResultSchema,
@@ -89,6 +90,22 @@ describe("incidentSchema", () => {
 
     expect(result.sourceAddress).toBe(sourceAddress);
     expect(result.ownershipAttestation.accepted).toBe(true);
+  });
+
+  it("commits a bounded multi-standard asset batch", () => {
+    const manifest = rescueAssetManifestSchema.parse({
+      erc20TokenAddresses: [tokenAddress],
+      erc721Assets: [{ collectionAddress: spenderAddress, tokenId: "7" }],
+    });
+    expect(manifest).toEqual({
+      erc20TokenAddresses: [tokenAddress],
+      erc721Assets: [{ collectionAddress: spenderAddress, tokenId: "7" }],
+      erc1155Assets: [],
+    });
+    expect(() => rescueAssetManifestSchema.parse({})).toThrow();
+    expect(() => rescueAssetManifestSchema.parse({
+      erc20TokenAddresses: [tokenAddress, tokenAddress],
+    })).toThrow("Duplicate asset entry");
   });
 
   it("rejects a destination equal to the source", () => {

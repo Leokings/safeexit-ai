@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import { chainIdSchema, evmAddressSchema, incidentSchema } from "@safeexit/shared";
+import {
+  chainIdSchema,
+  evmAddressSchema,
+  incidentSchema,
+  rescueAssetManifestSchema,
+} from "@safeexit/shared";
 
 import { agentServiceJobSchema } from "./schemas";
 import { signingPackageSchema } from "./signing-package";
@@ -13,6 +18,7 @@ const walletContextSchema = z
     chainId: chainIdSchema,
     sourceAddress: evmAddressSchema,
     destinationAddress: evmAddressSchema,
+    assetManifest: rescueAssetManifestSchema.optional(),
     authorizationConfirmed: z.literal(true),
   })
   .superRefine(({ sourceAddress, destinationAddress }, context) => {

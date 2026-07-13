@@ -1,0 +1,8 @@
+contracts/
+scripts/demo/
+scripts/contracts/
+.demo/
+.tools/
+**/tests/
+**/*.test.ts
+**/*.test.tsx

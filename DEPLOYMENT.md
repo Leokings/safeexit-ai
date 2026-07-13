@@ -29,11 +29,15 @@ wallet credential in Vercel, PostgreSQL, GitHub, or an OKX service prompt.
 DATABASE_URL=<pooled PostgreSQL URL>
 DIRECT_URL=<direct PostgreSQL URL for migrations>
 SAFEEXIT_PUBLIC_BASE_URL=https://<your-domain>
-SAFEEXIT_DEMO_MODE=HOSTED_REPLAY
-SAFEEXIT_AGENT_MODE=HOSTED_REPLAY
+SAFEEXIT_AGENT_MODE=LIVE_READONLY
 SAFEEXIT_AGENT_STORE=DATABASE
 SAFEEXIT_AGENT_API_KEY=<at-least-32-random-characters>
 SAFEEXIT_OKX_PROVIDER_AGENT_ID=<registered numeric ASP agent ID>
+SAFEEXIT_AI_MODE=GATEWAY
+SAFEEXIT_AI_MODEL=deepseek/deepseek-v4-flash
+SAFEEXIT_AI_MAX_ESTIMATED_INPUT_TOKENS=12000
+SAFEEXIT_AI_MAX_OUTPUT_TOKENS=256
+SAFEEXIT_AI_TIMEOUT_MS=8000
 SAFEEXIT_RATE_LIMIT_MAX_REQUESTS=20
 SAFEEXIT_RATE_LIMIT_WINDOW_MS=60000
 ```
@@ -44,6 +48,16 @@ SAFEEXIT API. It is not an OKX wallet secret and must never have a
 
 `SAFEEXIT_OKX_PROVIDER_AGENT_ID` pins normalized handoffs to one registered ASP.
 It is an identity number, not a wallet credential.
+
+On Vercel, AI Gateway uses the deployment's OIDC identity, so the production
+DeepSeek path does not require a separate LLM API key. Local development outside
+Vercel requires the authentication method supported by the current AI Gateway
+SDK. The model receives only the user question, the six allowlisted tool names,
+and IDs already present in the validated incident. It cannot author calldata,
+change a destination, add an action, sign, or broadcast. The limits above cap
+estimated input, generated output, and request time. Failure falls back to the
+deterministic grounded explanation, and successful usage is stored in
+`AiUsageEvent`.
 
 ### Live read-only production mode
 
@@ -57,6 +71,13 @@ OKX_WEB3_SECRET_KEY=<OKX developer secret key>
 OKX_WEB3_PASSPHRASE=<OKX developer passphrase>
 XLAYER_MAINNET_RPC_URL=<dedicated HTTPS X Layer RPC URL>
 XLAYER_TESTNET_RPC_URL=<dedicated HTTPS X Layer testnet RPC URL>
+ETHEREUM_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
+BNB_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
+POLYGON_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
+ARBITRUM_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
+OPTIMISM_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
+BASE_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
+AVALANCHE_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
 ```
 
 Create the OKX credentials in the official Onchain OS developer portal. Never
@@ -64,6 +85,14 @@ commit them, paste them into an agent conversation, add a `NEXT_PUBLIC_` prefix,
 or expose them to browser code. `/api/ready` fails closed in `LIVE_READONLY`
 mode when the OKX credentials or dedicated mainnet RPC are missing, and it
 verifies an RPC block read before reporting ready.
+
+Every configured multichain endpoint is checked for HTTPS, expected chain ID,
+and a current block number. These URLs may contain provider credentials and
+must be entered as encrypted server-only Vercel variables. X Layer (chain 196,
+the OKX network) is currently rescue-enabled. The other endpoints are
+configuration-only until their scanner, planner, simulation, and settlement
+adapters are verified; their presence must not be interpreted as execution
+support.
 
 Live discovery is intentionally partial. Native and OKX-discovered ERC-20
 balances are verified by RPC. NFT discovery, approval discovery, Permit2,
@@ -133,6 +162,66 @@ POST /api/agent/okx/prepare
 POST /api/agent/okx/buyer-report
 ```
 
+The paid direct endpoint is separate:
+
+```text
+POST /api/agent/okx/prepare-paid
+```
+
+It is protected by the official OKX x402 Next.js wrapper, charges `$0.10` on
+X Layer mainnet, and does not use `SAFEEXIT_AGENT_API_KEY`. Configure:
+
+```text
+SAFEEXIT_X402_MODE=MAINNET
+SAFEEXIT_X402_PAY_TO_ADDRESS=0x<provider-owned-payout-wallet>
+```
+
+`OKX_WEB3_API_KEY`, `OKX_WEB3_SECRET_KEY`, and `OKX_WEB3_PASSPHRASE` are reused
+server-side by the official facilitator client. An unpaid request returns
+`402 Payment Required`; after payment, the same request is retried and returns
+the deterministic signing package plus an explanation-only grounded incident
+analysis. DeepSeek can select only an intent and known evidence IDs; the
+scanner, plan, simulation, signing package, fixed destination, and plan hash
+remain deterministic. Readiness reports
+`paidAgentApi=configured:eip155:196:$0.10` only when this configuration is
+complete.
+
+Use a buyer wallet that differs from `SAFEEXIT_X402_PAY_TO_ADDRESS`. A buyer
+cannot meaningfully test a paid service against its own payout address;
+SAFEEXIT rejects that case with `409 X402_SELF_PAYMENT_UNSUPPORTED` before
+verification or settlement. For the low-latency path, call this A2MCP endpoint
+directly. Do not wrap the request in an A2A task or wait for the marketplace
+task event stream unless a custom incident-response engagement is intended.
+
+The request body is:
+
+```json
+{
+  "schemaVersion": "safeexit-okx-x402-v1",
+  "transportMode": "OKX_X402",
+  "requestId": "buyer-generated-idempotency-key",
+  "buyerAgentId": "5282",
+  "service": "compromised-wallet-rescue",
+  "walletContext": {
+    "chainId": 1952,
+    "sourceAddress": "0xSource",
+    "destinationAddress": "0xDestination"
+  },
+  "assetManifest": {
+    "erc20TokenAddresses": ["0xToken"],
+    "erc721Assets": [],
+    "erc1155Assets": []
+  },
+  "authorization": {
+    "statement": "I confirm that I am authorised to control and sign for this wallet.",
+    "confirmedAt": "2026-07-13T13:00:00.000Z"
+  }
+}
+```
+
+`buyerAgentId` is optional. Testnet requires an explicit asset manifest.
+Unknown fields, credentials, signatures, and arbitrary calldata are rejected.
+
 These are not claimed OKX callback endpoints. After the official runtime emits
 `job_accepted`, the provider runtime maps the accepted task fields into
 `safeexit-okx-a2a-v1` and calls `prepare`. Repeated calls with the same OKX job
@@ -143,9 +232,11 @@ flow. After local buyer execution, only the receipt report is mapped into
 
 The normalized bridge accepts X Layer mainnet (`196`) and the guarded X Layer
 testnet pilot (`1952`). A testnet handoff must declare one to eight ERC-20
-contract addresses in `assetManifest.erc20TokenAddresses`; the testnet analyzer
-does not use AI or an indexer to infer additional assets. Mainnet uses the
-OKX-backed discovery path and rejects this test-only manifest field.
+contracts in `assetManifest.erc20TokenAddresses` and explicit NFT entries in
+`assetManifest.erc721Assets` or `assetManifest.erc1155Assets`. The testnet
+analyzer does not use AI or an indexer to infer additional assets. Mainnet
+merges the explicit manifest with OKX-backed ERC-20 discovery and verifies all
+submitted entries at the pinned RPC block.
 
 Analysis, planning, simulation, and monitoring accept the strict body
 `{ "schemaVersion": "safeexit-agent-api-v1" }`.
@@ -225,8 +316,9 @@ official-docs-required and is not represented as connected.
 
 ## X Layer testnet destination-paid pilot
 
-For an incident created on chain ID `1952`, the rescue dashboard scans explicit
-ERC-20 and ERC-721 manifests and ranks destination-paid routes. ERC-3009 requires
+For an incident created on chain ID `1952`, the rescue dashboard scans an
+incident-committed batch of ERC-20, ERC-721, and ERC-1155 assets and ranks
+destination-paid routes. ERC-3009 requires
 verified type-hash, EIP-712 domain, domain separator, and authorization-state
 reads. ERC-2612 requires a verified EIP-712 domain and nonce read, then remains
 provisional until the exact signed permit succeeds and OKX Wallet reports
@@ -273,7 +365,9 @@ control has received an independent security review.
   for EIP-7702 sponsorship and private atomic bundles, but exposes neither as
   executable until official X Layer integration details and an independent
   delegate-contract audit are available.
-- The in-process rate limiter is defense in depth only. Configure an edge or
-  shared rate limiter before accepting untrusted public traffic at scale.
+- Production request limits are stored atomically in PostgreSQL and fail closed
+  if that shared store is unavailable. The x402 limit is evaluated before the
+  payment middleware so a throttled request is not charged first. Vercel
+  Firewall limits may be added as a second independent layer.
 - Recovery remains best effort because a blockchain cannot distinguish two
   parties holding the same EOA private key.

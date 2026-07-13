@@ -36,6 +36,16 @@ const erc20MetadataAbi = [
   },
 ] as const;
 
+const erc721MetadataAbi = [
+  {
+    type: "function",
+    name: "name",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+  },
+] as const;
+
 function safeMetadata(value: string, maximum: number, fallback: string): string {
   const normalized = value.replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, maximum);
   return normalized || fallback;
@@ -101,12 +111,76 @@ export class LiveXLayerTestnetManifestAnalyzer implements IncidentAnalyzerPort {
         }
       }),
     );
+    const erc721Metadata = await Promise.all(
+      this.manifest.erc721Assets.map(async (asset) => {
+        try {
+          const address = asset.collectionAddress as Address;
+          const bytecode = await client.getCode({ address, blockNumber: observedAtBlock });
+          if (!bytecode) {
+            throw new Error("No bytecode");
+          }
+          const name = await client.readContract({
+            address,
+            abi: erc721MetadataAbi,
+            functionName: "name",
+            blockNumber: observedAtBlock,
+          }).catch(() => "Unlabelled ERC-721");
+          return {
+            query: {
+              collectionAddress: asset.collectionAddress,
+              tokenId: BigInt(asset.tokenId),
+              name: safeMetadata(name, 128, "Unlabelled ERC-721"),
+            },
+          } as const;
+        } catch {
+          return {
+            asset,
+            reason: "ERC-721 contract verification failed at the pinned block",
+          } as const;
+        }
+      }),
+    );
+    const erc1155Metadata = await Promise.all(
+      this.manifest.erc1155Assets.map(async (asset) => {
+        const address = asset.collectionAddress as Address;
+        const bytecode = await client.getCode({ address, blockNumber: observedAtBlock });
+        return bytecode
+          ? {
+              query: {
+                collectionAddress: asset.collectionAddress,
+                tokenId: BigInt(asset.tokenId),
+              },
+            } as const
+          : {
+              asset,
+              reason: "ERC-1155 contract verification failed at the pinned block",
+            } as const;
+      }),
+    );
     const manifestTokens = metadata.flatMap((entry) =>
       "query" in entry ? [entry.query] : [],
     );
     const omitted = metadata.flatMap((entry) =>
       "reason" in entry ? [`${entry.tokenAddress}: ${entry.reason}.`] : [],
     );
+    const manifestErc721Assets = erc721Metadata.flatMap((entry) =>
+      "query" in entry ? [entry.query] : [],
+    );
+    const manifestErc1155Assets = erc1155Metadata.flatMap((entry) =>
+      "query" in entry ? [entry.query] : [],
+    );
+    const omittedNfts = [
+      ...erc721Metadata.flatMap((entry) =>
+        "reason" in entry && entry.asset
+          ? [`${entry.asset.collectionAddress}:${entry.asset.tokenId}: ${entry.reason}.`]
+          : [],
+      ),
+      ...erc1155Metadata.flatMap((entry) =>
+        "reason" in entry && entry.asset
+          ? [`${entry.asset.collectionAddress}:${entry.asset.tokenId}: ${entry.reason}.`]
+          : [],
+      ),
+    ];
     const scanner = new DeterministicWalletScanner({
       config: xLayerTestnetConfig,
       reader: new ViemStandardReadClient("x-layer-testnet-agent-rpc", client),
@@ -116,7 +190,11 @@ export class LiveXLayerTestnetManifestAnalyzer implements IncidentAnalyzerPort {
       chainId: incident.chainId,
       address: incident.sourceAddress,
       observedAtBlock,
-      manifest: { erc20Assets: manifestTokens },
+      manifest: {
+        erc20Assets: manifestTokens,
+        erc721Assets: manifestErc721Assets,
+        erc1155Assets: manifestErc1155Assets,
+      },
     });
 
     return walletScanSchema.parse({
@@ -125,9 +203,10 @@ export class LiveXLayerTestnetManifestAnalyzer implements IncidentAnalyzerPort {
       providerId: "safeexit-live-xlayer-testnet-manifest-v1",
       warnings: [
         ...report.scan.warnings,
-        "X Layer testnet agent discovery used only the explicit ERC-20 manifest and pinned RPC state.",
+        "X Layer testnet agent discovery used only the explicit ERC-20/ERC-721/ERC-1155 manifest and pinned RPC state.",
         "Native balance is detected for incident context but has no enabled destination-paid recovery route.",
         ...omitted,
+        ...omittedNfts,
       ],
     });
   }

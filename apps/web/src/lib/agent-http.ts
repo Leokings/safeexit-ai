@@ -7,22 +7,34 @@ import {
   createSecureLogger,
   InMemoryRateLimiter,
   parseApiSecurityEnvironment,
+  SharedRateLimiter,
+  type RateLimitDecision,
 } from "@safeexit/security";
+import {
+  getPrismaClient,
+  PrismaRateLimitStore,
+} from "@safeexit/persistence";
 
 import { parseDeploymentEnvironment } from "./deployment-env";
 
 const securityConfig = parseApiSecurityEnvironment(process.env);
-const rateLimiter = new InMemoryRateLimiter(
-  securityConfig.maxRequests,
-  securityConfig.windowMs,
-);
 const logger = createSecureLogger();
+
+type RequestRateLimiter = {
+  consume(key: string, now?: number): RateLimitDecision | Promise<RateLimitDecision>;
+};
+
+const globalForRateLimits = globalThis as typeof globalThis & {
+  safeExitRateLimiters?: Map<string, RequestRateLimiter>;
+  safeExitRateLimitStore?: PrismaRateLimitStore;
+};
 
 export class AgentHttpError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
     message: string,
+    readonly responseHeaders: Record<string, string> = {},
   ) {
     super(message);
     this.name = "AgentHttpError";
@@ -39,7 +51,81 @@ function clientKey(request: Request): string {
   return createHash("sha256").update(address.slice(0, 256)).digest("hex");
 }
 
-export function authorizeAgentRequest(request: Request): Record<string, string> {
+function getRequestRateLimiter(scope: string, limit: number): RequestRateLimiter {
+  globalForRateLimits.safeExitRateLimiters ??= new Map();
+  const key = `${scope}:${limit}:${securityConfig.windowMs}`;
+  const existing = globalForRateLimits.safeExitRateLimiters.get(key);
+  if (existing) {
+    return existing;
+  }
+  const deployment = parseDeploymentEnvironment();
+  const limiter = deployment.nodeEnv === "production"
+    ? new SharedRateLimiter(
+        limit,
+        securityConfig.windowMs,
+        globalForRateLimits.safeExitRateLimitStore ??=
+          new PrismaRateLimitStore(getPrismaClient(), "safeexit-http-v1"),
+      )
+    : new InMemoryRateLimiter(limit, securityConfig.windowMs);
+  globalForRateLimits.safeExitRateLimiters.set(key, limiter);
+  return limiter;
+}
+
+async function consumeRequestRateLimit(
+  request: Request,
+  scope: string,
+  limit: number,
+): Promise<{ decision: RateLimitDecision; headers: Record<string, string> }> {
+  const decision = await getRequestRateLimiter(scope, limit).consume(
+    `${scope}:${clientKey(request)}`,
+  );
+  return {
+    decision,
+    headers: {
+      "RateLimit-Limit": String(decision.limit),
+      "RateLimit-Remaining": String(decision.remaining),
+      "RateLimit-Reset": String(Math.ceil(decision.resetAt / 1_000)),
+    },
+  };
+}
+
+export async function rateLimitAgentRequest(
+  request: Request,
+  scope = "agent",
+): Promise<Record<string, string>> {
+  const { decision, headers } = await consumeRequestRateLimit(
+    request,
+    scope,
+    securityConfig.maxRequests,
+  );
+  if (!decision.allowed) {
+    throw new AgentHttpError(
+      429,
+      "RATE_LIMITED",
+      "Too many agent-service requests",
+      { ...headers, "Retry-After": String(Math.max(1, Math.ceil((decision.resetAt - Date.now()) / 1_000))) },
+    );
+  }
+  return headers;
+}
+
+export async function rateLimitPublicRequest(
+  request: Request,
+  scope: string,
+  maximum = securityConfig.maxRequests,
+): Promise<{ allowed: boolean; headers: Record<string, string> }> {
+  const { decision, headers } = await consumeRequestRateLimit(
+    request,
+    scope,
+    Math.min(securityConfig.maxRequests, maximum),
+  );
+  return { allowed: decision.allowed, headers };
+}
+
+export async function authorizeAgentRequest(
+  request: Request,
+): Promise<Record<string, string>> {
+  const headers = await rateLimitAgentRequest(request, "authenticated-agent");
   const config = parseDeploymentEnvironment();
   if (config.agentMode === "DISABLED" || !config.agentApiKey) {
     throw new AgentHttpError(
@@ -56,18 +142,14 @@ export function authorizeAgentRequest(request: Request): Record<string, string> 
   const expectedDigest = digest(config.agentApiKey);
   const suppliedDigest = digest(supplied);
   if (!supplied || !timingSafeEqual(expectedDigest, suppliedDigest)) {
-    throw new AgentHttpError(401, "UNAUTHORIZED", "Valid bearer authentication is required");
+    throw new AgentHttpError(
+      401,
+      "UNAUTHORIZED",
+      "Valid bearer authentication is required",
+      headers,
+    );
   }
 
-  const decision = rateLimiter.consume(clientKey(request));
-  const headers = {
-    "RateLimit-Limit": String(decision.limit),
-    "RateLimit-Remaining": String(decision.remaining),
-    "RateLimit-Reset": String(Math.ceil(decision.resetAt / 1_000)),
-  };
-  if (!decision.allowed) {
-    throw new AgentHttpError(429, "RATE_LIMITED", "Too many agent-service requests");
-  }
   return headers;
 }
 
@@ -87,7 +169,11 @@ export function agentErrorResponse(
   headers: Record<string, string> = {},
 ): Response {
   if (error instanceof AgentHttpError) {
-    return agentJson({ code: error.code, message: error.message }, error.status, headers);
+    return agentJson(
+      { code: error.code, message: error.message },
+      error.status,
+      { ...error.responseHeaders, ...headers },
+    );
   }
   if (error instanceof ApiInputError) {
     return agentJson(

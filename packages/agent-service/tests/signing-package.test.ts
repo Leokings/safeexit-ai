@@ -81,6 +81,76 @@ function daiPackage(): Record<string, unknown> {
   };
 }
 
+function eip3009Package(): Record<string, unknown> {
+  return {
+    schemaVersion: "safeexit-signing-package-v1",
+    packageId: "signing-package:eip3009",
+    jobId: "job:test",
+    incidentId: "incident:test",
+    planId: "plan:test",
+    planHash,
+    actionId: "action:transfer",
+    route: "ERC3009_RECEIVE_WITH_AUTHORIZATION",
+    chainId: 1,
+    sourceAddress: source,
+    destinationAddress: destination,
+    observedAtBlock: "123",
+    expiresAt: "2026-07-13T10:04:00.000Z",
+    tokenAddress: token,
+    amount: "100",
+    sourceSigningRequests: [{
+      id: "source-transfer-authorization",
+      signer: source,
+      method: "EIP712",
+      rpcMethod: "eth_signTypedData_v4",
+      typedData: {
+        primaryType: "ReceiveWithAuthorization",
+        types: {
+          EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+          ReceiveWithAuthorization: [
+            ...SIGNING_PACKAGE_EIP712_TYPES.ReceiveWithAuthorization,
+          ],
+        },
+        domain: {
+          name: "USD Coin",
+          version: "2",
+          chainId: 1,
+          verifyingContract: token,
+        },
+        message: {
+          from: source,
+          to: destination,
+          value: "100",
+          validAfter: "1783936800",
+          validBefore: "1783937040",
+          nonce: `0x${"8".repeat(64)}`,
+        },
+      },
+    }],
+    destinationSettlement: {
+      executor: destination,
+      payer: "DESTINATION",
+      assembly: "BUYER_LOCAL_RUNTIME",
+      atomicRequired: false,
+      operations: ["RECEIVE_WITH_AUTHORIZATION"],
+    },
+    simulation: {
+      resultId: "simulation:test",
+      providerId: "test-simulator",
+      status: "SUCCEEDED",
+      expiresAt: "2026-07-13T10:05:00.000Z",
+    },
+    policy: {
+      sourceSignsLocally: true,
+      destinationPaysSettlement: true,
+      privateCredentialsAccepted: false,
+      signaturesReturnedToSafeExit: false,
+      arbitraryCallsAllowed: false,
+      postSignatureSimulationRequired: true,
+    },
+  };
+}
+
 describe("agent signing package", () => {
   it("accepts a tightly scoped DAI allow-transfer-revoke package", () => {
     const parsed = signingPackageSchema.parse(daiPackage());
@@ -150,5 +220,45 @@ describe("agent signing package", () => {
 
     expect(signingPackageSchema.safeParse(withCredential).success).toBe(false);
     expect(signingPackageSchema.safeParse(withCalldata).success).toBe(false);
+  });
+
+  it("accepts an exact, short-lived ERC-3009 authorization", () => {
+    expect(signingPackageSchema.safeParse(eip3009Package()).success).toBe(true);
+  });
+
+  it("rejects unsafe ERC-3009 amount, nonce, and validity windows", () => {
+    const zeroAmount = eip3009Package();
+    zeroAmount.amount = "0";
+
+    const zeroNonce = eip3009Package();
+    const zeroNonceRequest = (zeroNonce.sourceSigningRequests as Array<Record<string, unknown>>)[0];
+    const zeroNonceTypedData = zeroNonceRequest?.typedData as Record<string, unknown>;
+    zeroNonceTypedData.message = {
+      ...(zeroNonceTypedData.message as Record<string, unknown>),
+      nonce: `0x${"0".repeat(64)}`,
+    };
+
+    const invertedWindow = eip3009Package();
+    const invertedRequest = (
+      invertedWindow.sourceSigningRequests as Array<Record<string, unknown>>
+    )[0];
+    const invertedTypedData = invertedRequest?.typedData as Record<string, unknown>;
+    invertedTypedData.message = {
+      ...(invertedTypedData.message as Record<string, unknown>),
+      validAfter: "1783937040",
+    };
+
+    expect(signingPackageSchema.safeParse(zeroAmount).success).toBe(false);
+    expect(signingPackageSchema.safeParse(zeroNonce).success).toBe(false);
+    expect(signingPackageSchema.safeParse(invertedWindow).success).toBe(false);
+  });
+
+  it("rejects a simulation that expires before the signing package", () => {
+    const value = eip3009Package();
+    value.simulation = {
+      ...(value.simulation as Record<string, unknown>),
+      expiresAt: "2026-07-13T10:03:59.000Z",
+    };
+    expect(signingPackageSchema.safeParse(value).success).toBe(false);
   });
 });

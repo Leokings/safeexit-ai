@@ -174,8 +174,28 @@ function sameAddress(left: string, right: string): boolean {
 }
 
 function assertFresh(signingPackage: SigningPackage, now: Date): void {
-  if (Date.parse(signingPackage.expiresAt) <= now.getTime()) {
+  const expiresAt = Date.parse(signingPackage.expiresAt);
+  if (expiresAt <= now.getTime()) {
     throw new BuyerRuntimeError("PACKAGE_EXPIRED", "The signing package has expired");
+  }
+  if (expiresAt - now.getTime() > 300_000) {
+    throw new BuyerRuntimeError(
+      "PACKAGE_EXPIRED",
+      "The signing package exceeds the maximum five-minute authorization window",
+    );
+  }
+  if (signingPackage.route === "ERC3009_RECEIVE_WITH_AUTHORIZATION") {
+    const message = signingPackage.sourceSigningRequests[0].typedData.message;
+    const nowSeconds = BigInt(Math.floor(now.getTime() / 1_000));
+    if (
+      nowSeconds <= BigInt(message.validAfter) ||
+      nowSeconds >= BigInt(message.validBefore)
+    ) {
+      throw new BuyerRuntimeError(
+        "PACKAGE_EXPIRED",
+        "The ERC-3009 authorization is not active at the current time",
+      );
+    }
   }
 }
 

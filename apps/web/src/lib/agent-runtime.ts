@@ -22,7 +22,6 @@ import {
   getPrismaClient,
 } from "@safeexit/persistence";
 import {
-  computePlanIntegrityHash,
   DeterministicRescuePlanner,
 } from "@safeexit/planner";
 import {
@@ -30,11 +29,8 @@ import {
   ViemStandardReadClient,
 } from "@safeexit/scanner";
 import {
-  rescuePlanSchema,
-  simulationResultSchema,
   walletScanSchema,
   type Incident,
-  type RescueAction,
   type RescuePlan,
   type WalletScan,
 } from "@safeexit/shared";
@@ -45,7 +41,21 @@ import {
 } from "@safeexit/simulator";
 import type { Address } from "viem";
 
-const erc20DecimalsAbi = [
+const erc20MetadataAbi = [
+  {
+    type: "function",
+    name: "name",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+  },
+  {
+    type: "function",
+    name: "symbol",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+  },
   {
     type: "function",
     name: "decimals",
@@ -55,161 +65,38 @@ const erc20DecimalsAbi = [
   },
 ] as const;
 
-import { createDemoAiContext } from "./demo-ai-context";
-import { demoIncident } from "./demo-incident";
+const erc721MetadataAbi = [
+  {
+    type: "function",
+    name: "name",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+  },
+] as const;
+
+function safeOnchainMetadata(value: string, maximum: number, fallback: string): string {
+  const normalized = value.replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, maximum);
+  return normalized || fallback;
+}
+
 import { parseDeploymentEnvironment } from "./deployment-env";
 import { LivePermitSigningPackageBuilder } from "./live-signing-package-builder";
 import { LiveBuyerExecutionVerifier } from "./live-buyer-report-verifier";
 import { LiveXLayerTestnetManifestAnalyzer } from "./live-testnet-analyzer";
 
-const replayGas: Record<RescueAction["actionType"], string> = {
-  CLAIM_SUPPORTED_AIRDROP: "34873",
-  TRANSFER_ERC20: "46803",
-  TRANSFER_ERC721: "57872",
-  REVOKE_ERC20_APPROVAL: "24394",
-  TRANSFER_ERC1155: "0",
-  REVOKE_NFT_OPERATOR: "0",
-  WITHDRAW_SUPPORTED_POSITION: "0",
-  CUSTOM_SUPPORTED_ADAPTER: "0",
-  TRANSFER_NATIVE: "0",
-};
-
-function assertReplayScope(incident: Incident): void {
-  if (
-    incident.chainId !== demoIncident.chainId ||
-    incident.sourceAddress.toLowerCase() !== demoIncident.source.toLowerCase() ||
-    incident.destinationAddress.toLowerCase() !== demoIncident.destination.toLowerCase()
-  ) {
-    throw new Error(
-      "Hosted replay supports only the fixed developer-created demo incident",
-    );
-  }
-}
-
-function scoped(scope: string, value: string): string {
-  return `${value}:${scope}`.slice(0, 256);
-}
-
-class HostedReplayAnalyzer implements IncidentAnalyzerPort {
-  async analyse(incident: Incident): Promise<WalletScan> {
-    assertReplayScope(incident);
-    const base = createDemoAiContext().scan;
-    const evidenceIds = new Map<string, string>();
-    for (const evidence of [...base.assets, ...base.approvals]) {
-      evidenceIds.set(evidence.id, scoped(incident.id, evidence.id));
-    }
-    return walletScanSchema.parse({
-      ...base,
-      id: scoped(incident.id, "scan"),
-      incidentId: incident.id,
-      address: incident.sourceAddress,
-      providerId: "safeexit-hosted-replay-v1",
-      assets: base.assets.map((asset) => ({
-        ...asset,
-        id: evidenceIds.get(asset.id),
-        ownerAddress: incident.sourceAddress,
-      })),
-      approvals: base.approvals.map((approval) => ({
-        ...approval,
-        id: evidenceIds.get(approval.id),
-        ownerAddress: incident.sourceAddress,
-      })),
-      warnings: [
-        "Hosted replay fixture only; this is not a live production-chain discovery result.",
-      ],
-    });
-  }
-}
-
-class HostedReplayPlanner implements RescuePlanGeneratorPort {
-  async generate(incident: Incident, scan: WalletScan): Promise<RescuePlan> {
-    assertReplayScope(incident);
-    const base = createDemoAiContext().plan;
-    if (!base) {
-      throw new Error("Hosted replay plan is unavailable");
-    }
-
-    const evidenceMap = new Map<string, string>([
-      ["asset:srt", scan.assets.find((asset) => asset.assetType === "ERC20")?.id ?? ""],
-      ["asset:nft:1", scan.assets.find((asset) => asset.assetType === "ERC721")?.id ?? ""],
-      ["approval:demo-attacker", scan.approvals[0]?.id ?? ""],
-      ["claim:srt", scoped(incident.id, "claim:srt")],
-    ]);
-    const actionMap = new Map(
-      base.actions.map((action) => [action.id, scoped(incident.id, action.id)]),
-    );
-    const actions = base.actions.map((action) => ({
-      ...action,
-      id: actionMap.get(action.id),
-      sourceAddress: incident.sourceAddress,
-      dependencies: action.dependencies.map((id) => actionMap.get(id)),
-      evidenceIds: action.evidenceIds.map((id) => evidenceMap.get(id)),
-      expectedEffects: action.expectedEffects.map((effect) => ({
-        ...effect,
-        ...(effect.assetId ? { assetId: evidenceMap.get(effect.assetId) } : {}),
-      })),
-      parameters:
-        "recipient" in action.parameters
-          ? { ...action.parameters, recipient: incident.destinationAddress }
-          : action.parameters,
-    }));
-    const payload: Omit<RescuePlan, "integrityHash"> = {
-      ...base,
-      id: scoped(incident.id, "plan"),
-      incidentId: incident.id,
-      sourceAddress: incident.sourceAddress,
-      destinationAddress: incident.destinationAddress,
-      actions: rescuePlanSchema.shape.actions.parse(actions),
-      createdAt: new Date().toISOString(),
-    };
-    return rescuePlanSchema.parse({
-      ...payload,
-      integrityHash: computePlanIntegrityHash(payload),
-    });
-  }
-}
-
-class HostedReplaySimulator implements RescuePlanSimulatorPort {
-  async simulate(plan: RescuePlan): Promise<AgentSimulationReport> {
-    const simulatedAt = new Date();
-    const expiresAt = new Date(simulatedAt.getTime() + 5 * 60_000);
-    const results = plan.actions.map((action, index) =>
-      simulationResultSchema.parse({
-        id: scoped(plan.id, `simulation:${index + 1}`),
-        planId: plan.id,
-        actionId: action.id,
-        providerId: "safeexit-hosted-replay-v1",
-        status: "SUCCEEDED",
-        planHash: plan.integrityHash,
-        observedAtBlock: plan.observedAtBlock,
-        gasEstimate: replayGas[action.actionType],
-        expectedEffects: action.expectedEffects,
-        assetChanges: [],
-        warnings: [
-          "Verified fixture replay only; no production simulation provider was called.",
-        ],
-        simulatedAt: simulatedAt.toISOString(),
-        expiresAt: expiresAt.toISOString(),
-      }),
-    );
-    return {
-      status: "SUCCEEDED",
-      providerId: "safeexit-hosted-replay-v1",
-      results,
-      executableActionIds: plan.actions.map((action) => action.id),
-      excludedActionIds: [],
-    };
-  }
-}
-
 class LiveXLayerAnalyzer implements IncidentAnalyzerPort {
   private readonly discovery: OkxWalletBalanceDiscoveryClient;
 
-  constructor(private readonly rpcUrl: string, credentials: {
-    apiKey: string;
-    secretKey: string;
-    passphrase: string;
-  }) {
+  constructor(
+    private readonly rpcUrl: string,
+    credentials: {
+      apiKey: string;
+      secretKey: string;
+      passphrase: string;
+    },
+    private readonly manifest?: OkxA2AAssetManifest,
+  ) {
     this.discovery = new OkxWalletBalanceDiscoveryClient(
       credentials,
       async (request) => {
@@ -248,18 +135,33 @@ class LiveXLayerAnalyzer implements IncidentAnalyzerPort {
     const metadata = await Promise.all(
       selectedCandidates.map(async (candidate) => {
         try {
-          const decimals = await client.readContract({
-            address: candidate.tokenAddress as Address,
-            abi: erc20DecimalsAbi,
-            functionName: "decimals",
-            blockNumber: observedAtBlock,
-          });
+          const address = candidate.tokenAddress as Address;
+          const [name, symbol, decimals] = await Promise.all([
+            client.readContract({
+              address,
+              abi: erc20MetadataAbi,
+              functionName: "name",
+              blockNumber: observedAtBlock,
+            }).catch(() => candidate.symbol),
+            client.readContract({
+              address,
+              abi: erc20MetadataAbi,
+              functionName: "symbol",
+              blockNumber: observedAtBlock,
+            }).catch(() => candidate.symbol),
+            client.readContract({
+              address,
+              abi: erc20MetadataAbi,
+              functionName: "decimals",
+              blockNumber: observedAtBlock,
+            }),
+          ]);
           return {
             candidate,
             query: {
               tokenAddress: candidate.tokenAddress,
-              name: candidate.symbol,
-              symbol: candidate.symbol.slice(0, 32),
+              name: safeOnchainMetadata(name, 128, candidate.symbol),
+              symbol: safeOnchainMetadata(symbol, 32, candidate.symbol.slice(0, 32)),
               decimals,
             },
           };
@@ -268,10 +170,105 @@ class LiveXLayerAnalyzer implements IncidentAnalyzerPort {
         }
       }),
     );
-    const manifestTokens = metadata.flatMap((entry) =>
-      "query" in entry && entry.query ? [entry.query] : [],
+    const discoveredAddresses = new Set(
+      selectedCandidates.map((candidate) => candidate.tokenAddress.toLowerCase()),
     );
-    const metadataFailures = metadata.filter((entry) => !("query" in entry)).length;
+    const explicitTokenMetadata = await Promise.all(
+      (this.manifest?.erc20TokenAddresses ?? [])
+        .filter((address) => !discoveredAddresses.has(address.toLowerCase()))
+        .map(async (tokenAddress) => {
+          try {
+            const address = tokenAddress as Address;
+            const bytecode = await client.getCode({ address, blockNumber: observedAtBlock });
+            if (!bytecode) {
+              throw new Error("No bytecode");
+            }
+            const [name, symbol, decimals] = await Promise.all([
+              client.readContract({
+                address,
+                abi: erc20MetadataAbi,
+                functionName: "name",
+                blockNumber: observedAtBlock,
+              }),
+              client.readContract({
+                address,
+                abi: erc20MetadataAbi,
+                functionName: "symbol",
+                blockNumber: observedAtBlock,
+              }),
+              client.readContract({
+                address,
+                abi: erc20MetadataAbi,
+                functionName: "decimals",
+                blockNumber: observedAtBlock,
+              }),
+            ]);
+            return {
+              query: {
+                tokenAddress,
+                name: safeOnchainMetadata(name, 128, "Unlabelled ERC-20"),
+                symbol: safeOnchainMetadata(symbol, 32, "TOKEN"),
+                decimals,
+              },
+            } as const;
+          } catch {
+            return { tokenAddress, omitted: true } as const;
+          }
+        }),
+    );
+    const manifestTokens = [
+      ...metadata.flatMap((entry) =>
+        "query" in entry && entry.query ? [entry.query] : [],
+      ),
+      ...explicitTokenMetadata.flatMap((entry) =>
+        "query" in entry ? [entry.query] : [],
+      ),
+    ];
+    const explicitNftMetadata = await Promise.all(
+      (this.manifest?.erc721Assets ?? []).map(async (asset) => {
+        try {
+          const address = asset.collectionAddress as Address;
+          const bytecode = await client.getCode({ address, blockNumber: observedAtBlock });
+          if (!bytecode) {
+            throw new Error("No bytecode");
+          }
+          const name = await client.readContract({
+            address,
+            abi: erc721MetadataAbi,
+            functionName: "name",
+            blockNumber: observedAtBlock,
+          }).catch(() => "Unlabelled ERC-721");
+          return {
+            query: {
+              collectionAddress: asset.collectionAddress,
+              tokenId: BigInt(asset.tokenId),
+              name: safeOnchainMetadata(name, 128, "Unlabelled ERC-721"),
+            },
+          } as const;
+        } catch {
+          return { asset, omitted: true } as const;
+        }
+      }),
+    );
+    const explicitErc1155Metadata = await Promise.all(
+      (this.manifest?.erc1155Assets ?? []).map(async (asset) => {
+        const address = asset.collectionAddress as Address;
+        const bytecode = await client.getCode({ address, blockNumber: observedAtBlock });
+        return bytecode
+          ? {
+              query: {
+                collectionAddress: asset.collectionAddress,
+                tokenId: BigInt(asset.tokenId),
+              },
+            } as const
+          : { asset, omitted: true } as const;
+      }),
+    );
+    const metadataFailures =
+      metadata.filter((entry) => !("query" in entry)).length +
+      explicitTokenMetadata.filter((entry) => !("query" in entry)).length +
+      explicitNftMetadata.filter((entry) => !("query" in entry)).length +
+      explicitErc1155Metadata.filter((entry) => !("query" in entry)).length;
     const reader = new ViemStandardReadClient("x-layer-mainnet-rpc", client);
     const scanner = new DeterministicWalletScanner({
       config: xLayerMainnetConfig,
@@ -282,7 +279,15 @@ class LiveXLayerAnalyzer implements IncidentAnalyzerPort {
       chainId: incident.chainId,
       address: incident.sourceAddress,
       observedAtBlock,
-      manifest: { erc20Assets: manifestTokens },
+      manifest: {
+        erc20Assets: manifestTokens,
+        erc721Assets: explicitNftMetadata.flatMap((entry) =>
+          "query" in entry ? [entry.query] : [],
+        ),
+        erc1155Assets: explicitErc1155Metadata.flatMap((entry) =>
+          "query" in entry ? [entry.query] : [],
+        ),
+      },
     });
     const candidateByAddress = new Map(
       selectedCandidates.map((candidate) => [
@@ -319,6 +324,7 @@ class LiveXLayerAnalyzer implements IncidentAnalyzerPort {
       warnings: [
         ...report.scan.warnings,
         "ERC-20 candidates were discovered by the official OKX Wallet API and balances were re-verified at the pinned RPC block.",
+        "Explicit incident asset contracts were merged with discovery and re-verified at the pinned RPC block.",
         "NFT, allowance, operator-approval, Permit2, airdrop, and protocol-position discovery is not exhaustive in this release.",
         ...(uniqueCandidates.length > selectedCandidates.length
           ? ["Token discovery was capped at 50 candidates for this incident."]
@@ -390,16 +396,6 @@ class ReviewOnlyMonitor implements RescueMonitorPort {
   }
 }
 
-class ScopedDashboardLocator implements DashboardLocatorPort {
-  constructor(private readonly baseUrl: string) {}
-
-  getDashboardUrl(job: Parameters<DashboardLocatorPort["getDashboardUrl"]>[0]): string {
-    const url = new URL("/demo", this.baseUrl);
-    url.searchParams.set("job", job.id);
-    return url.toString();
-  }
-}
-
 class LiveDashboardLocator implements DashboardLocatorPort {
   constructor(private readonly baseUrl: string) {}
 
@@ -428,6 +424,7 @@ export type AgentRuntimeRequest = {
 
 function createMainnetService(
   config: ReturnType<typeof parseDeploymentEnvironment>,
+  assetManifest?: OkxA2AAssetManifest,
 ): AgentIncidentService {
   if (
     !config.okxWeb3ApiKey ||
@@ -443,7 +440,7 @@ function createMainnetService(
       apiKey: config.okxWeb3ApiKey,
       secretKey: config.okxWeb3SecretKey,
       passphrase: config.okxWeb3Passphrase,
-    }),
+    }, assetManifest),
     planner: new LiveDeterministicPlanner(),
     simulator: new LiveRpcSimulator(xLayerMainnetConfig, config.xLayerMainnetRpcUrl),
     dashboard: new LiveDashboardLocator(config.publicBaseUrl),
@@ -491,35 +488,15 @@ export function getAgentIncidentService(
   request: AgentRuntimeRequest = {},
 ): AgentIncidentService {
   const config = parseDeploymentEnvironment();
-  if (config.agentMode === "DISABLED") {
+  if (config.agentMode !== "LIVE_READONLY") {
     throw new Error("SAFEEXIT agent service is disabled for this deployment");
   }
-  if (config.agentMode === "LIVE_READONLY") {
-    const chainId = request.chainId ?? xLayerMainnetConfig.chain.id;
-    if (chainId === xLayerMainnetConfig.chain.id) {
-      return createMainnetService(config);
-    }
-    if (chainId === xLayerTestnetConfig.chain.id) {
-      return createTestnetService(config, request.assetManifest);
-    }
-    throw new Error(`Live SAFEEXIT does not support chain ${chainId}`);
+  const chainId = request.chainId ?? xLayerMainnetConfig.chain.id;
+  if (chainId === xLayerMainnetConfig.chain.id) {
+    return createMainnetService(config, request.assetManifest);
   }
-  return new AgentIncidentService({
-    store: createStore(),
-    analyzer: new HostedReplayAnalyzer(),
-    planner: new HostedReplayPlanner(),
-    simulator: new HostedReplaySimulator(),
-    dashboard: new ScopedDashboardLocator(config.publicBaseUrl),
-    signingPackages: {
-      build: async () => {
-        throw new Error("Hosted replay does not issue production signing packages");
-      },
-    },
-    executionVerifier: {
-      verify: async () => {
-        throw new Error("Hosted replay does not verify buyer execution reports");
-      },
-    },
-    monitor: new ReviewOnlyMonitor(),
-  });
+  if (chainId === xLayerTestnetConfig.chain.id) {
+    return createTestnetService(config, request.assetManifest);
+  }
+  throw new Error(`Live SAFEEXIT does not support chain ${chainId}`);
 }

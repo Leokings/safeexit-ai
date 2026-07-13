@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
 import { DraftWorkspace } from "@/components/draft-workspace";
 import { TestnetRescueWorkspace } from "@/components/testnet-rescue-workspace";
@@ -14,10 +14,6 @@ export const dynamic = "force-dynamic";
 
 export default async function RescuePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-
-  if (id === "demo-31337") {
-    redirect("/demo");
-  }
 
   const repository = new PrismaSafeExitRepository(getPrismaClient());
   let incident = await repository.getIncident(id);
@@ -38,6 +34,7 @@ export default async function RescuePage({ params }: { params: Promise<{ id: str
         incidentId={incident.id}
         source={incident.sourceAddress}
         destination={incident.destinationAddress}
+        {...(incident.assetManifest ? { assetManifest: incident.assetManifest } : {})}
       />
     );
   }

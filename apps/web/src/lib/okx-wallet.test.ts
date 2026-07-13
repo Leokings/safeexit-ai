@@ -534,6 +534,8 @@ describe("testnet preflight request", () => {
   it("accepts at most eight validated EVM token addresses", () => {
     expect(testnetPreflightRequestSchema.parse({ tokenAddresses: [source] })).toEqual({
       tokenAddresses: [source],
+      erc721Assets: [],
+      erc1155Assets: [],
     });
     expect(() =>
       testnetPreflightRequestSchema.parse({
@@ -556,5 +558,20 @@ describe("testnet preflight request", () => {
       tokenAddresses: [],
       erc721Assets: [{ collectionAddress: collection, tokenId: "-1" }],
     })).toThrow();
+  });
+
+  it("accepts explicit ERC-1155 collection and token ID pairs", () => {
+    expect(testnetPreflightRequestSchema.parse({
+      tokenAddresses: [],
+      erc1155Assets: [{ collectionAddress: collection, tokenId: "7" }],
+    }).erc1155Assets).toEqual([{ collectionAddress: collection, tokenId: "7" }]);
+    expect(() => testnetPreflightRequestSchema.parse({
+      tokenAddresses: [],
+      erc1155Assets: [{ collectionAddress: collection, tokenId: "-1" }],
+    })).toThrow();
+  });
+
+  it("rejects an empty asset batch", () => {
+    expect(() => testnetPreflightRequestSchema.parse({ tokenAddresses: [] })).toThrow();
   });
 });

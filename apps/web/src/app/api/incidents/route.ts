@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import { ZodError } from "zod";
 
@@ -7,26 +7,15 @@ import {
   ApiInputError,
   createIncidentRequestSchema,
   createSecureLogger,
-  InMemoryRateLimiter,
-  parseApiSecurityEnvironment,
   parseJsonBody,
 } from "@safeexit/security";
 import { incidentSchema } from "@safeexit/shared";
 
+import { rateLimitPublicRequest } from "@/lib/agent-http";
+
 export const runtime = "nodejs";
 
-const securityConfig = parseApiSecurityEnvironment(process.env);
-const rateLimiter = new InMemoryRateLimiter(
-  securityConfig.maxRequests,
-  securityConfig.windowMs,
-);
 const logger = createSecureLogger();
-
-function clientKey(request: Request): string {
-  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const address = forwarded || request.headers.get("x-real-ip") || "unknown";
-  return createHash("sha256").update(address.slice(0, 256)).digest("hex");
-}
 
 function jsonResponse(
   body: unknown,
@@ -43,17 +32,24 @@ function jsonResponse(
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const decision = rateLimiter.consume(clientKey(request));
-  const rateHeaders = {
-    "RateLimit-Limit": String(decision.limit),
-    "RateLimit-Remaining": String(decision.remaining),
-    "RateLimit-Reset": String(Math.ceil(decision.resetAt / 1_000)),
-  };
-  if (!decision.allowed) {
+  let rateHeaders: Record<string, string> = {};
+  try {
+    const rateLimit = await rateLimitPublicRequest(request, "incidents");
+    rateHeaders = rateLimit.headers;
+    if (!rateLimit.allowed) {
+      return jsonResponse(
+        { code: "RATE_LIMITED", message: "Too many incident requests" },
+        429,
+        rateHeaders,
+      );
+    }
+  } catch {
     return jsonResponse(
-      { code: "RATE_LIMITED", message: "Too many incident requests" },
-      429,
-      rateHeaders,
+      {
+        code: "RATE_LIMIT_UNAVAILABLE",
+        message: "Incident request protection is temporarily unavailable",
+      },
+      503,
     );
   }
 
@@ -65,6 +61,7 @@ export async function POST(request: Request): Promise<Response> {
       chainId: input.chainId,
       sourceAddress: input.sourceAddress,
       destinationAddress: input.destinationAddress,
+      assetManifest: input.assetManifest,
       status: "RECEIVED",
       ownershipAttestation: {
         accepted: input.authorizationConfirmed,

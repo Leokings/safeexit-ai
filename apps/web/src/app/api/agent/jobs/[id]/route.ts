@@ -14,7 +14,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 export async function GET(request: Request, context: RouteContext): Promise<Response> {
   let headers: Record<string, string> = {};
   try {
-    headers = authorizeAgentRequest(request);
+    headers = await authorizeAgentRequest(request);
     const { id } = await context.params;
     const job = await getAgentIncidentService().getJob(id);
     return agentJson(

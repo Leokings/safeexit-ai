@@ -1,11 +1,19 @@
 import {
   createDedicatedPublicClient,
-  xLayerMainnetConfig,
   xLayerTestnetConfig,
 } from "@safeexit/chain";
-import { checkDatabaseConnection } from "@safeexit/persistence";
+import {
+  checkDatabaseConnection,
+  checkSharedRateLimitStore,
+  getPrismaClient,
+} from "@safeexit/persistence";
 
 import { parseDeploymentEnvironment } from "@/lib/deployment-env";
+import { probeConfiguredRpcEndpoints } from "@/lib/rpc-endpoints";
+import {
+  getSafeExitX402Configuration,
+  SAFEEXIT_X402_PRICE,
+} from "@/lib/okx-x402";
 
 export const runtime = "nodejs";
 
@@ -13,7 +21,6 @@ export async function GET(): Promise<Response> {
   try {
     const config = parseDeploymentEnvironment();
     const checks: Record<string, string> = {
-      demo: config.demoMode,
       agent: config.agentMode,
       store: config.agentStore,
       ai: config.aiMode,
@@ -33,9 +40,17 @@ export async function GET(): Promise<Response> {
       }
       checks.okxProviderBridge = `configured:${config.okxProviderAgentId}`;
     }
+    if (config.x402Mode === "MAINNET") {
+      const x402 = getSafeExitX402Configuration(config);
+      checks.paidAgentApi = `configured:${x402.network}:${SAFEEXIT_X402_PRICE}`;
+    }
     if (config.agentMode !== "DISABLED" && config.agentStore === "DATABASE") {
       await checkDatabaseConnection();
       checks.database = "connected";
+    }
+    if (config.nodeEnv === "production") {
+      await checkSharedRateLimitStore(getPrismaClient());
+      checks.rateLimitStore = "shared:postgresql";
     }
     if (config.agentMode === "LIVE_READONLY") {
       if (
@@ -46,13 +61,9 @@ export async function GET(): Promise<Response> {
       ) {
         throw new Error("OKX Wallet API credentials and a dedicated RPC are required");
       }
-      const block = await createDedicatedPublicClient(
-        xLayerMainnetConfig,
-        config.xLayerMainnetRpcUrl,
-      ).getBlockNumber();
-      checks.xLayerRpc = `connected:${block.toString()}`;
       checks.okxWalletApi = "configured";
     }
+    Object.assign(checks, await probeConfiguredRpcEndpoints(config));
     if (config.nodeEnv === "production") {
       if (!config.xLayerTestnetRpcUrl) {
         throw new Error("XLAYER_TESTNET_RPC_URL is required for the signing pilot");
@@ -66,6 +77,7 @@ export async function GET(): Promise<Response> {
     if (config.aiMode === "GATEWAY" && !config.aiModel?.includes("/")) {
       throw new Error("SAFEEXIT_AI_MODEL must use provider/model format");
     }
+    checks.aiBudget = `${config.aiMaxEstimatedInputTokens}:${config.aiMaxOutputTokens}:${config.aiTimeoutMs}`;
     return Response.json(
       { status: "ready", checks },
       { headers: { "Cache-Control": "no-store" } },

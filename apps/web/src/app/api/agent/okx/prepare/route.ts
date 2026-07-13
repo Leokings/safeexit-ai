@@ -20,7 +20,7 @@ export const runtime = "nodejs";
 export async function POST(request: Request): Promise<Response> {
   let headers: Record<string, string> = {};
   try {
-    headers = authorizeAgentRequest(request);
+    headers = await authorizeAgentRequest(request);
     const input = await parseJsonBody(request, okxA2ATaskRequestSchema);
     const deliverable = await getOkxProviderBridge().prepareSigningDeliverable(
       getAgentIncidentService({
