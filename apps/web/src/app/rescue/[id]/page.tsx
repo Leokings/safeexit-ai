@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { isRescueMainnetChainId } from "@safeexit/chain";
 import { MainnetRescueWorkspace } from "@/components/mainnet-rescue-workspace";
 import { getPrismaClient, PrismaSafeExitRepository } from "@safeexit/persistence";
 import { getAgentIncidentService } from "@/lib/agent-runtime";
@@ -27,13 +28,14 @@ export default async function RescuePage({ params }: { params: Promise<{ id: str
     notFound();
   }
 
-  if (incident.chainId !== 196) {
+  if (!isRescueMainnetChainId(incident.chainId)) {
     notFound();
   }
 
   return (
     <MainnetRescueWorkspace
       incidentId={incident.id}
+      chainId={incident.chainId}
       source={incident.sourceAddress}
       destination={incident.destinationAddress}
       {...(incident.assetManifest ? { assetManifest: incident.assetManifest } : {})}

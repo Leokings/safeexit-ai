@@ -12,6 +12,7 @@
   "dependencies": {
     "@safeexit/agent-service": "*",
     "@safeexit/ai": "*",
+    "@safeexit/chain": "*",
     "@safeexit/shared": "*",
     "zod": "4.4.3"
   }

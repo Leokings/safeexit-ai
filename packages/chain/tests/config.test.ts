@@ -7,7 +7,10 @@ import {
   createDedicatedPublicClient,
   defaultDevelopmentChainConfig,
   getChainAdapterConfig,
+  getRescueMainnetChainConfig,
+  isRescueMainnetChainId,
   primaryChainConfig,
+  RESCUE_MAINNET_CHAIN_IDS,
   xLayerMainnetConfig,
 } from "../src/config";
 
@@ -31,12 +34,21 @@ describe("chain adapter configuration", () => {
     );
   });
 
-  it("resolves only configured chain IDs", () => {
+  it("resolves every verified rescue mainnet and the local chain", () => {
     expect(getChainAdapterConfig(196)).toBe(xLayerMainnetConfig);
     expect(getChainAdapterConfig(31_337)).toBe(anvilLocalConfig);
+    expect(getRescueMainnetChainConfig(1).chain.name).toBe("Ethereum");
+    expect(getRescueMainnetChainConfig(8_453).chain.name).toBe("Base");
+    expect(RESCUE_MAINNET_CHAIN_IDS).toEqual([
+      1, 56, 137, 42_161, 10, 8_453, 43_114, 196,
+    ]);
+    expect(isRescueMainnetChainId(43_114)).toBe(true);
+    expect(isRescueMainnetChainId(10_001)).toBe(false);
     expect(() => getChainAdapterConfig(10_001)).toThrow("Unsupported chain ID: 10001");
-    expect(() => getChainAdapterConfig(1)).toThrow("Unsupported chain ID: 1");
-    expect(configuredChains).toHaveLength(2);
+    expect(() => getRescueMainnetChainConfig(31_337)).toThrow(
+      "Unsupported rescue mainnet chain ID: 31337",
+    );
+    expect(configuredChains).toHaveLength(9);
   });
 
   it("refuses an RPC URL that is not in the chain configuration", () => {

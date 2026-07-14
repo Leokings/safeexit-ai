@@ -49,6 +49,32 @@ const deploymentEnvironmentSchema = z.strictObject({
 
 export type DeploymentEnvironment = z.infer<typeof deploymentEnvironmentSchema>;
 
+export function getDeploymentRpcUrl(
+  config: DeploymentEnvironment,
+  chainId: number,
+): string | undefined {
+  switch (chainId) {
+    case 1:
+      return config.ethereumMainnetRpcUrl;
+    case 56:
+      return config.bnbMainnetRpcUrl;
+    case 137:
+      return config.polygonMainnetRpcUrl;
+    case 42_161:
+      return config.arbitrumMainnetRpcUrl;
+    case 10:
+      return config.optimismMainnetRpcUrl;
+    case 8_453:
+      return config.baseMainnetRpcUrl;
+    case 43_114:
+      return config.avalancheMainnetRpcUrl;
+    case 196:
+      return config.xLayerMainnetRpcUrl;
+    default:
+      return undefined;
+  }
+}
+
 export function parseDeploymentEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
 ): DeploymentEnvironment {

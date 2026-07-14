@@ -15,12 +15,7 @@ export function getOkxProviderBridge(): OkxA2AProviderBridge {
       "OKX provider bridge is not configured for this deployment",
     );
   }
-  return new OkxA2AProviderBridge(
-    providerAgentId,
-    undefined,
-    undefined,
-    [196],
-  );
+  return new OkxA2AProviderBridge(providerAgentId);
 }
 
 export function normalizeOkxBridgeError(error: unknown): unknown {

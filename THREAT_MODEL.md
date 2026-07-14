@@ -36,7 +36,7 @@
 | Threat | Control |
 | --- | --- |
 | Destination substitution | Destination is repeated in UI, fixed in plan/package schemas, included in typed data, rechecked after network changes and immediately before submission. |
-| Cross-chain replay | Chain ID and verifying contract are verified against the token domain and committed package. Production accepts chain `196` only. |
+| Cross-chain replay | Chain ID and verifying contract are verified against the token domain and committed package. Production accepts only the eight code-owned rescue-chain IDs and rechecks the active wallet chain before submission. |
 | Signature replay | ERC-3009 random nonces, permit nonces, and short expiries; current nonce/state is read before signing. |
 | Arbitrary AI execution | AI is explanation-only and cannot author calldata or alter deterministic actions. |
 | Partial permit batch | Permit routes require EIP-5792 atomic execution; unsupported wallets fail closed. |
@@ -49,8 +49,9 @@
 ## Residual risks
 
 - Recovery cannot be guaranteed when the attacker has the same private key.
-- The official public X Layer RPC does not currently expose `eth_simulateV1`.
-  The browser therefore verifies the signed permit call, relies on EIP-5792
+- Public RPC simulation capabilities vary by chain; the official public X Layer
+  RPC does not currently expose `eth_simulateV1`. The browser therefore verifies
+  the signed permit call, relies on EIP-5792
   atomicity for multi-call execution, and verifies the exact transfer receipt.
   The buyer runtime requires a full sequential simulation provider and fails
   closed when one is unavailable.
@@ -65,4 +66,3 @@
   to anyone who receives the link.
 - No software audit can certify that funds are safe or replace a low-value,
   operator-owned canary and an incident-response plan.
-

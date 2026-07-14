@@ -2,13 +2,17 @@ import { z } from "zod";
 
 import {
   evmAddressSchema,
+  chainIdSchema,
   rescuePlanSchema,
   simulationResultSchema,
   walletScanSchema,
 } from "@safeexit/shared";
+import { isRescueMainnetChainId } from "@safeexit/chain";
 
-export const XLAYER_MAINNET_CHAIN_ID = 196;
-export const XLAYER_MAINNET_CHAIN_HEX = "0xc4";
+export const rescueMainnetChainIdSchema = chainIdSchema.refine(
+  isRescueMainnetChainId,
+  "Chain is not enabled for mainnet rescue",
+);
 
 const requestedNftSchema = z.strictObject({
   collectionAddress: evmAddressSchema,
@@ -45,7 +49,7 @@ export const mainnetPreflightRequestSchema = z
 export const eip712DomainSchema = z.strictObject({
   name: z.string().min(1).max(128),
   version: z.string().min(1).max(32),
-  chainId: z.literal(XLAYER_MAINNET_CHAIN_ID),
+  chainId: rescueMainnetChainIdSchema,
   verifyingContract: evmAddressSchema,
 });
 
@@ -113,13 +117,24 @@ export const blockedGaslessActionSchema = z.strictObject({
 });
 
 export const mainnetPreflightResponseSchema = z.strictObject({
-  chainId: z.literal(XLAYER_MAINNET_CHAIN_ID),
+  chainId: rescueMainnetChainIdSchema,
   scan: walletScanSchema,
   plan: rescuePlanSchema,
   simulations: z.array(simulationResultSchema),
   sourceFundedExecutionDisabled: z.literal(true),
   gaslessActions: z.array(gaslessRescueActionSchema),
   blockedActions: z.array(blockedGaslessActionSchema),
+}).superRefine((response, context) => {
+  if (
+    response.scan.chainId !== response.chainId ||
+    response.plan.chainId !== response.chainId
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "Preflight chain commitments do not match",
+      path: ["chainId"],
+    });
+  }
 });
 
 export type MainnetPreflightRequest = z.infer<typeof mainnetPreflightRequestSchema>;

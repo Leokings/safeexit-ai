@@ -5,6 +5,7 @@ import { ArrowRight, ShieldCheck, TriangleAlert } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { getAddress, isAddress } from "viem";
 
+import { rescueMainnetChainConfigs } from "@safeexit/chain";
 import {
   evmAddressSchema,
   type RescueAssetManifest,
@@ -100,6 +101,7 @@ function parseAssetManifest(
 
 export function StartRescueForm() {
   const router = useRouter();
+  const [chainId, setChainId] = useState(196);
   const [source, setSource] = useState("");
   const [destination, setDestination] = useState("");
   const [erc20Input, setErc20Input] = useState("");
@@ -144,7 +146,7 @@ export function StartRescueForm() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chainId: 196,
+          chainId,
           sourceAddress: source,
           destinationAddress: destination,
           assetManifest,
@@ -194,12 +196,20 @@ export function StartRescueForm() {
         </label>
       </div>
 
-      <div className="mt-1 max-w-sm">
+      <label className="mt-1 block max-w-sm">
         <span className="mb-2 block text-sm font-semibold">Network</span>
-        <div className="flex h-11 items-center rounded-md border border-border-strong bg-background px-3 text-sm text-foreground">
-          X Layer mainnet / 196
-        </div>
-      </div>
+        <select
+          value={chainId}
+          onChange={(event) => setChainId(Number(event.target.value))}
+          className="h-11 w-full rounded-md border border-border-strong bg-background px-3 text-sm text-foreground focus:border-accent focus:outline focus:outline-1"
+        >
+          {rescueMainnetChainConfigs.map((config) => (
+            <option key={config.chain.id} value={config.chain.id}>
+              {config.chain.name} / {config.chain.id}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <div className="mt-6 border-t border-border pt-5">
         <div className="mb-4">

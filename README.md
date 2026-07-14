@@ -3,9 +3,9 @@
 The current foundation contains the TypeScript monorepo, shared domain schemas,
 verified chain configuration, deterministic standard-token scanners, and an
 opt-in official OKX Wallet API balance-discovery adapter, and a buyer-local
-signing and settlement runtime. X Layer mainnet execution is enabled only for
-strictly verified destination-paid permit routes; native and unsupported assets
-remain blocked.
+signing and settlement runtime. Destination-paid execution is enabled on eight
+verified EVM mainnets only for token-level permit routes that pass fresh
+onchain capability checks; native and unsupported assets remain blocked.
 
 ## Deterministic scanning
 
@@ -25,10 +25,12 @@ Scanner states have distinct meanings:
 - `UNKNOWN`: a configured read failed or could not determine state. It is never
   converted into a zero balance.
 
-Production recovery supports X Layer mainnet only. A local Anvil adapter remains
+Production recovery supports Ethereum, BNB Smart Chain, Polygon, Arbitrum,
+Optimism, Base, Avalanche C-Chain, and X Layer. A local Anvil adapter remains
 available to deterministic unit tests, but the production repository no longer
-contains a demo UI, attacker fixture, or demo deployment scripts. X Layer values are sourced from the
-[official network documentation](https://web3.okx.com/onchainos/dev-docs/xlayer/developer/build-on-xlayer/network-information).
+contains a demo UI, attacker fixture, or demo deployment scripts. Chain IDs are
+checked against dedicated provider RPCs and the
+[official OKX supported-network matrix](https://web3.okx.com/onchain-os/dev-docs/home/supported-chain).
 
 ## Deterministic planning
 
@@ -90,8 +92,8 @@ destination-paid settlement stay in the buyer's local runtime. Jobs are
 dashboardless by default; an audit URL is created only through the explicit
 dashboard endpoint.
 
-An opt-in `LIVE_READONLY` agent mode replaces fixture analysis with real X Layer
-mainnet reads. It discovers non-risk ERC-20 candidates through the official OKX
+An opt-in `LIVE_READONLY` agent mode replaces fixture analysis with real
+incident-chain mainnet reads. It discovers non-risk ERC-20 candidates through the official OKX
 Wallet API, rechecks each candidate at a pinned block through a dedicated RPC,
 then uses the deterministic planner and real RPC preflight provider. The scan is
 always `PARTIAL` while NFT and approval discovery remain incomplete. Required
@@ -143,9 +145,9 @@ Model failure, timeout, invalid output, or token-budget overflow falls back to
 the deterministic explanation without changing the signing package. AI usage
 is persisted per SAFEEXIT job for cost accounting.
 
-## Destination-paid X Layer mainnet recovery
+## Destination-paid EVM mainnet recovery
 
-The X Layer mainnet rescue workspace supports multiple destination-paid asset
+The rescue workspace supports multiple destination-paid asset
 routes. ERC-3009 is preferred for fungible tokens when its capability and EIP-712 domain are
 verified onchain. The reported source signs a short-lived
 `ReceiveWithAuthorization` message and the destination submits it with real
@@ -170,13 +172,13 @@ verifiable EIP-712 domain and nonce. The source signs the NFT permit; the
 destination atomically submits `permit` and `transferFrom` and pays gas.
 
 Authorization signatures remain in browser memory and are never sent to or
-stored by SAFEEXIT. Assets without a verified permit route, native OKB,
+stored by SAFEEXIT. Assets without a verified permit route, native currency,
 ERC-1155 assets, approvals, airdrops, and positions stay blocked until a
 verified destination-paid adapter exists. The mainnet route is best effort and
 has not received an independent security audit.
 
-Native OKB recovery remains non-executable. The adapter package records
-fail-closed requirements for an audited EIP-7702 sponsor or an official X Layer
+Native-currency recovery remains non-executable. The adapter package records
+fail-closed requirements for an audited EIP-7702 sponsor or an official target-chain
 private atomic relay, including bytecode allowlisting, signed target/value/gas
 bounds, pinned simulation, no public-mempool fallback, and revocation handling.
 

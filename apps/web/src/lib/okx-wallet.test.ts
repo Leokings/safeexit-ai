@@ -8,6 +8,7 @@ import {
   createEip3009Authorization,
   createErc2612PermitAuthorization,
   createErc4494PermitAuthorization,
+  ensureRescueMainnet,
   ensureXLayerMainnet,
   getOkxConnectedAccount,
   getOkxCallsStatus,
@@ -178,11 +179,11 @@ class FakeProvider implements OkxInjectedProvider {
         this.rejectSwitchWith4902 = false;
         throw { code: 4_902 };
       }
-      this.chainId = "0xc4";
+      this.chainId = (request.params?.[0] as { chainId: string }).chainId;
       return null;
     }
     if (request.method === "wallet_addEthereumChain") {
-      this.chainId = "0xc4";
+      this.chainId = (request.params?.[0] as { chainId: string }).chainId;
       return null;
     }
     if (request.method === "eth_signTypedData_v4") {
@@ -266,7 +267,10 @@ class FakeProvider implements OkxInjectedProvider {
       });
     }
     if (request.method === "wallet_getCapabilities") {
-      return { "0xc4": { atomic: { status: this.atomicStatus } } };
+      const requestedChains = request.params?.[1] as string[];
+      return Object.fromEntries(
+        requestedChains.map((chainId) => [chainId, { atomic: { status: this.atomicStatus } }]),
+      );
     }
     if (request.method === "wallet_sendCalls") {
       return { id: "0x1234" };
@@ -310,6 +314,37 @@ describe("OKX injected wallet guardrails", () => {
       "eth_chainId",
     ]);
     expect(provider.chainId).toBe("0xc4");
+  });
+
+  it("switches to another verified mainnet using its exact chain metadata", async () => {
+    const provider = new FakeProvider();
+    provider.rejectSwitchWith4902 = true;
+
+    await ensureRescueMainnet(provider, 8_453);
+
+    expect(provider.chainId).toBe("0x2105");
+    expect(provider.calls[2]).toMatchObject({
+      method: "wallet_addEthereumChain",
+      params: [{ chainId: "0x2105", chainName: "Base" }],
+    });
+  });
+
+  it("binds authorizations to verified mainnets and rejects unknown chains", async () => {
+    const baseAction = gaslessRescueActionSchema.parse({
+      ...action,
+      domain: { ...action.domain, chainId: 8_453 },
+    });
+    expect(createEip3009Authorization(baseAction).domain.chainId).toBe(8_453);
+    expect(gaslessRescueActionSchema.safeParse({
+      ...action,
+      domain: { ...action.domain, chainId: 10_001 },
+    }).success).toBe(false);
+
+    const provider = new FakeProvider();
+    await expect(ensureRescueMainnet(provider, 10_001)).rejects.toThrow(
+      "Unsupported rescue mainnet chain ID: 10001",
+    );
+    expect(provider.calls).toHaveLength(0);
   });
 
   it("creates a short-lived authorization with a caller-provided nonce", () => {

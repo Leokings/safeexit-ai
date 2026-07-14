@@ -18,12 +18,13 @@ Required task fields are:
 - the exact ownership statement exported as
   `SAFEEXIT_AUTHORIZATION_STATEMENT`
 
-X Layer mainnet tasks (`chainId: 196`) require an explicit `assetManifest` with
+Tasks on a verified rescue mainnet require an explicit `assetManifest` with
 a bounded batch of ERC-20 contract addresses and explicit ERC-721/ERC-1155
 `collectionAddress` plus `tokenId` entries. SAFEEXIT reads those identified
 assets at a pinned block and may merge the manifest with OKX-backed ERC-20
 discovery so explicitly requested contracts are not omitted when an indexer
-does not return them. Other chains are rejected.
+does not return them. Unverified chains are rejected. The currently verified
+chain IDs are `1`, `56`, `137`, `42161`, `10`, `8453`, `43114`, and `196`.
 
 The canonical manifest is committed into the persisted incident scope.
 Reusing an OKX job ID with a different asset list is rejected by the same

@@ -113,7 +113,7 @@ export class LiveBuyerExecutionVerifier implements BuyerExecutionVerifierPort {
       failedActionIds: [],
       transactionHashes: [...report.transactionHashes],
       observedAt: this.clock().toISOString(),
-      detail: "Receipt status and committed Transfer event verified by X Layer RPC.",
+      detail: `Receipt status and committed Transfer event verified by ${this.chain.chain.name} RPC.`,
     };
   }
 }

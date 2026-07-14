@@ -13,6 +13,11 @@ agent APIs, local buyer runtime, x402 boundary, persistence, deployment
 configuration, and browser security boundary. SAFEEXIT has no custom production
 settlement contract in this release.
 
+This review predates the eight-network adapter expansion. The multichain release
+preserves the reviewed authorization and settlement invariants and is recorded
+separately in `MULTICHAIN_ADAPTER_VERIFICATION.md`; that internal verification
+does not widen this review into an independent audit.
+
 ## Resolved findings
 
 | ID | Severity | Finding | Resolution |
@@ -67,4 +72,3 @@ permit routes, perform a low-value operator-owned mainnet canary for each route,
 retain the current blocked-asset behavior, and commission an external review
 using `AUDIT_SCOPE.md`. Publish the external report and remediation commit before
 removing the unaudited warning or encouraging high-value rescues.
-

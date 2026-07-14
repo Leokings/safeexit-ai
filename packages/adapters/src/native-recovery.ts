@@ -15,7 +15,7 @@ export const nativeRecoveryBoundaries = [
     status: "OFFICIAL_DOCS_REQUIRED",
     executable: false,
     requirements: [
-      "Official X Layer support for EIP-7702 set-code transactions",
+      "Official target-chain support for EIP-7702 set-code transactions",
       "An audited and bytecode-allowlisted delegate implementation",
       "An official wallet authorization method that never accepts arbitrary delegate code",
       "A sponsor path that binds chain, nonce, target, calldata, value, gas, and expiry",
@@ -27,7 +27,7 @@ export const nativeRecoveryBoundaries = [
     status: "OFFICIAL_DOCS_REQUIRED",
     executable: false,
     requirements: [
-      "An official X Layer private relay endpoint and authentication contract",
+      "An official target-chain private relay endpoint and authentication contract",
       "Documented all-or-nothing ordering for sponsor and rescue transactions",
       "A strict prohibition on public-mempool fallback",
       "Pinned-state bundle simulation and inclusion-status monitoring",

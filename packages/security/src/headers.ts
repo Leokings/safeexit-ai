@@ -4,6 +4,13 @@ export function createContentSecurityPolicy(isDevelopment: boolean): string {
   const scriptSources = ["'self'", "'unsafe-inline'"];
   const connectSources = [
     "'self'",
+    "https://eth.merkle.io",
+    "https://56.rpc.thirdweb.com",
+    "https://polygon.drpc.org",
+    "https://arb1.arbitrum.io",
+    "https://mainnet.optimism.io",
+    "https://mainnet.base.org",
+    "https://api.avax.network",
     "https://rpc.xlayer.tech",
     "https://xlayerrpc.okx.com",
   ];

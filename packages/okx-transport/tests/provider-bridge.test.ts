@@ -289,15 +289,19 @@ describe("OKX A2A provider bridge", () => {
     expect(() => okxA2ATaskRequestSchema.parse({ ...request, privateKey: "0xsecret" })).toThrow();
   });
 
-  it("requires a bounded explicit asset manifest and X Layer mainnet", () => {
+  it("requires a bounded explicit asset manifest and a verified rescue mainnet", () => {
     expect(() => okxA2ATaskRequestSchema.parse({
       ...request,
       assetManifest: undefined,
     })).toThrow();
     expect(() => okxA2ATaskRequestSchema.parse({
       ...request,
+      walletContext: { ...request.walletContext, chainId: 10_001 },
+    })).toThrow("verified adapter");
+    expect(okxA2ATaskRequestSchema.parse({
+      ...request,
       walletContext: { ...request.walletContext, chainId: 1 },
-    })).toThrow("X Layer mainnet");
+    }).walletContext.chainId).toBe(1);
     expect(okxA2ATaskRequestSchema.parse({
       ...request,
       assetManifest: {
@@ -419,12 +423,12 @@ describe("OKX A2A provider bridge", () => {
     expect(result.verification.sourceSignaturesReceivedBySafeExit).toBe(false);
   });
 
-  it("rejects stale authorization and a non-mainnet chain", async () => {
+  it("rejects stale authorization and an unverified chain", async () => {
     const bridge = new OkxA2AProviderBridge("5196", () => new Date(now));
     await expect(bridge.prepareSigningDeliverable(lifecycle(), {
       ...request,
-      walletContext: { ...request.walletContext, chainId: 1 },
-    })).rejects.toThrow("X Layer mainnet");
+      walletContext: { ...request.walletContext, chainId: 10_001 },
+    })).rejects.toThrow("verified adapter");
     await expect(bridge.prepareSigningDeliverable(lifecycle(), {
       ...request,
       authorization: {

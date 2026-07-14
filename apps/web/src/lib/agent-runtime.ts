@@ -12,6 +12,7 @@ import {
 import { OkxWalletBalanceDiscoveryClient } from "@safeexit/adapters";
 import {
   createDedicatedPublicClient,
+  getRescueMainnetChainConfig,
   type ChainAdapterConfig,
   xLayerMainnetConfig,
 } from "@safeexit/chain";
@@ -79,14 +80,18 @@ function safeOnchainMetadata(value: string, maximum: number, fallback: string): 
   return normalized || fallback;
 }
 
-import { parseDeploymentEnvironment } from "./deployment-env";
+import {
+  getDeploymentRpcUrl,
+  parseDeploymentEnvironment,
+} from "./deployment-env";
 import { LivePermitSigningPackageBuilder } from "./live-signing-package-builder";
 import { LiveBuyerExecutionVerifier } from "./live-buyer-report-verifier";
 
-class LiveXLayerAnalyzer implements IncidentAnalyzerPort {
+class LiveMainnetAnalyzer implements IncidentAnalyzerPort {
   private readonly discovery: OkxWalletBalanceDiscoveryClient;
 
   constructor(
+    private readonly chain: ChainAdapterConfig,
     private readonly rpcUrl: string,
     credentials: {
       apiKey: string;
@@ -114,11 +119,11 @@ class LiveXLayerAnalyzer implements IncidentAnalyzerPort {
   }
 
   async analyse(incident: Incident): Promise<WalletScan> {
-    if (incident.chainId !== xLayerMainnetConfig.chain.id) {
-      throw new Error("Live discovery currently supports X Layer mainnet only");
+    if (incident.chainId !== this.chain.chain.id) {
+      throw new Error("Live discovery is not configured for this incident chain");
     }
 
-    const client = createDedicatedPublicClient(xLayerMainnetConfig, this.rpcUrl);
+    const client = createDedicatedPublicClient(this.chain, this.rpcUrl);
     const observedAtBlock = await client.getBlockNumber();
     const discovered = await this.discovery.discoverErc20Tokens(
       incident.sourceAddress,
@@ -267,9 +272,9 @@ class LiveXLayerAnalyzer implements IncidentAnalyzerPort {
       explicitTokenMetadata.filter((entry) => !("query" in entry)).length +
       explicitNftMetadata.filter((entry) => !("query" in entry)).length +
       explicitErc1155Metadata.filter((entry) => !("query" in entry)).length;
-    const reader = new ViemStandardReadClient("x-layer-mainnet-rpc", client);
+    const reader = new ViemStandardReadClient(`${this.chain.id}-rpc`, client);
     const scanner = new DeterministicWalletScanner({
-      config: xLayerMainnetConfig,
+      config: this.chain,
       reader,
     });
     const report = await scanner.scan({
@@ -422,33 +427,34 @@ export type AgentRuntimeRequest = {
 
 function createMainnetService(
   config: ReturnType<typeof parseDeploymentEnvironment>,
+  chain: ChainAdapterConfig,
+  rpcUrl: string,
   assetManifest?: OkxA2AAssetManifest,
 ): AgentIncidentService {
   if (
     !config.okxWeb3ApiKey ||
     !config.okxWeb3SecretKey ||
-    !config.okxWeb3Passphrase ||
-    !config.xLayerMainnetRpcUrl
+    !config.okxWeb3Passphrase
   ) {
-    throw new Error("Live X Layer mainnet dependencies are not configured");
+    throw new Error("Live mainnet discovery dependencies are not configured");
   }
   return new AgentIncidentService({
     store: createStore(),
-    analyzer: new LiveXLayerAnalyzer(config.xLayerMainnetRpcUrl, {
+    analyzer: new LiveMainnetAnalyzer(chain, rpcUrl, {
       apiKey: config.okxWeb3ApiKey,
       secretKey: config.okxWeb3SecretKey,
       passphrase: config.okxWeb3Passphrase,
     }, assetManifest),
     planner: new LiveDeterministicPlanner(),
-    simulator: new LiveRpcSimulator(xLayerMainnetConfig, config.xLayerMainnetRpcUrl),
+    simulator: new LiveRpcSimulator(chain, rpcUrl),
     dashboard: new LiveDashboardLocator(config.publicBaseUrl),
     signingPackages: new LivePermitSigningPackageBuilder(
-      xLayerMainnetConfig,
-      config.xLayerMainnetRpcUrl,
+      chain,
+      rpcUrl,
     ),
     executionVerifier: new LiveBuyerExecutionVerifier(
-      xLayerMainnetConfig,
-      config.xLayerMainnetRpcUrl,
+      chain,
+      rpcUrl,
     ),
     monitor: new ReviewOnlyMonitor(),
   });
@@ -462,8 +468,10 @@ export function getAgentIncidentService(
     throw new Error("SAFEEXIT agent service is disabled for this deployment");
   }
   const chainId = request.chainId ?? xLayerMainnetConfig.chain.id;
-  if (chainId === xLayerMainnetConfig.chain.id) {
-    return createMainnetService(config, request.assetManifest);
+  const chain = getRescueMainnetChainConfig(chainId);
+  const rpcUrl = getDeploymentRpcUrl(config, chainId);
+  if (!rpcUrl) {
+    throw new Error(`Live SAFEEXIT RPC is not configured for chain ${chainId}`);
   }
-  throw new Error(`Live SAFEEXIT does not support chain ${chainId}`);
+  return createMainnetService(config, chain, rpcUrl, request.assetManifest);
 }

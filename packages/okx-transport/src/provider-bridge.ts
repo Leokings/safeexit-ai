@@ -5,6 +5,7 @@ import {
   signingPackageSchema,
   type AgentServiceJob,
 } from "@safeexit/agent-service";
+import { RESCUE_MAINNET_CHAIN_IDS } from "@safeexit/chain";
 import { incidentSchema } from "@safeexit/shared";
 
 import {
@@ -97,7 +98,7 @@ export class OkxA2AProviderBridge {
     private readonly providerAgentId: string,
     private readonly clock: () => Date = () => new Date(),
     private readonly incidentIdFactory: () => string = () => `incident_${randomUUID()}`,
-    supportedChainIds: readonly number[] = [196],
+    supportedChainIds: readonly number[] = RESCUE_MAINNET_CHAIN_IDS,
   ) {
     if (!/^\d{1,32}$/.test(providerAgentId)) {
       throw new Error("SAFEEXIT OKX provider agent ID is invalid");

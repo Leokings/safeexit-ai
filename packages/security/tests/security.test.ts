@@ -182,6 +182,8 @@ describe("security headers", () => {
     expect(policy).toContain("object-src 'none'");
     expect(policy).toContain("https://rpc.xlayer.tech");
     expect(policy).toContain("https://xlayerrpc.okx.com");
+    expect(policy).toContain("https://arb1.arbitrum.io");
+    expect(policy).toContain("https://api.avax.network");
     expect(policy).not.toContain("'unsafe-eval'");
     expect(createSecurityHeaders(false)).toContainEqual({
       key: "X-Content-Type-Options",

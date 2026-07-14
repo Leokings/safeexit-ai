@@ -16,7 +16,7 @@ import {
 import { useState } from "react";
 import { createPublicClient, getAddress, http, isAddress, type Hex } from "viem";
 
-import { xLayerMainnetConfig } from "@safeexit/chain";
+import { getRescueMainnetChainConfig } from "@safeexit/chain";
 import type {
   EvmAddress,
   RescueAction,
@@ -29,7 +29,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { CopyAddress } from "@/components/copy-address";
 import {
   connectOkxWallet,
-  ensureXLayerMainnet,
+  ensureRescueMainnet,
   getOkxConnectedAccount,
   getOkxCallsStatus,
   getOkxProvider,
@@ -160,15 +160,18 @@ function actionTarget(action: RescueAction): EvmAddress {
 
 export function MainnetRescueWorkspace({
   incidentId,
+  chainId,
   source,
   destination,
   assetManifest,
 }: {
   incidentId: string;
+  chainId: number;
   source: EvmAddress;
   destination: EvmAddress;
   assetManifest?: RescueAssetManifest;
 }) {
+  const chainConfig = getRescueMainnetChainConfig(chainId);
   const [connectedAccount, setConnectedAccount] = useState<`0x${string}`>();
   const [tokenInput, setTokenInput] = useState(
     () => assetManifest?.erc20TokenAddresses.join("\n") ?? "",
@@ -200,7 +203,7 @@ export function MainnetRescueWorkspace({
     try {
       const provider = getOkxProvider();
       await connectOkxWallet(provider);
-      await ensureXLayerMainnet(provider);
+      await ensureRescueMainnet(provider, chainId);
       const account = await getOkxConnectedAccount(provider);
       setConnectedAccount(account);
       const expected = role === "SOURCE" ? source : destination;
@@ -237,6 +240,9 @@ export function MainnetRescueWorkspace({
       throw new Error(message);
     }
     const result = mainnetPreflightResponseSchema.parse(body);
+    if (result.chainId !== chainId) {
+      throw new Error("Preflight returned a different chain than the incident");
+    }
     setPreflight(result);
     setSelectedRoute((current) =>
       result.gaslessActions.some((route) => gaslessRouteKey(route) === current)
@@ -269,7 +275,7 @@ export function MainnetRescueWorkspace({
     try {
       const provider = getOkxProvider();
       await connectOkxWallet(provider);
-      await ensureXLayerMainnet(provider);
+      await ensureRescueMainnet(provider, chainId);
       const account = await getOkxConnectedAccount(provider);
       setConnectedAccount(account);
       if (account.toLowerCase() !== source.toLowerCase()) {
@@ -284,8 +290,8 @@ export function MainnetRescueWorkspace({
       const fresh = await requestPreflight();
       const action = requireReviewedGaslessRoute(fresh.gaslessActions, intendedRoute);
       const publicClient = createPublicClient({
-        chain: xLayerMainnetConfig.chain,
-        transport: http(xLayerMainnetConfig.rpcUrls[0]),
+        chain: chainConfig.chain,
+        transport: http(chainConfig.rpcUrls[0]),
       });
       let result: SignedRecoveryAuthorization;
       if (action.standard === "ERC3009_RECEIVE_WITH_AUTHORIZATION") {
@@ -334,7 +340,7 @@ export function MainnetRescueWorkspace({
     try {
       const provider = getOkxProvider();
       await connectOkxWallet(provider);
-      await ensureXLayerMainnet(provider);
+      await ensureRescueMainnet(provider, chainId);
       const account = await getOkxConnectedAccount(provider);
       setConnectedAccount(account);
       if (account.toLowerCase() !== destination.toLowerCase()) {
@@ -342,8 +348,8 @@ export function MainnetRescueWorkspace({
       }
 
       const publicClient = createPublicClient({
-        chain: xLayerMainnetConfig.chain,
-        transport: http(xLayerMainnetConfig.rpcUrls[0]),
+        chain: chainConfig.chain,
+        transport: http(chainConfig.rpcUrls[0]),
       });
       let hash: Hex;
       if (signed.standard === "ERC3009_RECEIVE_WITH_AUTHORIZATION") {
@@ -472,7 +478,7 @@ export function MainnetRescueWorkspace({
               <p className="font-mono text-[10px] uppercase text-dim">Incident {incidentId}</p>
               <h1 className="mt-2 text-3xl font-semibold">Destination-paid rescue</h1>
             </div>
-            <Badge variant="info">X Layer mainnet / 196</Badge>
+            <Badge variant="info">{chainConfig.chain.name} / {chainId}</Badge>
           </div>
         </div>
       </section>
@@ -637,7 +643,9 @@ export function MainnetRescueWorkspace({
                   {transactions.map((transaction) => (
                     <div key={transaction.hash} className="border-l-2 border-border-strong pl-4">
                       <Badge variant={transaction.status === "CONFIRMED" ? "success" : transaction.status === "FAILED" ? "danger" : "info"}>{transaction.status}</Badge>
-                      <a href={`https://www.okx.com/web3/explorer/xlayer/tx/${transaction.hash}`} target="_blank" rel="noreferrer" className="mt-2 inline-flex max-w-full items-center gap-2 font-mono text-[11px] text-info hover:text-foreground"><span className="break-all">{transaction.hash}</span><ExternalLink className="size-3.5 shrink-0" /></a>
+                      {chainConfig.chain.blockExplorers?.default && (
+                        <a href={`${chainConfig.chain.blockExplorers.default.url}/tx/${transaction.hash}`} target="_blank" rel="noreferrer" className="mt-2 inline-flex max-w-full items-center gap-2 font-mono text-[11px] text-info hover:text-foreground"><span className="break-all">{transaction.hash}</span><ExternalLink className="size-3.5 shrink-0" /></a>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -649,7 +657,7 @@ export function MainnetRescueWorkspace({
             <p className="font-mono text-[10px] uppercase text-warning">Authorization checkpoint</p>
             <h2 className="mt-2 text-lg font-semibold">Source-funded execution disabled</h2>
             <div className="mt-5 space-y-4 border-y border-border py-4 text-xs">
-              <div className="flex justify-between gap-4"><span className="text-muted">Network</span><span>X Layer mainnet</span></div>
+              <div className="flex justify-between gap-4"><span className="text-muted">Network</span><span>{chainConfig.chain.name}</span></div>
               <div className="space-y-2"><span className="block text-muted">Source signs</span><CopyAddress address={source} compact /></div>
               <div className="space-y-2"><span className="block text-muted">Destination receives and pays gas</span><CopyAddress address={destination} compact /></div>
               <div className="flex justify-between gap-4"><span className="text-muted">Route</span><span className="text-right">{nextGaslessAction ? routeLabel(nextGaslessAction.standard) : "None verified"}</span></div>
@@ -664,7 +672,7 @@ export function MainnetRescueWorkspace({
               <>
                 <label className="mt-5 flex cursor-pointer items-start gap-3">
                   <Checkbox checked={authorized} onChange={(event) => setAuthorized(event.target.checked)} />
-                  <span className="text-xs leading-5">I confirm I am authorised to control and sign for the displayed source wallet, and I understand this action uses X Layer mainnet with real assets.</span>
+                  <span className="text-xs leading-5">I confirm I am authorised to control and sign for the displayed source wallet, and I understand this action uses {chainConfig.chain.name} with real assets.</span>
                 </label>
                 <Button type="button" className="mt-5 w-full" size="lg" onClick={() => void signAuthorization()} disabled={!sourceConnected || !nextGaslessAction || !authorized || busy !== null}>
                   {busy === "SIGN" ? <LoaderCircle className="size-4 animate-spin" /> : <FileSignature className="size-4" />}
@@ -682,7 +690,7 @@ export function MainnetRescueWorkspace({
             )}
             <p className="mt-4 text-xs leading-5 text-muted">This action moves real assets. The authorization is short-lived and stays in this browser tab. SAFEEXIT never receives the private key, seed phrase, or signature.</p>
             {preflight?.blockedActions.some((item) => preflight.plan.actions.find((action) => action.id === item.actionId)?.actionType === "TRANSFER_NATIVE") && (
-              <p className="mt-4 flex items-start gap-2 text-xs leading-5 text-warning"><TriangleAlert className="mt-0.5 size-3.5 shrink-0" />Native OKB is blocked until a verified sponsored EIP-7702 or private atomic bundle adapter is available.</p>
+              <p className="mt-4 flex items-start gap-2 text-xs leading-5 text-warning"><TriangleAlert className="mt-0.5 size-3.5 shrink-0" />Native {chainConfig.chain.nativeCurrency.symbol} is blocked until a verified sponsored EIP-7702 or private atomic bundle adapter is available.</p>
             )}
             {error && <p role="alert" className="mt-4 flex items-start gap-2 text-xs leading-5 text-danger"><TriangleAlert className="mt-0.5 size-3.5 shrink-0" />{error}</p>}
           </aside>

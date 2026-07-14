@@ -12,7 +12,7 @@ describe("server-only multichain RPC endpoints", () => {
     });
 
     expect(getConfiguredRpcEndpoints(config)).toEqual([
-      expect.objectContaining({ chainId: 1, rescueSupport: "CONFIG_ONLY" }),
+      expect.objectContaining({ chainId: 1, rescueSupport: "ENABLED" }),
       expect.objectContaining({ chainId: 196, rescueSupport: "ENABLED" }),
     ]);
   });

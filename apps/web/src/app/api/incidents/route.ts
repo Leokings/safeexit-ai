@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { ZodError } from "zod";
 
+import { isRescueMainnetChainId } from "@safeexit/chain";
 import { getPrismaClient, PrismaSafeExitRepository } from "@safeexit/persistence";
 import {
   ApiInputError,
@@ -55,11 +56,11 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const input = await parseJsonBody(request, createIncidentRequestSchema);
-    if (input.chainId !== 196) {
+    if (!isRescueMainnetChainId(input.chainId)) {
       return jsonResponse(
         {
           code: "UNSUPPORTED_CHAIN",
-          message: "SAFEEXIT currently supports X Layer mainnet (chain 196) only",
+          message: "SAFEEXIT does not have a verified rescue adapter for this chain",
         },
         422,
         rateHeaders,

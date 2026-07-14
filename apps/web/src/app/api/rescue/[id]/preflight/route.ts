@@ -1,4 +1,7 @@
-import { createDedicatedPublicClient, xLayerMainnetConfig } from "@safeexit/chain";
+import {
+  createDedicatedPublicClient,
+  getRescueMainnetChainConfig,
+} from "@safeexit/chain";
 import { getPrismaClient, PrismaSafeExitRepository } from "@safeexit/persistence";
 import { computePlanIntegrityHash, DeterministicRescuePlanner } from "@safeexit/planner";
 import { DeterministicWalletScanner, ViemStandardReadClient } from "@safeexit/scanner";
@@ -25,7 +28,10 @@ import {
   type Address,
 } from "viem";
 
-import { parseDeploymentEnvironment } from "@/lib/deployment-env";
+import {
+  getDeploymentRpcUrl,
+  parseDeploymentEnvironment,
+} from "@/lib/deployment-env";
 import { rateLimitPublicRequest } from "@/lib/agent-http";
 import {
   eip712DomainSchema,
@@ -33,7 +39,6 @@ import {
   mainnetPreflightResponseSchema,
   type Eip712Domain,
   type GaslessRescueAction,
-  XLAYER_MAINNET_CHAIN_ID,
 } from "@/lib/mainnet-rescue";
 
 export const runtime = "nodejs";
@@ -260,6 +265,7 @@ async function readVerifiedEip712Domain(
   client: ReturnType<typeof createDedicatedPublicClient>,
   tokenAddress: Address,
   blockNumber: bigint,
+  expectedChainId: number,
 ): Promise<Eip712Domain | undefined> {
   try {
     const [domainFields, domainSeparator] = await Promise.all([
@@ -284,7 +290,7 @@ async function readVerifiedEip712Domain(
       (Number(BigInt(fields)) & 0x0f) !== 0x0f ||
       !name ||
       !version ||
-      chainId !== BigInt(XLAYER_MAINNET_CHAIN_ID) ||
+      chainId !== BigInt(expectedChainId) ||
       verifyingContract.toLowerCase() !== tokenAddress.toLowerCase() ||
       extensions.length > 0
     ) {
@@ -300,7 +306,7 @@ async function readVerifiedEip712Domain(
     return eip712DomainSchema.parse({
       name,
       version,
-      chainId: XLAYER_MAINNET_CHAIN_ID,
+      chainId: expectedChainId,
       verifyingContract,
     });
   } catch {
@@ -313,8 +319,14 @@ async function detectEip3009Domain(
   tokenAddress: Address,
   sourceAddress: Address,
   blockNumber: bigint,
+  chainId: number,
 ): Promise<Eip712Domain | undefined> {
-  const domain = await readVerifiedEip712Domain(client, tokenAddress, blockNumber);
+  const domain = await readVerifiedEip712Domain(
+    client,
+    tokenAddress,
+    blockNumber,
+    chainId,
+  );
   if (!domain) {
     return undefined;
   }
@@ -346,8 +358,14 @@ async function detectErc2612Permit(
   sourceAddress: Address,
   destinationAddress: Address,
   blockNumber: bigint,
+  chainId: number,
 ): Promise<{ domain: Eip712Domain; nonce: string } | undefined> {
-  const domain = await readVerifiedEip712Domain(client, tokenAddress, blockNumber);
+  const domain = await readVerifiedEip712Domain(
+    client,
+    tokenAddress,
+    blockNumber,
+    chainId,
+  );
   if (!domain) {
     return undefined;
   }
@@ -395,6 +413,7 @@ async function detectDaiStylePermit(
   sourceAddress: Address,
   destinationAddress: Address,
   blockNumber: bigint,
+  chainId: number,
 ): Promise<{ domain: Eip712Domain; nonce: string } | undefined> {
   try {
     const [rawName, domainSeparator, typehash, nonce] = await Promise.all([
@@ -431,7 +450,7 @@ async function detectDaiStylePermit(
     const domain = eip712DomainSchema.parse({
       name,
       version: "1",
-      chainId: XLAYER_MAINNET_CHAIN_ID,
+      chainId,
       verifyingContract: tokenAddress,
     });
     const computedSeparator = hashDomain({
@@ -483,8 +502,14 @@ async function detectErc4494Permit(
   tokenId: bigint,
   destinationAddress: Address,
   blockNumber: bigint,
+  chainId: number,
 ): Promise<{ domain: Eip712Domain; nonce: string } | undefined> {
-  const domain = await readVerifiedEip712Domain(client, collectionAddress, blockNumber);
+  const domain = await readVerifiedEip712Domain(
+    client,
+    collectionAddress,
+    blockNumber,
+    chainId,
+  );
   if (!domain) {
     return undefined;
   }
@@ -571,9 +596,15 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     if (!incident) {
       return json({ code: "INCIDENT_NOT_FOUND", message: "Incident was not found" }, 404, rateHeaders);
     }
-    if (incident.chainId !== XLAYER_MAINNET_CHAIN_ID) {
+    let chainConfig;
+    try {
+      chainConfig = getRescueMainnetChainConfig(incident.chainId);
+    } catch {
       return json(
-        { code: "MAINNET_ONLY", message: "Browser signing is restricted to X Layer mainnet" },
+        {
+          code: "UNSUPPORTED_CHAIN",
+          message: "This incident does not use a verified rescue mainnet adapter",
+        },
         409,
         rateHeaders,
       );
@@ -599,17 +630,20 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
     const config = parseDeploymentEnvironment();
     const rpcUrl =
-      config.xLayerMainnetRpcUrl ??
-      (config.nodeEnv === "production" ? undefined : xLayerMainnetConfig.rpcUrls[0]);
+      getDeploymentRpcUrl(config, incident.chainId) ??
+      (config.nodeEnv === "production" ? undefined : chainConfig.rpcUrls[0]);
     if (!rpcUrl) {
       return json(
-        { code: "MAINNET_RPC_UNAVAILABLE", message: "X Layer mainnet RPC is not configured" },
+        {
+          code: "MAINNET_RPC_UNAVAILABLE",
+          message: `${chainConfig.chain.name} mainnet RPC is not configured`,
+        },
         503,
         rateHeaders,
       );
     }
     const client = createDedicatedPublicClient(
-      xLayerMainnetConfig,
+      chainConfig,
       rpcUrl,
     );
     const observedAtBlock = await client.getBlockNumber();
@@ -656,6 +690,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
               address,
               incident.sourceAddress as Address,
               observedAtBlock,
+              incident.chainId,
             ),
             detectErc2612Permit(
               client,
@@ -663,6 +698,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
               incident.sourceAddress as Address,
               incident.destinationAddress as Address,
               observedAtBlock,
+              incident.chainId,
             ),
             detectDaiStylePermit(
               client,
@@ -670,6 +706,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
               incident.sourceAddress as Address,
               incident.destinationAddress as Address,
               observedAtBlock,
+              incident.chainId,
             ),
           ]);
           return {
@@ -710,6 +747,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
               tokenId,
               incident.destinationAddress as Address,
               observedAtBlock,
+              incident.chainId,
             ),
           ]);
           return {
@@ -759,9 +797,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         ? [`${entry.collectionAddress}:${entry.tokenId}: ${entry.reason}.`]
         : [],
     );
-    const reader = new ViemStandardReadClient("x-layer-mainnet-rpc", client);
+    const reader = new ViemStandardReadClient(`${chainConfig.id}-rpc`, client);
     const scanner = new DeterministicWalletScanner({
-      config: xLayerMainnetConfig,
+      config: chainConfig,
       reader,
     });
     const report = await scanner.scan({
@@ -780,7 +818,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       status: "PARTIAL",
       warnings: [
         ...report.scan.warnings,
-        "X Layer mainnet recovery: discovery is limited to native balance and the submitted ERC-20/ERC-721/ERC-1155 manifest.",
+        `${chainConfig.chain.name} mainnet recovery: discovery is limited to native balance and the submitted ERC-20/ERC-721/ERC-1155 manifest.`,
         ...omittedMetadata,
         ...omittedNftMetadata,
         ...omittedErc1155Metadata,
@@ -791,7 +829,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     const generatedPlan = new DeterministicRescuePlanner().plan({
       incidentId: incident.id,
       destinationAddress: incident.destinationAddress,
-      policyVersion: "safeexit-xlayer-mainnet-v1",
+      policyVersion: `safeexit-${chainConfig.id}-v1`,
       scan,
       adapterCandidates: [],
     });
@@ -815,9 +853,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     });
     await repository.saveRescuePlan(plan);
     const provider = new LocalSimulationProvider({
-      id: "x-layer-mainnet-rpc-preflight-v1",
+      id: `${chainConfig.id}-rpc-preflight-v1`,
       kind: "PRODUCTION_RPC",
-      client: new ViemLocalSimulationClient("x-layer-mainnet-preflight-client", client),
+      client: new ViemLocalSimulationClient(`${chainConfig.id}-preflight-client`, client),
       ttlMs: 300_000,
       estimateGas: false,
     });
@@ -961,7 +999,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
     return json(
       mainnetPreflightResponseSchema.parse({
-        chainId: XLAYER_MAINNET_CHAIN_ID,
+        chainId: incident.chainId,
         scan,
         plan,
         simulations: simulation.results,

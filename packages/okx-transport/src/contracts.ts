@@ -5,6 +5,7 @@ import {
   signingPackageSchema,
 } from "@safeexit/agent-service";
 import { aiChatResponseSchema } from "@safeexit/ai";
+import { isRescueMainnetChainId } from "@safeexit/chain";
 import {
   chainIdSchema,
   evmAddressSchema,
@@ -56,10 +57,10 @@ export const okxA2ATaskRequestSchema = z
     authorization: authorizationSchema,
   })
   .superRefine(({ walletContext }, context) => {
-    if (walletContext.chainId !== OKX_A2A_XLAYER_MAINNET_CHAIN_ID) {
+    if (!isRescueMainnetChainId(walletContext.chainId)) {
       context.addIssue({
         code: "custom",
-        message: "SAFEEXIT currently accepts X Layer mainnet tasks only",
+        message: "SAFEEXIT does not have a verified adapter for this rescue chain",
         path: ["walletContext", "chainId"],
       });
     }
@@ -77,10 +78,10 @@ export const okxX402PrepareRequestSchema = z
     authorization: authorizationSchema,
   })
   .superRefine(({ walletContext }, context) => {
-    if (walletContext.chainId !== OKX_A2A_XLAYER_MAINNET_CHAIN_ID) {
+    if (!isRescueMainnetChainId(walletContext.chainId)) {
       context.addIssue({
         code: "custom",
-        message: "SAFEEXIT currently accepts X Layer mainnet requests only",
+        message: "SAFEEXIT does not have a verified adapter for this rescue chain",
         path: ["walletContext", "chainId"],
       });
     }

@@ -3,9 +3,13 @@
 ## Review target
 
 - Product: SAFEEXIT AI
-- Network: X Layer mainnet, chain ID `196`
-- Review baseline: commit `cea127495a692dab372186a3b6239e00bfa9787f`
-- Remediation release: the commit containing `INTERNAL_SECURITY_REVIEW.md`
+- Networks: Ethereum `1`, BNB Smart Chain `56`, Polygon `137`, Arbitrum
+  `42161`, Optimism `10`, Base `8453`, Avalanche C-Chain `43114`, and X Layer
+  `196`
+- Original internal-review baseline: commit
+  `cea127495a692dab372186a3b6239e00bfa9787f`
+- Multichain release: the commit containing
+  `MULTICHAIN_ADAPTER_VERIFICATION.md`
 - Production URL: `https://safeexit.xyz`
 
 SAFEEXIT does not currently deploy a production settlement contract. The
@@ -58,18 +62,18 @@ Primary implementation locations:
 6. Multi-call permit routes execute only with an EIP-5792 atomicity guarantee.
 7. Failed simulation is fail-closed, and confirmed execution requires evidence
    of the exact committed transfer.
-8. Native OKB and assets without a verified destination-paid adapter remain
+8. Native currency and assets without a verified destination-paid adapter remain
    non-executable.
 
 ## Out of scope and external trust
 
 - The internal security of OKX Wallet, Agentic Wallet, Vercel, PostgreSQL
-  providers, RPC providers, X Layer consensus, and third-party token contracts.
+  providers, RPC providers, supported-chain consensus, and third-party token contracts.
 - Compromise of the user's browser, operating system, wallet extension, or
   destination wallet.
 - Distinguishing the legitimate owner from an attacker when both possess the
   same source private key.
-- Native OKB rescue, EIP-7702 delegates, private bundles, Permit2, ERC-1155
+- Native-currency rescue, EIP-7702 delegates, private bundles, Permit2, ERC-1155
   settlement, protocol claims, and protocol withdrawals.
 - Economic guarantees, asset valuation, and universal token compatibility.
 
@@ -99,4 +103,3 @@ The independent reviewer should provide:
 - dependency and web-boundary review, including XSS/signature exfiltration;
 - a severity-ranked report tied to an exact commit;
 - remediation verification tied to a second exact commit.
-
