@@ -370,7 +370,7 @@ class LiveRpcSimulator implements RescuePlanSimulatorPort {
       id: `${this.chain.id}-rpc-preflight-v1`,
       kind: this.chain.environment === "MAINNET" ? "PRODUCTION_RPC" : "TEST_RPC",
       client,
-      ttlMs: this.chain.environment === "MAINNET" ? 300_000 : 60_000,
+      ttlMs: 300_000,
     });
     const report = await simulateRescuePlan(plan, provider);
     return {

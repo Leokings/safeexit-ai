@@ -818,7 +818,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       id: "x-layer-testnet-rpc-preflight-v1",
       kind: "TEST_RPC",
       client: new ViemLocalSimulationClient("x-layer-testnet-preflight-client", client),
-      ttlMs: 60_000,
+      ttlMs: 300_000,
     });
     const simulation = await simulateRescuePlan(plan, provider);
     await Promise.all(simulation.results.map((result) => repository.saveSimulation(result)));
