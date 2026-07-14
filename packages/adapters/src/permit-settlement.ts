@@ -1,7 +1,7 @@
 import { evmAddressSchema, type EvmAddress } from "@safeexit/shared";
 
 export const PERMIT_SETTLEMENT_NAME = "SafeExit Permit Settlement";
-export const PERMIT_SETTLEMENT_VERSION = "1";
+export const PERMIT_SETTLEMENT_VERSION = "2";
 export const PERMIT_KIND_ERC2612 = 1;
 export const PERMIT_KIND_DAI = 2;
 
@@ -11,7 +11,7 @@ export const ERC721_RESCUE_TYPEHASH =
   "0xc8c5f2f27df3d275d82978fa06e4b58b1efd6eec9c83f8786baf5a82269ff793";
 
 const permitSettlementAddresses: Readonly<Partial<Record<number, EvmAddress>>> = {
-  196: evmAddressSchema.parse("0x964FDCfE0A0bCE568309f3f7D07ab08Fc8F93103"),
+  196: evmAddressSchema.parse("0x73E8A8d165EC9710aC27f91B0Df02975CC4a48d0"),
 };
 
 export function getConfiguredPermitSettlementAddress(

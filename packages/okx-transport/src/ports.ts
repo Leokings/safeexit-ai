@@ -14,6 +14,7 @@ export interface SafeExitAgentLifecyclePort {
   generatePlan(jobId: string): Promise<AgentServiceJob>;
   simulatePlan(jobId: string): Promise<AgentServiceJob>;
   getSigningPackage(jobId: string): Promise<SigningPackage>;
+  getSigningPackages(jobId: string): Promise<SigningPackage[]>;
   getJob(jobId: string): Promise<AgentServiceJob>;
   recordBuyerExecutionReport(
     jobId: string,

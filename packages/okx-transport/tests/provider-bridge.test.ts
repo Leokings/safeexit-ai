@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   SIGNING_PACKAGE_EIP712_TYPES,
+  signingPackageSchema,
   type AgentServiceJob,
   type BuyerExecutionReport,
   type SigningPackage,
@@ -23,6 +24,7 @@ import {
   OKX_A2A_XLAYER_MAINNET_CHAIN_ID,
   OkxA2AProviderBridge,
   SAFEEXIT_AUTHORIZATION_STATEMENT,
+  okxA2ASigningDeliverableSchema,
   okxA2ATaskRequestSchema,
   okxX402PrepareRequestSchema,
   type OkxA2ATaskRequest,
@@ -271,6 +273,7 @@ const completedJob: AgentServiceJob = {
   ...waitingJob,
   status: "COMPLETED",
   signingPackage,
+  signingPackages: [signingPackage],
   monitor: {
     phase: "COMPLETED",
     completedActionIds: ["action:transfer"],
@@ -307,14 +310,18 @@ const request: OkxA2ATaskRequest = {
   authorization: { statement: SAFEEXIT_AUTHORIZATION_STATEMENT, confirmedAt: now },
 };
 
-function lifecycle(): SafeExitAgentLifecyclePort {
+function lifecycle(
+  packages: SigningPackage[] = [signingPackage],
+  job: AgentServiceJob = waitingJob,
+): SafeExitAgentLifecyclePort {
   return {
-    createIncident: vi.fn(async () => waitingJob),
-    analyseIncident: vi.fn(async () => waitingJob),
-    generatePlan: vi.fn(async () => waitingJob),
-    simulatePlan: vi.fn(async () => waitingJob),
-    getSigningPackage: vi.fn(async () => signingPackage),
-    getJob: vi.fn(async () => ({ ...waitingJob, signingPackage })),
+    createIncident: vi.fn(async () => job),
+    analyseIncident: vi.fn(async () => job),
+    generatePlan: vi.fn(async () => job),
+    simulatePlan: vi.fn(async () => job),
+    getSigningPackage: vi.fn(async () => packages[0]!),
+    getSigningPackages: vi.fn(async () => packages),
+    getJob: vi.fn(async () => ({ ...job, signingPackage: packages[0], signingPackages: packages })),
     recordBuyerExecutionReport: vi.fn(async () => completedJob),
   };
 }
@@ -373,7 +380,7 @@ describe("OKX A2A provider bridge", () => {
           erc721Assets: [],
           erc1155Assets: [],
         },
-      })).resolves.toMatchObject({ status: "SIGNING_PACKAGE_READY" });
+      })).resolves.toMatchObject({ status: "SIGNING_PACKAGES_READY" });
       const createIncident = vi.mocked(service.createIncident);
       const input = createIncident.mock.calls[0]?.[0];
       versions.push(input?.incident?.ownershipAttestation.statementVersion ?? "");
@@ -389,9 +396,19 @@ describe("OKX A2A provider bridge", () => {
     const result = await bridge.prepareSigningDeliverable(lifecycle(), request);
 
     expect(result.safeExitJobId).toBe("job:test");
-    expect(result.signingPackage.route).toBe("ERC2612_PERMIT_SETTLEMENT");
+    expect(result.signingPackages[0]?.executionPath).toBe("SAFEEXIT_SETTLEMENT");
+    expect(result.signingPackages[0]?.authorizationStandard).toBe("ERC2612");
+    expect(result.signingPackages[0]?.signingPackage.route).toBe("ERC2612_PERMIT_SETTLEMENT");
     expect(result.executionRequirements.sourceSignaturesMustNotBeReturned).toBe(true);
     expect(JSON.stringify(result)).not.toContain("signature\"");
+
+    expect(okxA2ASigningDeliverableSchema.safeParse({
+      ...result,
+      signingPackages: [{
+        ...result.signingPackages[0],
+        executionPath: "DIRECT_AUTHORIZATION",
+      }],
+    }).success).toBe(false);
   });
 
   it("prepares a paid direct deliverable without a conversational task round-trip", async () => {
@@ -412,10 +429,71 @@ describe("OKX A2A provider bridge", () => {
 
     expect(result.transportMode).toBe("OKX_X402");
     expect(result.requestId).toBe("paid-request-1");
-    expect(result.signingPackage).toEqual(signingPackage);
+    expect(result.signingPackages[0]?.executionPath).toBe("SAFEEXIT_SETTLEMENT");
+    expect(result.signingPackages[0]?.authorizationStandard).toBe("ERC2612");
+    expect(result.signingPackages[0]?.signingPackage).toEqual(signingPackage);
     expect(vi.mocked(service.createIncident).mock.calls[0]?.[0].requestId).toBe(
       "okx:5196:x402:paid-request-1",
     );
+  });
+
+  it("returns one deliverable containing every package in a mixed rescue plan", async () => {
+    const secondAction = {
+      ...plan.actions[0]!,
+      id: "action:second-token",
+      evidenceIds: ["asset:second-token"],
+    };
+    const mixedPlan = { ...plan, actions: [...plan.actions, secondAction] };
+    const firstResult = waitingJob.simulation!.results[0]!;
+    const secondResult = {
+      ...firstResult,
+      id: "simulation:second-token",
+      actionId: secondAction.id,
+      expectedEffects: secondAction.expectedEffects,
+    };
+    const secondPackage = signingPackageSchema.parse({
+      ...signingPackage,
+      packageId: "signing-package:second-token",
+      actionId: secondAction.id,
+      simulation: {
+        ...signingPackage.simulation,
+        resultId: secondResult.id,
+      },
+      sourceSigningRequests: [
+        signingPackage.sourceSigningRequests[0],
+        {
+          ...signingPackage.sourceSigningRequests[1],
+          typedData: {
+            ...signingPackage.sourceSigningRequests[1].typedData,
+            message: {
+              ...signingPackage.sourceSigningRequests[1].typedData.message,
+              rescueNonce: `0x${"8".repeat(64)}`,
+            },
+          },
+        },
+      ],
+    });
+    const mixedJob: AgentServiceJob = {
+      ...waitingJob,
+      plan: mixedPlan,
+      simulation: {
+        ...waitingJob.simulation!,
+        results: [firstResult, secondResult],
+        executableActionIds: [signingPackage.actionId, secondAction.id],
+      },
+    };
+    const bridge = new OkxA2AProviderBridge("5196", () => new Date(now));
+    const result = await bridge.prepareSigningDeliverable(
+      lifecycle([signingPackage, secondPackage], mixedJob),
+      request,
+    );
+
+    expect(result.signingPackages).toHaveLength(2);
+    expect(result.coverage.issuedActionIds).toEqual([
+      signingPackage.actionId,
+      secondPackage.actionId,
+    ]);
+    expect(result.coverage.unavailableActionIds).toEqual([]);
   });
 
   it("rejects credentials and provider overrides on paid direct requests", () => {

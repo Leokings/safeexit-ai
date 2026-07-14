@@ -2,7 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 
 import {
   agentServiceJobSchema,
-  signingPackageSchema,
+  signingPackageExecutionMetadata,
+  signingPackageListSchema,
+  type SigningPackage,
   type AgentServiceJob,
 } from "@safeexit/agent-service";
 import { RESCUE_MAINNET_CHAIN_IDS } from "@safeexit/chain";
@@ -76,10 +78,12 @@ function assertProvider(expected: string, actual: string): void {
 function assertSigningScope(
   request: OkxA2ATaskRequest,
   job: AgentServiceJob,
-  signingPackage: ReturnType<typeof signingPackageSchema.parse>,
+  signingPackage: SigningPackage,
 ): void {
   if (
     signingPackage.jobId !== job.id ||
+    !job.plan?.actions.some((action) => action.id === signingPackage.actionId) ||
+    !job.simulation?.executableActionIds.includes(signingPackage.actionId) ||
     signingPackage.chainId !== request.walletContext.chainId ||
     !sameAddress(signingPackage.sourceAddress, request.walletContext.sourceAddress) ||
     !sameAddress(signingPackage.destinationAddress, request.walletContext.destinationAddress)
@@ -169,20 +173,33 @@ export class OkxA2AProviderBridge {
       );
     }
 
-    const signingPackage = signingPackageSchema.parse(
-      await lifecycle.getSigningPackage(job.id),
+    const signingPackages = signingPackageListSchema.parse(
+      await lifecycle.getSigningPackages(job.id),
     );
-    assertSigningScope(request, job, signingPackage);
+    signingPackages.forEach((signingPackage) =>
+      assertSigningScope(request, job, signingPackage));
+    const issuedActionIds = signingPackages.map((signingPackage) => signingPackage.actionId);
+    const issuedActionIdSet = new Set(issuedActionIds);
+    const unavailableActionIds = job.plan?.actions
+      .map((action) => action.id)
+      .filter((actionId) => !issuedActionIdSet.has(actionId)) ?? [];
     return okxA2ASigningDeliverableSchema.parse({
-      schemaVersion: "safeexit-okx-deliverable-v1",
+      schemaVersion: "safeexit-okx-deliverable-v2",
       transportMode: "SAFEEXIT_NORMALIZED",
       okxJobId: request.okxJobId,
       providerAgentId: request.providerAgentId,
       safeExitJobId: job.id,
-      status: "SIGNING_PACKAGE_READY",
+      status: "SIGNING_PACKAGES_READY",
       createdAt: this.clock().toISOString(),
       walletContext: request.walletContext,
-      signingPackage,
+      signingPackages: signingPackages.map((signingPackage) => ({
+        ...signingPackageExecutionMetadata(signingPackage),
+        signingPackage,
+      })),
+      coverage: {
+        issuedActionIds,
+        unavailableActionIds,
+      },
       executionRequirements: {
         sourceSignerMustRemainLocal: true,
         destinationPaysSettlementGas: true,
@@ -210,7 +227,7 @@ export class OkxA2AProviderBridge {
       authorization: request.authorization,
     });
     return okxX402SigningDeliverableSchema.parse({
-      schemaVersion: "safeexit-okx-x402-deliverable-v1",
+      schemaVersion: "safeexit-okx-x402-deliverable-v2",
       transportMode: "OKX_X402",
       requestId: request.requestId,
       providerAgentId: deliverable.providerAgentId,
@@ -218,7 +235,8 @@ export class OkxA2AProviderBridge {
       status: deliverable.status,
       createdAt: deliverable.createdAt,
       walletContext: deliverable.walletContext,
-      signingPackage: deliverable.signingPackage,
+      signingPackages: deliverable.signingPackages,
+      coverage: deliverable.coverage,
       executionRequirements: deliverable.executionRequirements,
     });
   }
@@ -249,21 +267,31 @@ export class OkxA2AProviderBridge {
     const completed = agentServiceJobSchema.parse(
       await lifecycle.recordBuyerExecutionReport(request.safeExitJobId, request.report),
     );
-    if (completed.status !== "COMPLETED" || !completed.monitor) {
+    if (
+      !["EXECUTING", "COMPLETED", "PARTIAL"].includes(completed.status) ||
+      !completed.monitor
+    ) {
       throw new OkxProviderBridgeError(
         "VERIFICATION_FAILED",
-        "Buyer report did not produce a verified completed SAFEEXIT job",
+        "Buyer report did not produce a verified SAFEEXIT execution state",
       );
     }
+    const issuedPackages = completed.signingPackages ??
+      (completed.signingPackage ? [completed.signingPackage] : []);
+    const completedActionIds = new Set(completed.monitor.completedActionIds);
     return okxA2ACompletionDeliverableSchema.parse({
-      schemaVersion: "safeexit-okx-deliverable-v1",
+      schemaVersion: "safeexit-okx-deliverable-v2",
       transportMode: "SAFEEXIT_NORMALIZED",
       okxJobId: request.okxJobId,
       providerAgentId: request.providerAgentId,
       safeExitJobId: completed.id,
-      status: "COMPLETED",
-      completedAt: completed.monitor.observedAt,
+      status: completed.status,
+      observedAt: completed.monitor.observedAt,
       transactionHashes: completed.monitor.transactionHashes,
+      completedActionIds: completed.monitor.completedActionIds,
+      remainingPackageIds: issuedPackages
+        .filter((signingPackage) => !completedActionIds.has(signingPackage.actionId))
+        .map((signingPackage) => signingPackage.packageId),
       verification: {
         receiptStatusVerified: true,
         committedTransferVerified: true,

@@ -20,13 +20,18 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   try {
     headers = await authorizeAgentRequest(request);
     const input = await parseJsonBody(request, signingPackageRequestSchema);
-    const signingPackage = await getAgentIncidentService().getSigningPackage(
+    const signingPackages = await getAgentIncidentService().getSigningPackages(
       (await context.params).id,
     );
+    const signingPackage = signingPackages[0];
+    if (!signingPackage) {
+      throw new Error("No supported signing package was prepared");
+    }
     return agentJson(
       signingPackageResponseSchema.parse({
         schemaVersion: input.schemaVersion,
         signingPackage,
+        signingPackages,
       }),
       200,
       headers,

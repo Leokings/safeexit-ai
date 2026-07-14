@@ -55,6 +55,8 @@ export const eip712DomainSchema = z.strictObject({
 
 export const eip3009RescueActionSchema = z.strictObject({
   actionId: z.string().min(1).max(256),
+  executionPath: z.literal("DIRECT_AUTHORIZATION"),
+  authorizationStandard: z.literal("ERC3009"),
   standard: z.literal("ERC3009_RECEIVE_WITH_AUTHORIZATION"),
   capabilityStatus: z.literal("VERIFIED"),
   tokenAddress: evmAddressSchema,
@@ -66,6 +68,8 @@ export const eip3009RescueActionSchema = z.strictObject({
 
 export const erc2612RescueActionSchema = z.strictObject({
   actionId: z.string().min(1).max(256),
+  executionPath: z.literal("SAFEEXIT_SETTLEMENT"),
+  authorizationStandard: z.literal("ERC2612"),
   standard: z.literal("ERC2612_PERMIT_SETTLEMENT"),
   capabilityStatus: z.literal("SIGNATURE_VERIFICATION_REQUIRED"),
   tokenAddress: evmAddressSchema,
@@ -80,6 +84,8 @@ export const erc2612RescueActionSchema = z.strictObject({
 
 export const daiPermitRescueActionSchema = z.strictObject({
   actionId: z.string().min(1).max(256),
+  executionPath: z.literal("SAFEEXIT_SETTLEMENT"),
+  authorizationStandard: z.literal("DAI_PERMIT"),
   standard: z.literal("DAI_PERMIT_SETTLEMENT"),
   capabilityStatus: z.literal("SIGNATURE_VERIFICATION_REQUIRED"),
   tokenAddress: evmAddressSchema,
@@ -94,6 +100,8 @@ export const daiPermitRescueActionSchema = z.strictObject({
 
 export const erc4494RescueActionSchema = z.strictObject({
   actionId: z.string().min(1).max(256),
+  executionPath: z.literal("SAFEEXIT_SETTLEMENT"),
+  authorizationStandard: z.literal("ERC4494"),
   standard: z.literal("ERC4494_PERMIT_SETTLEMENT"),
   capabilityStatus: z.literal("SIGNATURE_VERIFICATION_REQUIRED"),
   collectionAddress: evmAddressSchema,

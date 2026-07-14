@@ -120,18 +120,26 @@ function actionLabel(actionType: string): string {
   return actionType.toLowerCase().replaceAll("_", " ");
 }
 
-function routeLabel(standard: string): string {
+function executionPathLabel(
+  executionPath: MainnetPreflightResponse["gaslessActions"][number]["executionPath"],
+): string {
+  return executionPath === "DIRECT_AUTHORIZATION"
+    ? "Direct authorization"
+    : "SafeExit settlement";
+}
+
+function authorizationStandardLabel(
+  standard: MainnetPreflightResponse["gaslessActions"][number]["authorizationStandard"],
+): string {
   switch (standard) {
-    case "ERC3009_RECEIVE_WITH_AUTHORIZATION":
-      return "ERC-3009 direct authorization";
-    case "ERC2612_PERMIT_SETTLEMENT":
-      return "ERC-2612 permit settlement";
-    case "DAI_PERMIT_SETTLEMENT":
-      return "DAI-style permit settlement";
-    case "ERC4494_PERMIT_SETTLEMENT":
-      return "ERC-4494 NFT permit settlement";
-    default:
-      return "Unsupported recovery route";
+    case "ERC3009":
+      return "ERC-3009";
+    case "ERC2612":
+      return "ERC-2612";
+    case "DAI_PERMIT":
+      return "DAI permit";
+    case "ERC4494":
+      return "ERC-4494";
   }
 }
 
@@ -587,7 +595,12 @@ export function MainnetRescueWorkspace({
                         }}
                         className={`flex items-center justify-between gap-4 border px-3 py-3 text-left text-sm ${nextGaslessAction && gaslessRouteKey(nextGaslessAction) === gaslessRouteKey(route) ? "border-accent bg-accent/5" : "border-border bg-background"}`}
                       >
-                        <span>{routeLabel(route.standard)}</span>
+                        <span>
+                          <span className="block">{executionPathLabel(route.executionPath)}</span>
+                          <span className="mt-1 block font-mono text-[10px] uppercase text-dim">
+                            {authorizationStandardLabel(route.authorizationStandard)}
+                          </span>
+                        </span>
                         <Badge variant={route.capabilityStatus === "VERIFIED" ? "success" : "info"}>
                           {route.capabilityStatus === "VERIFIED" ? "VERIFIED" : "VERIFY ON SIGN"}
                         </Badge>
@@ -626,7 +639,8 @@ export function MainnetRescueWorkspace({
               <div className="flex justify-between gap-4"><span className="text-muted">Network</span><span>{chainConfig.chain.name}</span></div>
               <div className="space-y-2"><span className="block text-muted">Source signs</span><CopyAddress address={source} compact /></div>
               <div className="space-y-2"><span className="block text-muted">Destination receives and pays gas</span><CopyAddress address={destination} compact /></div>
-              <div className="flex justify-between gap-4"><span className="text-muted">Route</span><span className="text-right">{nextGaslessAction ? routeLabel(nextGaslessAction.standard) : "None verified"}</span></div>
+              <div className="flex justify-between gap-4"><span className="text-muted">Execution path</span><span className="text-right">{nextGaslessAction ? executionPathLabel(nextGaslessAction.executionPath) : "None verified"}</span></div>
+              {nextGaslessAction && <div className="flex justify-between gap-4"><span className="text-muted">Authorization standard</span><span className="font-mono">{authorizationStandardLabel(nextGaslessAction.authorizationStandard)}</span></div>}
               {nextGaslessAction && <div className="space-y-2"><span className="block text-muted">Asset contract</span><CopyAddress address={routeContract(nextGaslessAction)} compact /></div>}
               {nextGaslessAction && nextGaslessAction.standard !== "ERC3009_RECEIVE_WITH_AUTHORIZATION" && <div className="space-y-2"><span className="block text-muted">Settlement contract</span><CopyAddress address={nextGaslessAction.settlementContract} compact /></div>}
               {nextGaslessAction?.standard === "ERC4494_PERMIT_SETTLEMENT" && <div className="flex justify-between gap-4"><span className="text-muted">Token ID</span><span className="font-mono">{nextGaslessAction.tokenId}</span></div>}

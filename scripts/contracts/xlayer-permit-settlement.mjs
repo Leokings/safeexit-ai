@@ -18,17 +18,32 @@ import {
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const rootDirectory = resolve(scriptDirectory, "../..");
-const sourceName = "SafeExitPermitSettlement.sol";
-const contractName = "SafeExitPermitSettlement";
+const requestedCommand = process.argv[2] ?? "prepare";
+const targetVersion = requestedCommand.endsWith("-v1") ? "1" : "2";
+const command = requestedCommand.replace(/-v1$/, "");
+const target = targetVersion === "1"
+  ? {
+      sourceName: "SafeExitPermitSettlement.sol",
+      contractName: "SafeExitPermitSettlement",
+      deploymentName: "xlayer-permit-settlement-v1.json",
+      saltLabel: "SafeExit X Layer permit settlement v1:SafeExitPermitSettlement",
+    }
+  : {
+      sourceName: "SafeExitPermitSettlementV2.sol",
+      contractName: "SafeExitPermitSettlementV2",
+      deploymentName: "xlayer-permit-settlement.json",
+      saltLabel: "SafeExit X Layer permit settlement v2:SafeExitPermitSettlementV2",
+    };
+const { sourceName, contractName } = target;
 const deploymentFile = resolve(
   rootDirectory,
-  "contracts/deployments/xlayer-permit-settlement.json",
+  `contracts/deployments/${target.deploymentName}`,
 );
 const factoryAddress = getAddress("0x4e59b44847b379578588920cA78FbF26c0B4956C");
 const expectedFactoryRuntime =
   "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe03601600081602082378035828234f58015156039578182fd5b8082525050506014600cf3";
 const deploymentSalt = keccak256(
-  stringToHex("SafeExit X Layer permit settlement v1:SafeExitPermitSettlement"),
+  stringToHex(target.saltLabel),
 );
 
 const xLayer = defineChain({
@@ -40,7 +55,7 @@ const xLayer = defineChain({
 
 const settlementDomain = {
   name: "SafeExit Permit Settlement",
-  version: "1",
+  version: targetVersion,
 };
 const eip712DomainTypes = {
   EIP712Domain: [
@@ -299,7 +314,7 @@ async function prepareOrVerify() {
       ? "VERIFIED"
       : "CODE_MISMATCH";
   const manifest = {
-    warning: "UNAUDITED - DO NOT ENABLE FOR VALUABLE ASSETS UNTIL INDEPENDENT REVIEW",
+    warning: "INTERNALLY REVIEWED - NOT INDEPENDENTLY AUDITED",
     chainId: xLayer.id,
     chainName: xLayer.name,
     factoryAddress,
@@ -369,7 +384,7 @@ async function serveDeployer() {
     <div class="eyebrow">Operator-only / X Layer mainnet</div>
     <h1>Deploy permit settlement</h1>
     <div class="panel">
-      <div class="warning">UNAUDITED CONTRACT. Deploying does not make it approved for high-value use.</div>
+      <div class="warning">INTERNALLY REVIEWED, NOT INDEPENDENTLY AUDITED. Deploy only the fixed, verified artifact shown below.</div>
       <div class="grid">
         <div class="label">Expected contract</div><div class="value">${address}</div>
         <div class="label">CREATE2 factory</div><div class="value">${factoryAddress}</div>
@@ -379,7 +394,7 @@ async function serveDeployer() {
         <div class="label">Estimated max cost</div><div class="value">${maximumCostWei?.toString() ?? "unavailable"} wei</div>
         <div class="label">Payload hash</div><div class="value">${keccak256(deploymentData)}</div>
       </div>
-      <label class="confirm"><input id="risk" type="checkbox"> <span>I understand this deploys unaudited code to X Layer mainnet and requires an OKX Wallet confirmation.</span></label>
+      <label class="confirm"><input id="risk" type="checkbox"> <span>I understand this deploys internally reviewed code that has not received an independent audit and requires an OKX Wallet confirmation.</span></label>
       <div class="actions">
         <button id="connect">Connect OKX Wallet</button>
         <button id="deploy" class="primary" disabled>Deploy fixed contract</button>
@@ -520,7 +535,6 @@ async function serveDeployer() {
   process.stdout.write(`SAFEEXIT deployment page: http://127.0.0.1:${port}/\n`);
 }
 
-const command = process.argv[2] ?? "prepare";
 if (command === "payload") {
   await printPayload();
 } else if (command === "serve") {

@@ -12,10 +12,11 @@
   `MULTICHAIN_ADAPTER_VERIFICATION.md`
 - Production URL: `https://safeexit.xyz`
 
-SAFEEXIT includes the unaudited `SafeExitPermitSettlement` Solidity contract at
-`contracts/src/SafeExitPermitSettlement.sol`. Its deterministic X Layer address
-is `0x964FDCfE0A0bCE568309f3f7D07ab08Fc8F93103`; production remains fail-closed
-until it is deployed and verified. The review must cover the contract, browser
+SAFEEXIT uses the internally reviewed `SafeExitPermitSettlementV2` Solidity
+contract at `contracts/src/SafeExitPermitSettlementV2.sol`. Its deterministic
+X Layer address is `0x73E8A8d165EC9710aC27f91B0Df02975CC4a48d0`;
+production remains fail-closed until it is deployed and verified. The review
+must cover the contract, browser
 and buyer-runtime EIP-712 construction, capability detection, simulation,
 submission, and receipt verification as one system.
 
@@ -42,8 +43,8 @@ Primary implementation locations:
 - `apps/web/src/app/api/rescue/[id]/preflight/route.ts`
 - `apps/web/src/lib/live-signing-package-builder.ts`
 - `apps/web/src/lib/live-buyer-report-verifier.ts`
-- `contracts/src/SafeExitPermitSettlement.sol`
-- `contracts/test/SafeExitPermitSettlement.ts`
+- `contracts/src/SafeExitPermitSettlementV2.sol`
+- `contracts/test/SafeExitPermitSettlementV2.ts`
 - `packages/adapters/src/permit-settlement.ts`
 - `packages/agent-service/src/signing-package.ts`
 - `packages/buyer-runtime/src/`

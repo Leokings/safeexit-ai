@@ -26,6 +26,7 @@ export interface DashboardLocatorPort {
 
 export interface SigningPackageBuilderPort {
   build(job: AgentServiceJob): Promise<SigningPackage>;
+  buildAll?(job: AgentServiceJob): Promise<readonly SigningPackage[]>;
 }
 
 export interface BuyerExecutionVerifierPort {

@@ -124,7 +124,7 @@ sign for the compromised source EOA. See
 The production fast path is `POST /api/agent/okx/prepare-paid`. It uses the
 official OKX x402 Next.js middleware at a fixed `$0.10` price on X Layer
 mainnet. After payment verification, the endpoint runs scanner, planner, and
-simulation code directly and returns a strict signing package in the same HTTP
+simulation code directly and returns an ordered set of strict signing packages in the same HTTP
 request. It also returns an explanation-only incident analysis. In hosted AI
 mode, DeepSeek may select an intent and existing evidence IDs; deterministic
 code still writes the response and remains the sole source of executable plan
@@ -142,13 +142,25 @@ service so ordinary rescues do not inherit conversational task latency.
 Payment does not grant execution authority: source signing stays local and the
 destination still performs post-signature simulation and pays settlement gas.
 Model failure, timeout, invalid output, or token-budget overflow falls back to
-the deterministic explanation without changing the signing package. AI usage
+the deterministic explanation without changing any signing package. AI usage
 is persisted per SAFEEXIT job for cost accounting.
 
 ## Destination-paid EVM mainnet recovery
 
-The rescue workspace supports multiple destination-paid asset
-routes. ERC-3009 is preferred for fungible tokens when its capability and EIP-712 domain are
+SAFEEXIT presents two execution paths: `DIRECT_AUTHORIZATION` for token-native
+destination calls and `SAFEEXIT_SETTLEMENT` for one call to the shared
+settlement contract. The precise standard remains committed as
+`authorizationStandard` so deterministic code can construct and verify the
+correct typed data and calldata.
+
+One paid preparation creates one incident and one rescue plan. It may return
+multiple signing packages in deterministic plan order, one for each supported
+asset action. Every package is independently scoped, signed, post-simulated,
+submitted, and receipt-verified. Each public package envelope still exposes
+only `DIRECT_AUTHORIZATION` or `SAFEEXIT_SETTLEMENT`; ERC-3009, ERC-2612,
+DAI-style permit, and ERC-4494 remain internal authorization standards.
+
+ERC-3009 is preferred for fungible tokens when its capability and EIP-712 domain are
 verified onchain. The reported source signs a short-lived
 `ReceiveWithAuthorization` message and the destination submits it with real
 mainnet gas.
@@ -159,6 +171,11 @@ SAFEEXIT authorization that binds the exact destination, token, amount, permit
 nonce, deadline, and one-time rescue nonce. The destination simulates and sends
 one `settleERC2612` transaction. In both routes the source submits no
 transaction and pays no network fee.
+
+Settlement v2 also tolerates a publicly pre-consumed ERC-2612 permit only when
+the token nonce advanced exactly once and the resulting settlement allowance
+still equals the signed rescue amount. Any unrelated nonce or allowance change
+fails closed.
 
 DAI-style permits are supported when the token exposes the exact legacy permit
 type hash and its `name`, version `1`, chain ID, contract address, and domain
@@ -177,14 +194,15 @@ Permit settlement is asset-agnostic: there is no token or NFT allowlist. Any
 submitted asset may use a route when its capability checks pass and the exact
 chain settlement contract passes onchain identity verification. X Layer's
 deterministic contract address is
-`0x964FDCfE0A0bCE568309f3f7D07ab08Fc8F93103`; the route remains disabled until
+`0x73E8A8d165EC9710aC27f91B0Df02975CC4a48d0`; the route remains disabled until
 that address is deployed and verified.
 
 Authorization signatures remain in browser memory and are never sent to or
 stored by SAFEEXIT. Assets without a verified permit route, native currency,
 ERC-1155 assets, approvals, airdrops, and positions stay blocked until a
 verified destination-paid adapter exists. The mainnet route is best effort and
-has not received an independent security audit.
+has received an internal engineering review but not an independent audit. No
+monetary-value ceiling is imposed on a route that passes all execution gates.
 
 Native-currency recovery remains non-executable. The adapter package records
 fail-closed requirements for an audited EIP-7702 sponsor or an official target-chain

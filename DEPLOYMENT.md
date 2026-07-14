@@ -239,8 +239,10 @@ submitted entries at the pinned RPC block.
 Analysis, planning, simulation, and monitoring accept the strict body
 `{ "schemaVersion": "safeexit-agent-api-v1" }`.
 
-`signing-package` accepts the same version-only body. It returns one strict,
-short-lived package for a successfully simulated action. The package contains
+`signing-package` accepts the same version-only body. It returns an ordered
+`signingPackages` set for every successfully simulated action with a verified
+destination-paid adapter, plus `signingPackage` as a first-package compatibility
+field. Each package contains
 EIP-712 typed data and a declarative settlement sequence, not signatures,
 private credentials, raw calldata, or an unrestricted call list. The buyer's
 local runtime must re-confirm the fixed addresses, collect source signatures,
@@ -273,9 +275,11 @@ strict receipt report to `buyer-report`:
 }
 ```
 
-SAFEEXIT rejects reports outside the issued package scope and independently
-loads successful chain receipts. A job completes only when the receipts contain
-the exact committed ERC-20 or ERC-721 transfer from source to destination.
+SAFEEXIT rejects reports outside the issued package set and independently
+loads successful chain receipts. A mixed job remains `EXECUTING` until every
+issued package has a receipt containing the exact committed ERC-20 or ERC-721
+transfer from source to destination. It finishes `PARTIAL` when verified
+packages complete but unsupported or uncovered plan actions remain.
 Signatures and settlement calldata are never returned to the hosted service.
 
 The dashboard is optional and is not created with the job. Request it only for
@@ -336,23 +340,24 @@ signs both the NFT permit and the SAFEEXIT destination commitment before the
 destination submits one `settleERC4494` call.
 
 The deterministic X Layer settlement address is
-`0x964FDCfE0A0bCE568309f3f7D07ab08Fc8F93103`. Run
+`0x73E8A8d165EC9710aC27f91B0Df02975CC4a48d0`. Run
 `npm run contracts:prepare:settlement:xlayer` to reproduce it and
 `npm run contracts:verify:settlement:xlayer` after deployment. Production
 preflight fails closed until code and all domain/type-hash constants verify at
-that exact address. The contract is unaudited and must not be presented as
-independently reviewed.
+that exact address. The contract is internally reviewed but must not be
+presented as independently audited.
 
 No server credential, relayer key, or private key is used. The short-lived
 signature remains only in the browser tab. Source-funded transactions are
-disabled in this flow. This is a real-money mainnet path and has not received
-an independent security review; use remains best effort and permit-only.
+disabled in this flow. This is a real-money mainnet path with an internal
+engineering review, not an independent audit; use remains best effort and
+permit-only.
 
 ## Current production limitations
 
-- Hosted scanning and simulation are verified fixture replays unless the agent
-  is explicitly switched to `LIVE_READONLY`.
-- Only the fixed local developer incident is accepted by the hosted analyzer.
+- Production agent endpoints run only in explicit `LIVE_READONLY` mode and use
+  chain RPC reads for the caller-supplied, ownership-attested incident. Demo
+  fixtures are not accepted by the production analyzer.
 - Mainnet browser execution is limited to ERC-3009, signature-verified ERC-2612,
   strict DAI-style permits, or ERC-4494 destination-paid settlement through
   the user-controlled OKX Wallet. Relayer, private transaction, paymaster,

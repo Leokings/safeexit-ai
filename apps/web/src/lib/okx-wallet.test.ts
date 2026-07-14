@@ -53,6 +53,8 @@ const settlementContract = getConfiguredPermitSettlementAddress(196)!;
 
 const action = gaslessRescueActionSchema.parse({
   actionId: "action:test",
+  executionPath: "DIRECT_AUTHORIZATION",
+  authorizationStandard: "ERC3009",
   standard: "ERC3009_RECEIVE_WITH_AUTHORIZATION",
   capabilityStatus: "VERIFIED",
   tokenAddress: token,
@@ -69,6 +71,8 @@ const action = gaslessRescueActionSchema.parse({
 
 const permitAction = gaslessRescueActionSchema.parse({
   actionId: "action:permit-test",
+  executionPath: "SAFEEXIT_SETTLEMENT",
+  authorizationStandard: "ERC2612",
   standard: "ERC2612_PERMIT_SETTLEMENT",
   capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED",
   tokenAddress: token,
@@ -88,6 +92,8 @@ const permitAction = gaslessRescueActionSchema.parse({
 
 const daiPermitAction = gaslessRescueActionSchema.parse({
   actionId: "action:dai-permit-test",
+  executionPath: "SAFEEXIT_SETTLEMENT",
+  authorizationStandard: "DAI_PERMIT",
   standard: "DAI_PERMIT_SETTLEMENT",
   capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED",
   tokenAddress: token,
@@ -107,6 +113,8 @@ const daiPermitAction = gaslessRescueActionSchema.parse({
 
 const nftPermitAction = gaslessRescueActionSchema.parse({
   actionId: "action:nft-permit-test",
+  executionPath: "SAFEEXIT_SETTLEMENT",
+  authorizationStandard: "ERC4494",
   standard: "ERC4494_PERMIT_SETTLEMENT",
   capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED",
   collectionAddress: collection,

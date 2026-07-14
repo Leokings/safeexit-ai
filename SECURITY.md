@@ -6,7 +6,7 @@ wallet signatures.
 
 ## Dependency advisory record
 
-As of 2026-07-13, `npm audit` reports GHSA-qx2v-qp2m-jg93 through Next.js's
+As of 2026-07-14, `npm audit` reports GHSA-qx2v-qp2m-jg93 through Next.js's
 exact nested dependency on PostCSS 8.4.31. The current stable Next.js release is
 16.2.10 and still pins that version; npm's automated fix incorrectly proposes a
 breaking downgrade to Next.js 9.3.3.
@@ -33,9 +33,11 @@ after signing, and permits only the confirmed destination wallet to submit it.
 
 This is an internal engineering review, not an independent smart-contract or
 protocol audit. See `INTERNAL_SECURITY_REVIEW.md`, `THREAT_MODEL.md`, and
-`AUDIT_SCOPE.md`. The mainnet route is enabled for narrowly scoped permit-only
-recovery, but high-value use still requires a controlled canary with
-operator-owned funds followed by independent security review.
+`AUDIT_SCOPE.md`. Supported mainnet routes do not impose a monetary-value cap.
+Execution remains limited by deterministic capability verification, exact
+destination-bound authorization, fresh simulation, and receipt evidence. A
+controlled operator-owned canary is recommended when enabling a new route or
+asset implementation, but an external audit is not a runtime prerequisite.
 
 ## Distributed abuse controls
 

@@ -8,7 +8,7 @@ import {
 } from "@safeexit/shared";
 
 import { agentServiceJobSchema } from "./schemas";
-import { signingPackageSchema } from "./signing-package";
+import { signingPackageListSchema, signingPackageSchema } from "./signing-package";
 import { buyerExecutionReportSchema } from "./buyer-report";
 
 const identifierSchema = z.string().min(1).max(256);
@@ -58,6 +58,7 @@ export const signingPackageRequestSchema = z.strictObject({
 export const signingPackageResponseSchema = z.strictObject({
   schemaVersion: z.literal("safeexit-agent-api-v1"),
   signingPackage: signingPackageSchema,
+  signingPackages: signingPackageListSchema,
 });
 
 export const buyerExecutionReportRequestSchema = z.strictObject({

@@ -30,7 +30,10 @@ import {
   type CreateIncidentInput,
   type RescueMonitorObservation,
 } from "./schemas";
-import { signingPackageSchema, type SigningPackage } from "./signing-package";
+import {
+  signingPackageListSchema,
+  type SigningPackage,
+} from "./signing-package";
 import type { AgentServiceJobStore } from "./store";
 
 export type AgentIncidentServiceOptions = {
@@ -247,7 +250,23 @@ export class AgentIncidentService {
   }
 
   async getSigningPackage(jobId: string): Promise<SigningPackage> {
+    const signingPackages = await this.getSigningPackages(jobId);
+    const signingPackage = signingPackages[0];
+    if (!signingPackage) {
+      throw new Error("Signing package is unavailable: no supported package was issued");
+    }
+    return signingPackage;
+  }
+
+  async getSigningPackages(jobId: string): Promise<SigningPackage[]> {
     const job = await this.requireJob(jobId);
+    const persisted = job.signingPackages ?? (job.signingPackage ? [job.signingPackage] : []);
+    if (
+      persisted.length > 0 &&
+      persisted.every((signingPackage) => Date.parse(signingPackage.expiresAt) > this.clock().getTime())
+    ) {
+      return signingPackageListSchema.parse(persisted);
+    }
     if (
       job.status !== "WAITING_FOR_USER" ||
       !job.incident ||
@@ -257,12 +276,26 @@ export class AgentIncidentService {
       throw new Error("A successfully simulated rescue plan is required before signing-package generation");
     }
     try {
-      const signingPackage = signingPackageSchema.parse(
-        await this.signingPackages.build(job),
+      const signingPackages = signingPackageListSchema.parse(
+        this.signingPackages.buildAll
+          ? await this.signingPackages.buildAll(job)
+          : [await this.signingPackages.build(job)],
       );
-      this.validateSigningPackage(job, signingPackage);
-      await this.updateJob(job, { signingPackage });
-      return signingPackage;
+      const actionOrder = new Map(job.plan.actions.map((action, index) => [action.id, index]));
+      let previousIndex = -1;
+      for (const signingPackage of signingPackages) {
+        this.validateSigningPackage(job, signingPackage);
+        const currentIndex = actionOrder.get(signingPackage.actionId);
+        if (currentIndex === undefined || currentIndex <= previousIndex) {
+          throw new Error("Signing packages must follow deterministic rescue-plan order");
+        }
+        previousIndex = currentIndex;
+      }
+      await this.updateJob(job, {
+        signingPackage: signingPackages[0],
+        signingPackages,
+      });
+      return signingPackages;
     } catch (error) {
       throw new Error(`Signing package is unavailable: ${messageFor(error)}`);
     }
@@ -293,14 +326,13 @@ export class AgentIncidentService {
   ): Promise<AgentServiceJob> {
     const job = await this.requireJob(jobId);
     const report = buyerExecutionReportSchema.parse(reportValue);
-    if (job.status === "COMPLETED") {
-      this.validateBuyerReportScope(job, report);
+    if (job.status === "COMPLETED" || job.status === "PARTIAL") {
+      const signingPackage = this.validateBuyerReportScope(job, report);
       const observedHashes = new Set(
         job.monitor?.transactionHashes.map((hash) => hash.toLowerCase()) ?? [],
       );
       const exactVerifiedRetry =
-        job.monitor?.phase === "COMPLETED" &&
-        observedHashes.size === report.transactionHashes.length &&
+        job.monitor?.completedActionIds.includes(signingPackage.actionId) === true &&
         report.transactionHashes.every((hash) => observedHashes.has(hash.toLowerCase()));
       if (!exactVerifiedRetry) {
         throw new Error("Completed buyer report retry does not match verified receipts");
@@ -309,7 +341,7 @@ export class AgentIncidentService {
     }
     if (
       !["WAITING_FOR_USER", "SIGNING", "EXECUTING"].includes(job.status) ||
-      !job.signingPackage ||
+      (job.signingPackages?.length ?? (job.signingPackage ? 1 : 0)) === 0 ||
       !job.plan
     ) {
       throw new Error(`Buyer execution reporting is not available while job is ${job.status}`);
@@ -322,7 +354,51 @@ export class AgentIncidentService {
     if (observation.phase !== "COMPLETED") {
       throw new Error("A verified buyer execution report must produce a completed observation");
     }
-    return this.advanceToObservation(job, observation);
+    const issuedPackages = job.signingPackages ?? (job.signingPackage ? [job.signingPackage] : []);
+    const completedActionIds = [
+      ...new Set([
+        ...(job.monitor?.completedActionIds ?? []),
+        ...observation.completedActionIds,
+      ]),
+    ];
+    const failedActionIds = [
+      ...new Set([
+        ...(job.monitor?.failedActionIds ?? []),
+        ...observation.failedActionIds,
+      ]),
+    ].filter((actionId) => !completedActionIds.includes(actionId));
+    const transactionHashes = [
+      ...new Map(
+        [...(job.monitor?.transactionHashes ?? []), ...observation.transactionHashes].map(
+          (hash) => [hash.toLowerCase(), hash] as const,
+        ),
+      ).values(),
+    ];
+    const everyIssuedPackageCompleted = issuedPackages.every((signingPackage) =>
+      completedActionIds.includes(signingPackage.actionId),
+    );
+    const issuedActionIds = new Set(issuedPackages.map((signingPackage) => signingPackage.actionId));
+    const uncoveredExecutableAction = job.simulation?.executableActionIds.some(
+      (actionId) => !issuedActionIds.has(actionId),
+    ) ?? false;
+    const hasExcludedActions = (job.simulation?.excludedActionIds.length ?? 0) > 0;
+    const phase = everyIssuedPackageCompleted
+      ? uncoveredExecutableAction || hasExcludedActions
+        ? "PARTIAL" as const
+        : "COMPLETED" as const
+      : "EXECUTING" as const;
+    return this.advanceToObservation(job, rescueMonitorObservationSchema.parse({
+      phase,
+      completedActionIds,
+      failedActionIds,
+      transactionHashes,
+      observedAt: observation.observedAt,
+      detail: everyIssuedPackageCompleted
+        ? phase === "COMPLETED"
+          ? "All issued SAFEEXIT signing packages were verified onchain"
+          : "All issued SAFEEXIT signing packages were verified; unsupported or uncovered actions remain"
+        : "A SAFEEXIT signing package was verified; additional issued packages remain",
+    }));
   }
 
   async getJob(jobId: string): Promise<AgentServiceJob> {
@@ -483,8 +559,9 @@ export class AgentIncidentService {
   private validateBuyerReportScope(
     job: AgentServiceJob,
     report: BuyerExecutionReport,
-  ): void {
-    const signingPackage = job.signingPackage;
+  ): SigningPackage {
+    const signingPackage = (job.signingPackages ?? (job.signingPackage ? [job.signingPackage] : []))
+      .find((candidate) => candidate.packageId === report.packageId);
     if (
       !signingPackage ||
       report.jobId !== job.id ||
@@ -500,6 +577,7 @@ export class AgentIncidentService {
     ) {
       throw new Error("Buyer execution report does not match the issued signing package");
     }
+    return signingPackage;
   }
 
   private async failJob(
@@ -522,7 +600,7 @@ export class AgentIncidentService {
 
   private async updateJob(
     job: AgentServiceJob,
-    patch: Partial<Pick<AgentServiceJob, "incident" | "scan" | "signingPackage" | "monitor" | "dashboardUrl">>,
+    patch: Partial<Pick<AgentServiceJob, "incident" | "scan" | "signingPackage" | "signingPackages" | "monitor" | "dashboardUrl">>,
   ): Promise<AgentServiceJob> {
     const at = this.now();
     return this.store.save(

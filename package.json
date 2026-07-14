@@ -19,6 +19,7 @@
     "contracts:test": "npm run contracts:build && node --import tsx --test contracts/test/*.ts",
     "contracts:verify:xlayer": "node scripts/contracts/xlayer-mainnet-fixtures.mjs verify",
     "contracts:verify:settlement:xlayer": "node scripts/contracts/xlayer-permit-settlement.mjs verify",
+    "contracts:verify:settlement-v1:xlayer": "node scripts/contracts/xlayer-permit-settlement.mjs verify-v1",
     "dev": "npm run dev --workspace @safeexit/web",
     "lint": "eslint . --max-warnings=0",
     "db:generate": "prisma generate",

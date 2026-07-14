@@ -14,6 +14,11 @@ configuration, browser security boundary, and the subsequently added
 `SafeExitPermitSettlement` contract. This remains an internal implementation
 review, not an independent contract audit.
 
+The production settlement is now `SafeExitPermitSettlementV2` at
+`0x73E8A8d165EC9710aC27f91B0Df02975CC4a48d0`. The original v1 deployment is
+retained only for reproducibility and is no longer selected by production
+adapters.
+
 This review predates the eight-network adapter expansion. The multichain release
 preserves the reviewed authorization and settlement invariants and is recorded
 separately in `MULTICHAIN_ADAPTER_VERIFICATION.md`; that internal verification
@@ -31,6 +36,7 @@ does not widen this review into an independent audit.
 | SE-06 | Low | Obsolete local demo contracts, attacker scripts, and public Anvil keys remained in the repository even though they were not deployed. | The contract/demo directories, scripts, commands, and unused OpenZeppelin dependency were removed. |
 | SE-07 | Low | Security-critical x402 dependencies used semver ranges. | Installed OKX x402 versions are now exactly pinned in `package.json` and the lockfile. |
 | SE-08 | Low | Environment schemas allowed malformed RPC/credential strings to reach runtime checks. | RPCs must be exact HTTPS URLs; server credentials reject line breaks. |
+| SE-09 | Medium | V1 rejected an otherwise valid rescue when an observer submitted the ERC-2612 or DAI allow permit before settlement. | V2 accepts only the narrowly proven pre-consumed state: the nonce advanced exactly once and the settlement allowance still supports the signed rescue. Unrelated nonce or allowance changes fail closed. |
 
 ## Verification performed
 
@@ -39,6 +45,10 @@ does not widen this review into an independent audit.
 - Targeted adversarial unit tests for route substitution, account switching,
   destination substitution, false transfer evidence, simulation failure,
   and log leakage.
+- Seventeen Solidity tests covering v1 reproducibility plus v2 replay,
+  destination binding, expiry, amount substitution, pre-consumed permits,
+  stale nonces, fee-on-transfer rejection, allowance revocation, and atomic
+  rollback, and one shared-deployment mixed ERC-2612/ERC-4494 rescue.
 - Full lint, TypeScript, Vitest, Prisma, and Next.js production build through
   `npm run ci`.
 - `npm audit --omit=dev`, registry signature verification, secret-pattern scan,
@@ -49,8 +59,9 @@ does not widen this review into an independent audit.
 ## Accepted and open risk
 
 1. This review is not independent because the reviewer also helped implement
-   the system. Obtain an external review before representing SAFEEXIT as
-   audited or encouraging high-value use.
+   the system. SAFEEXIT must not be represented as independently audited. An
+   external review remains a future risk-reduction milestone, not a runtime
+   asset-value restriction.
 2. The public X Layer RPC rejects `eth_simulateV1`. Browser settlement uses
    `eth_call` against the exact signed, single-call transaction instead.
    Settlement-contract identity, exact signed-call preflight, and receipt
@@ -68,8 +79,9 @@ does not widen this review into an independent audit.
 
 ## Release recommendation
 
-Do not label this release independently audited. Keep use limited to supported
-permit routes, perform a low-value operator-owned mainnet canary for each route,
-retain the current blocked-asset behavior, and commission an external review
-using `AUDIT_SCOPE.md`. Publish the external report and remediation commit before
-removing the unaudited warning or encouraging high-value rescues.
+Do not label this release independently audited. Enable every deterministically
+verified and freshly simulated supported route without an arbitrary monetary
+cap, retain fail-closed behavior for unsupported routes, and perform an
+operator-owned mainnet canary when introducing a new adapter or token behavior.
+Use `AUDIT_SCOPE.md` when an external review becomes practical and publish any
+future report with its exact remediation commit.

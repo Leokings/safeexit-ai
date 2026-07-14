@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 import {
+  authorizationStandardSchema,
   buyerExecutionReportSchema,
+  recoveryExecutionPathSchema,
+  signingPackageExecutionMetadata,
   signingPackageSchema,
 } from "@safeexit/agent-service";
 import { aiChatResponseSchema } from "@safeexit/ai";
@@ -87,16 +90,44 @@ export const okxX402PrepareRequestSchema = z
     }
   });
 
+export const okxSigningPackageEnvelopeSchema = z.strictObject({
+  executionPath: recoveryExecutionPathSchema,
+  authorizationStandard: authorizationStandardSchema,
+  signingPackage: signingPackageSchema,
+}).superRefine((envelope, context) => {
+  const expected = signingPackageExecutionMetadata(envelope.signingPackage);
+  if (envelope.executionPath !== expected.executionPath) {
+    context.addIssue({
+      code: "custom",
+      message: "Public execution path does not match the deterministic signing route",
+      path: ["executionPath"],
+    });
+  }
+  if (envelope.authorizationStandard !== expected.authorizationStandard) {
+    context.addIssue({
+      code: "custom",
+      message: "Authorization standard does not match the deterministic signing route",
+      path: ["authorizationStandard"],
+    });
+  }
+});
+
+const signingPackageCoverageSchema = z.strictObject({
+  issuedActionIds: z.array(identifierSchema).min(1),
+  unavailableActionIds: z.array(identifierSchema),
+});
+
 export const okxA2ASigningDeliverableSchema = z.strictObject({
-  schemaVersion: z.literal("safeexit-okx-deliverable-v1"),
+  schemaVersion: z.literal("safeexit-okx-deliverable-v2"),
   transportMode: z.literal("SAFEEXIT_NORMALIZED"),
   okxJobId: identifierSchema,
   providerAgentId: agentIdSchema,
   safeExitJobId: z.string().min(1).max(256),
-  status: z.literal("SIGNING_PACKAGE_READY"),
+  status: z.literal("SIGNING_PACKAGES_READY"),
   createdAt: timestampSchema,
   walletContext: walletContextSchema,
-  signingPackage: signingPackageSchema,
+  signingPackages: z.array(okxSigningPackageEnvelopeSchema).min(1),
+  coverage: signingPackageCoverageSchema,
   executionRequirements: z.strictObject({
     sourceSignerMustRemainLocal: z.literal(true),
     destinationPaysSettlementGas: z.literal(true),
@@ -107,15 +138,16 @@ export const okxA2ASigningDeliverableSchema = z.strictObject({
 });
 
 export const okxX402SigningDeliverableSchema = z.strictObject({
-  schemaVersion: z.literal("safeexit-okx-x402-deliverable-v1"),
+  schemaVersion: z.literal("safeexit-okx-x402-deliverable-v2"),
   transportMode: z.literal("OKX_X402"),
   requestId: identifierSchema,
   providerAgentId: agentIdSchema,
   safeExitJobId: z.string().min(1).max(256),
-  status: z.literal("SIGNING_PACKAGE_READY"),
+  status: z.literal("SIGNING_PACKAGES_READY"),
   createdAt: timestampSchema,
   walletContext: walletContextSchema,
-  signingPackage: signingPackageSchema,
+  signingPackages: z.array(okxSigningPackageEnvelopeSchema).min(1),
+  coverage: signingPackageCoverageSchema,
   incidentAnalysis: z.strictObject({
     authority: z.literal("EXPLANATION_ONLY"),
     executablePlanSource: z.literal("DETERMINISTIC"),
@@ -143,14 +175,16 @@ export const okxA2ABuyerReportRequestSchema = z.strictObject({
 });
 
 export const okxA2ACompletionDeliverableSchema = z.strictObject({
-  schemaVersion: z.literal("safeexit-okx-deliverable-v1"),
+  schemaVersion: z.literal("safeexit-okx-deliverable-v2"),
   transportMode: z.literal("SAFEEXIT_NORMALIZED"),
   okxJobId: identifierSchema,
   providerAgentId: agentIdSchema,
   safeExitJobId: z.string().min(1).max(256),
-  status: z.literal("COMPLETED"),
-  completedAt: timestampSchema,
-  transactionHashes: z.array(transactionHashSchema).min(1).max(8),
+  status: z.enum(["EXECUTING", "COMPLETED", "PARTIAL"]),
+  observedAt: timestampSchema,
+  transactionHashes: z.array(transactionHashSchema).min(1).max(16),
+  completedActionIds: z.array(identifierSchema).min(1),
+  remainingPackageIds: z.array(identifierSchema),
   verification: z.strictObject({
     receiptStatusVerified: z.literal(true),
     committedTransferVerified: z.literal(true),

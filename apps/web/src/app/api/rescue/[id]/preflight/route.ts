@@ -984,6 +984,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         }
         return [{
           actionId: action.id,
+          executionPath: "SAFEEXIT_SETTLEMENT" as const,
+          authorizationStandard: "ERC4494" as const,
           standard: "ERC4494_PERMIT_SETTLEMENT" as const,
           capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED" as const,
           collectionAddress: action.parameters.collectionAddress,
@@ -1007,6 +1009,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       if ("eip3009Domain" in tokenMetadata && tokenMetadata.eip3009Domain) {
         routes.push({
           actionId: action.id,
+          executionPath: "DIRECT_AUTHORIZATION" as const,
+          authorizationStandard: "ERC3009" as const,
           standard: "ERC3009_RECEIVE_WITH_AUTHORIZATION" as const,
           capabilityStatus: "VERIFIED" as const,
           tokenAddress: action.parameters.tokenAddress,
@@ -1023,6 +1027,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       ) {
         routes.push({
           actionId: action.id,
+          executionPath: "SAFEEXIT_SETTLEMENT" as const,
+          authorizationStandard: "ERC2612" as const,
           standard: "ERC2612_PERMIT_SETTLEMENT" as const,
           capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED" as const,
           tokenAddress: action.parameters.tokenAddress,
@@ -1042,6 +1048,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       ) {
         routes.push({
           actionId: action.id,
+          executionPath: "SAFEEXIT_SETTLEMENT" as const,
+          authorizationStandard: "DAI_PERMIT" as const,
           standard: "DAI_PERMIT_SETTLEMENT" as const,
           capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED" as const,
           tokenAddress: action.parameters.tokenAddress,

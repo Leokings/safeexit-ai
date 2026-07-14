@@ -7,7 +7,7 @@ import {
   walletScanSchema,
 } from "@safeexit/shared";
 
-import { signingPackageSchema } from "./signing-package";
+import { signingPackageListSchema, signingPackageSchema } from "./signing-package";
 
 const identifierSchema = z.string().min(1).max(256);
 const timestampSchema = z.string().datetime({ offset: true });
@@ -95,6 +95,7 @@ export const agentServiceJobSchema = z
     plan: rescuePlanSchema.optional(),
     simulation: agentSimulationReportSchema.optional(),
     signingPackage: signingPackageSchema.optional(),
+    signingPackages: signingPackageListSchema.optional(),
     monitor: rescueMonitorObservationSchema.optional(),
     dashboardUrl: z.string().url().optional(),
     error: agentServiceErrorSchema.optional(),
@@ -156,6 +157,24 @@ export const agentServiceJobSchema = z
         path: ["signingPackage"],
       });
     }
+    if (job.signingPackages && !job.simulation) {
+      context.addIssue({
+        code: "custom",
+        message: "Signing packages require a simulation report",
+        path: ["signingPackages"],
+      });
+    }
+    if (
+      job.signingPackage &&
+      job.signingPackages &&
+      job.signingPackage.packageId !== job.signingPackages[0]?.packageId
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "The compatibility signing package must be the first issued package",
+        path: ["signingPackage"],
+      });
+    }
     if (job.signingPackage && job.incident && job.plan) {
       const signingPackage = job.signingPackage;
       const scopeMatches =
@@ -175,6 +194,27 @@ export const agentServiceJobSchema = z
           path: ["signingPackage"],
         });
       }
+    }
+    if (job.signingPackages && job.incident && job.plan) {
+      job.signingPackages.forEach((signingPackage, index) => {
+        const scopeMatches =
+          signingPackage.jobId === job.id &&
+          signingPackage.incidentId === job.incident?.id &&
+          signingPackage.planId === job.plan?.id &&
+          signingPackage.planHash.toLowerCase() === job.plan?.integrityHash.toLowerCase() &&
+          signingPackage.chainId === job.plan?.chainId &&
+          signingPackage.sourceAddress.toLowerCase() === job.plan?.sourceAddress.toLowerCase() &&
+          signingPackage.destinationAddress.toLowerCase() ===
+            job.plan?.destinationAddress.toLowerCase() &&
+          signingPackage.observedAtBlock === job.plan?.observedAtBlock;
+        if (!scopeMatches) {
+          context.addIssue({
+            code: "custom",
+            message: "Every signing package must exactly match the persisted job and plan scope",
+            path: ["signingPackages", index],
+          });
+        }
+      });
     }
     if (job.status === "WAITING_FOR_SOURCE" && job.incident) {
       context.addIssue({

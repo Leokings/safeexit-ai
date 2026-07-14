@@ -20,6 +20,17 @@ const positiveBaseUnitAmountSchema = baseUnitAmountSchema.refine(
 const hashSchema = z.string().regex(/^0x[a-fA-F0-9]{64}$/);
 const bytes32Schema = hashSchema;
 
+export const recoveryExecutionPathSchema = z.enum([
+  "DIRECT_AUTHORIZATION",
+  "SAFEEXIT_SETTLEMENT",
+]);
+export const authorizationStandardSchema = z.enum([
+  "ERC3009",
+  "ERC2612",
+  "DAI_PERMIT",
+  "ERC4494",
+]);
+
 const typedDataField = <TName extends string, TType extends string>(
   name: TName,
   type: TType,
@@ -595,5 +606,84 @@ export const signingPackageSchema = z
     }
   });
 
+export const signingPackageListSchema = z
+  .array(signingPackageSchema)
+  .min(1)
+  .superRefine((packages, context) => {
+    const packageIds = new Set<string>();
+    const actionIds = new Set<string>();
+    const first = packages[0];
+    if (!first) return;
+
+    packages.forEach((signingPackage, index) => {
+      if (packageIds.has(signingPackage.packageId)) {
+        context.addIssue({
+          code: "custom",
+          message: "Signing package IDs must be unique",
+          path: [index, "packageId"],
+        });
+      }
+      if (actionIds.has(signingPackage.actionId)) {
+        context.addIssue({
+          code: "custom",
+          message: "A rescue action may only have one signing package",
+          path: [index, "actionId"],
+        });
+      }
+      packageIds.add(signingPackage.packageId);
+      actionIds.add(signingPackage.actionId);
+
+      const sharesPlanScope =
+        signingPackage.jobId === first.jobId &&
+        signingPackage.incidentId === first.incidentId &&
+        signingPackage.planId === first.planId &&
+        signingPackage.planHash.toLowerCase() === first.planHash.toLowerCase() &&
+        signingPackage.chainId === first.chainId &&
+        signingPackage.sourceAddress.toLowerCase() === first.sourceAddress.toLowerCase() &&
+        signingPackage.destinationAddress.toLowerCase() === first.destinationAddress.toLowerCase() &&
+        signingPackage.observedAtBlock === first.observedAtBlock;
+      if (!sharesPlanScope) {
+        context.addIssue({
+          code: "custom",
+          message: "Every signing package must share the same rescue-plan scope",
+          path: [index],
+        });
+      }
+    });
+  });
+
 export type SigningDomain = z.infer<typeof signingDomainSchema>;
 export type SigningPackage = z.infer<typeof signingPackageSchema>;
+export type SigningPackageList = z.infer<typeof signingPackageListSchema>;
+export type RecoveryExecutionPath = z.infer<typeof recoveryExecutionPathSchema>;
+export type AuthorizationStandard = z.infer<typeof authorizationStandardSchema>;
+
+export function signingPackageExecutionMetadata(
+  signingPackage: Pick<SigningPackage, "route">,
+): {
+  executionPath: RecoveryExecutionPath;
+  authorizationStandard: AuthorizationStandard;
+} {
+  switch (signingPackage.route) {
+    case "ERC3009_RECEIVE_WITH_AUTHORIZATION":
+      return {
+        executionPath: "DIRECT_AUTHORIZATION",
+        authorizationStandard: "ERC3009",
+      };
+    case "ERC2612_PERMIT_SETTLEMENT":
+      return {
+        executionPath: "SAFEEXIT_SETTLEMENT",
+        authorizationStandard: "ERC2612",
+      };
+    case "DAI_PERMIT_SETTLEMENT":
+      return {
+        executionPath: "SAFEEXIT_SETTLEMENT",
+        authorizationStandard: "DAI_PERMIT",
+      };
+    case "ERC4494_PERMIT_SETTLEMENT":
+      return {
+        executionPath: "SAFEEXIT_SETTLEMENT",
+        authorizationStandard: "ERC4494",
+      };
+  }
+}

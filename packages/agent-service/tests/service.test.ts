@@ -27,6 +27,7 @@ const source = evmAddressSchema.parse("0x70997970C51812dc3A010C7d01b50e0d17dc79C
 const destination = evmAddressSchema.parse("0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65");
 const otherDestination = evmAddressSchema.parse("0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc");
 const token = evmAddressSchema.parse("0x5FbDB2315678afecb367f032d93F642f64180aa3");
+const collection = evmAddressSchema.parse("0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512");
 const settlementContract = getConfiguredPermitSettlementAddress(196)!;
 const planHash = `0x${"3".repeat(64)}`;
 const txHash = `0x${"a".repeat(64)}`;
@@ -244,6 +245,103 @@ function signingPackage(overrides: Partial<SigningPackage> = {}): SigningPackage
   } as SigningPackage;
 }
 
+function nftSigningPackage(): SigningPackage {
+  return {
+    schemaVersion: "safeexit-signing-package-v1",
+    packageId: "signing-package:nft",
+    jobId: "job:test",
+    incidentId: incident.id,
+    planId: plan.id,
+    planHash,
+    actionId: "action:nft",
+    route: "ERC4494_PERMIT_SETTLEMENT",
+    chainId: incident.chainId,
+    sourceAddress: source,
+    destinationAddress: destination,
+    observedAtBlock: plan.observedAtBlock,
+    expiresAt: "2026-07-12T10:04:00.000Z",
+    collectionAddress: collection,
+    settlementContract,
+    tokenId: "42",
+    sourceSigningRequests: [
+      {
+        id: "source-nft-permit",
+        signer: source,
+        method: "EIP712",
+        rpcMethod: "eth_signTypedData_v4",
+        typedData: {
+          primaryType: "Permit",
+          types: {
+            EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+            Permit: [...SIGNING_PACKAGE_EIP712_TYPES.ERC4494Permit],
+          },
+          domain: {
+            name: "Rescue NFT",
+            version: "1",
+            chainId: incident.chainId,
+            verifyingContract: collection,
+          },
+          message: {
+            spender: settlementContract,
+            tokenId: "42",
+            nonce: "0",
+            deadline: "1783850640",
+          },
+        },
+      },
+      {
+        id: "source-rescue-authorization",
+        signer: source,
+        method: "EIP712",
+        rpcMethod: "eth_signTypedData_v4",
+        typedData: {
+          primaryType: "ERC721Rescue",
+          types: {
+            EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+            ERC721Rescue: [...SIGNING_PACKAGE_EIP712_TYPES.ERC721Rescue],
+          },
+          domain: {
+            name: PERMIT_SETTLEMENT_NAME,
+            version: PERMIT_SETTLEMENT_VERSION,
+            chainId: incident.chainId,
+            verifyingContract: settlementContract,
+          },
+          message: {
+            collection,
+            owner: source,
+            destination,
+            tokenId: "42",
+            permitNonce: "0",
+            deadline: "1783850640",
+            rescueNonce: `0x${"8".repeat(64)}`,
+          },
+        },
+      },
+    ],
+    destinationSettlement: {
+      executor: destination,
+      payer: "DESTINATION",
+      assembly: "BUYER_LOCAL_RUNTIME",
+      atomicRequired: false,
+      operations: ["SETTLE_ERC4494"],
+    },
+    simulation: {
+      resultId: "simulation:nft",
+      providerId: "test-simulator",
+      status: "SUCCEEDED",
+      expiresAt: "2026-07-12T10:05:00.000Z",
+    },
+    policy: {
+      sourceSignsLocally: true,
+      destinationPaysSettlement: true,
+      privateCredentialsAccepted: false,
+      signaturesReturnedToSafeExit: false,
+      arbitraryCallsAllowed: false,
+      postSignatureSimulationRequired: true,
+    },
+  };
+}
+
 function observation(
   phase: RescueMonitorObservation["phase"],
 ): RescueMonitorObservation {
@@ -283,6 +381,9 @@ type ServiceOptions = {
   simulationStatus?: AgentSimulationReport["status"];
   observations?: RescueMonitorObservation[];
   signingPackage?: SigningPackage;
+  signingPackages?: SigningPackage[];
+  plan?: RescuePlan;
+  simulation?: AgentSimulationReport;
 };
 
 function createService(options: ServiceOptions = {}) {
@@ -298,13 +399,14 @@ function createService(options: ServiceOptions = {}) {
         return scan;
       },
     },
-    planner: { generate: async () => plan },
+    planner: { generate: async () => options.plan ?? plan },
     simulator: {
-      simulate: async () => simulationReport(options.simulationStatus ?? "SUCCEEDED"),
+      simulate: async () => options.simulation ?? simulationReport(options.simulationStatus ?? "SUCCEEDED"),
     },
     dashboard: new SafeExitDashboardLocator("http://localhost:3001"),
     signingPackages: {
       build: async () => options.signingPackage ?? signingPackage(),
+      buildAll: async () => options.signingPackages ?? [options.signingPackage ?? signingPackage()],
     },
     executionVerifier: {
       verify: async (_job, report) => ({
@@ -463,6 +565,80 @@ describe("agent service lifecycle", () => {
 
     expect(completed.status).toBe("COMPLETED");
     expect(completed.monitor?.transactionHashes).toEqual([txHash]);
+  });
+
+  it("issues and verifies an ordered mixed ERC-20 and NFT rescue package set", async () => {
+    const mixedPlan: RescuePlan = {
+      ...plan,
+      actions: [
+        ...plan.actions,
+        {
+          id: "action:nft",
+          chainId: incident.chainId,
+          sourceAddress: source,
+          dependencies: [],
+          evidenceIds: ["asset:nft"],
+          expectedEffects: [{
+            effectType: "ASSET_TRANSFERRED",
+            assetId: "asset:nft",
+            description: "Move the NFT to the confirmed destination.",
+          }],
+          riskLevel: "HIGH",
+          supportStatus: "SUPPORTED",
+          simulationStatus: "PASSED",
+          actionType: "TRANSFER_ERC721",
+          parameters: {
+            collectionAddress: collection,
+            recipient: destination,
+            tokenId: "42",
+          },
+        },
+      ],
+    };
+    const tokenSimulation = simulationReport("SUCCEEDED").results[0]!;
+    const mixedSimulation: AgentSimulationReport = {
+      status: "SUCCEEDED",
+      providerId: "test-simulator",
+      results: [
+        tokenSimulation,
+        {
+          ...tokenSimulation,
+          id: "simulation:nft",
+          actionId: "action:nft",
+          expectedEffects: mixedPlan.actions[1]!.expectedEffects,
+        },
+      ],
+      executableActionIds: ["action:transfer", "action:nft"],
+      excludedActionIds: [],
+    };
+    const packages = [signingPackage(), nftSigningPackage()];
+    const { service } = createService({
+      plan: mixedPlan,
+      simulation: mixedSimulation,
+      signingPackages: packages,
+    });
+    await prepareWaitingForUser(service);
+
+    expect((await service.getSigningPackages("job:test")).map((item) => item.route)).toEqual([
+      "ERC2612_PERMIT_SETTLEMENT",
+      "ERC4494_PERMIT_SETTLEMENT",
+    ]);
+
+    const first = await service.recordBuyerExecutionReport("job:test", buyerReport());
+    expect(first.status).toBe("EXECUTING");
+    expect(first.monitor?.completedActionIds).toEqual(["action:transfer"]);
+
+    const nftReport: BuyerExecutionReport = {
+      ...buyerReport(),
+      packageId: "signing-package:nft",
+      actionId: "action:nft",
+      route: "ERC4494_PERMIT_SETTLEMENT",
+      transactionHashes: [`0x${"b".repeat(64)}`],
+    };
+    const completed = await service.recordBuyerExecutionReport("job:test", nftReport);
+    expect(completed.status).toBe("COMPLETED");
+    expect(completed.monitor?.completedActionIds).toEqual(["action:transfer", "action:nft"]);
+    expect(completed.monitor?.transactionHashes).toEqual([txHash, `0x${"b".repeat(64)}`]);
   });
 
   it("returns the completed job for an exact buyer-report retry", async () => {

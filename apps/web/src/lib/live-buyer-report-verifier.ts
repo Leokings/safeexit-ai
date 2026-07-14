@@ -62,10 +62,11 @@ export class LiveBuyerExecutionVerifier implements BuyerExecutionVerifierPort {
     job: AgentServiceJob,
     report: BuyerExecutionReport,
   ): Promise<RescueMonitorObservation> {
-    if (!job.signingPackage || report.chainId !== this.chain.chain.id) {
+    const signingPackage = (job.signingPackages ?? (job.signingPackage ? [job.signingPackage] : []))
+      .find((candidate) => candidate.packageId === report.packageId);
+    if (!signingPackage || report.chainId !== this.chain.chain.id) {
       throw new Error("Buyer receipt verification is not configured for this report");
     }
-    const signingPackage = job.signingPackage;
     const receipts = await Promise.all(report.transactionHashes.map((hash) =>
       this.client.getTransactionReceipt({ hash: hash as Hex })));
     if (receipts.some((receipt) => receipt.status !== "success")) {

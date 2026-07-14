@@ -8,7 +8,12 @@ import {
   PERMIT_SETTLEMENT_VERSION,
 } from "@safeexit/adapters";
 
-import { SIGNING_PACKAGE_EIP712_TYPES, signingPackageSchema } from "../src";
+import {
+  SIGNING_PACKAGE_EIP712_TYPES,
+  signingPackageExecutionMetadata,
+  signingPackageListSchema,
+  signingPackageSchema,
+} from "../src";
 
 const source = evmAddressSchema.parse("0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
 const destination = evmAddressSchema.parse("0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65");
@@ -257,7 +262,19 @@ describe("agent signing package", () => {
   });
 
   it("accepts an exact, short-lived ERC-3009 authorization", () => {
-    expect(signingPackageSchema.safeParse(eip3009Package()).success).toBe(true);
+    const parsed = signingPackageSchema.parse(eip3009Package());
+    expect(signingPackageExecutionMetadata(parsed)).toEqual({
+      executionPath: "DIRECT_AUTHORIZATION",
+      authorizationStandard: "ERC3009",
+    });
+  });
+
+  it("presents permit adapters as the shared SafeExit settlement path", () => {
+    const parsed = signingPackageSchema.parse(daiPackage());
+    expect(signingPackageExecutionMetadata(parsed)).toEqual({
+      executionPath: "SAFEEXIT_SETTLEMENT",
+      authorizationStandard: "DAI_PERMIT",
+    });
   });
 
   it("rejects unsafe ERC-3009 amount, nonce, and validity windows", () => {
@@ -294,5 +311,18 @@ describe("agent signing package", () => {
       expiresAt: "2026-07-13T10:03:59.000Z",
     };
     expect(signingPackageSchema.safeParse(value).success).toBe(false);
+  });
+
+  it("accepts one ordered package set and rejects duplicate package or action IDs", () => {
+    const second = daiPackage();
+    second.packageId = "signing-package:second";
+    second.actionId = "action:second";
+    second.simulation = {
+      ...(second.simulation as Record<string, unknown>),
+      resultId: "simulation:second",
+    };
+
+    expect(signingPackageListSchema.parse([daiPackage(), second])).toHaveLength(2);
+    expect(signingPackageListSchema.safeParse([daiPackage(), daiPackage()]).success).toBe(false);
   });
 });
