@@ -43,8 +43,9 @@ export default function HomePage() {
                 Wallet incident response
               </h1>
               <p className="mt-4 max-w-2xl text-base leading-7 text-muted">
-                Prepare a controlled rescue review for an EVM wallet you are authorised to sign
-                for. Wallet state must be verified before any action is presented for signing.
+                Prepare a controlled rescue review on X Layer mainnet for a wallet you are
+                authorised to sign for. Wallet state must be verified before any action is
+                presented for signing.
               </p>
             </div>
 
@@ -94,7 +95,7 @@ export default function HomePage() {
                 <p className="mt-1 text-sm font-semibold">{label}</p>
                 {index === 3 && (
                   <span className="mt-1 block font-mono text-[9px] uppercase text-warning">
-                    Testnet wallet pilot active
+                    X Layer mainnet active
                   </span>
                 )}
               </div>

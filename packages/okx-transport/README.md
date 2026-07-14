@@ -18,12 +18,12 @@ Required task fields are:
 - the exact ownership statement exported as
   `SAFEEXIT_AUTHORIZATION_STATEMENT`
 
-X Layer testnet tasks (`chainId: 1952`) additionally require an explicit
-`assetManifest` accepts a bounded batch of ERC-20 contract addresses and
-explicit ERC-721/ERC-1155 `collectionAddress` plus `tokenId` entries. SAFEEXIT
-reads only those identified assets at a pinned block. Testnet requires the
-manifest. Mainnet can merge it with OKX-backed ERC-20 discovery so explicitly
-requested contracts are not omitted when an indexer does not return them.
+X Layer mainnet tasks (`chainId: 196`) require an explicit `assetManifest` with
+a bounded batch of ERC-20 contract addresses and explicit ERC-721/ERC-1155
+`collectionAddress` plus `tokenId` entries. SAFEEXIT reads those identified
+assets at a pinned block and may merge the manifest with OKX-backed ERC-20
+discovery so explicitly requested contracts are not omitted when an indexer
+does not return them. Other chains are rejected.
 
 The canonical manifest is committed into the persisted incident scope.
 Reusing an OKX job ID with a different asset list is rejected by the same

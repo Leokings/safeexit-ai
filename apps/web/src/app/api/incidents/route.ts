@@ -55,6 +55,16 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const input = await parseJsonBody(request, createIncidentRequestSchema);
+    if (input.chainId !== 196) {
+      return jsonResponse(
+        {
+          code: "UNSUPPORTED_CHAIN",
+          message: "SAFEEXIT currently supports X Layer mainnet (chain 196) only",
+        },
+        422,
+        rateHeaders,
+      );
+    }
     const now = new Date().toISOString();
     const incident = incidentSchema.parse({
       id: `incident_${randomUUID()}`,

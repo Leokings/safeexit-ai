@@ -1,4 +1,4 @@
-import { createDedicatedPublicClient, xLayerTestnetConfig } from "@safeexit/chain";
+import { createDedicatedPublicClient, xLayerMainnetConfig } from "@safeexit/chain";
 import { getPrismaClient, PrismaSafeExitRepository } from "@safeexit/persistence";
 import { computePlanIntegrityHash, DeterministicRescuePlanner } from "@safeexit/planner";
 import { DeterministicWalletScanner, ViemStandardReadClient } from "@safeexit/scanner";
@@ -29,12 +29,12 @@ import { parseDeploymentEnvironment } from "@/lib/deployment-env";
 import { rateLimitPublicRequest } from "@/lib/agent-http";
 import {
   eip712DomainSchema,
-  testnetPreflightRequestSchema,
-  testnetPreflightResponseSchema,
+  mainnetPreflightRequestSchema,
+  mainnetPreflightResponseSchema,
   type Eip712Domain,
   type GaslessRescueAction,
-  XLAYER_TESTNET_CHAIN_ID,
-} from "@/lib/testnet-rescue";
+  XLAYER_MAINNET_CHAIN_ID,
+} from "@/lib/mainnet-rescue";
 
 export const runtime = "nodejs";
 
@@ -284,7 +284,7 @@ async function readVerifiedEip712Domain(
       (Number(BigInt(fields)) & 0x0f) !== 0x0f ||
       !name ||
       !version ||
-      chainId !== BigInt(XLAYER_TESTNET_CHAIN_ID) ||
+      chainId !== BigInt(XLAYER_MAINNET_CHAIN_ID) ||
       verifyingContract.toLowerCase() !== tokenAddress.toLowerCase() ||
       extensions.length > 0
     ) {
@@ -300,7 +300,7 @@ async function readVerifiedEip712Domain(
     return eip712DomainSchema.parse({
       name,
       version,
-      chainId: XLAYER_TESTNET_CHAIN_ID,
+      chainId: XLAYER_MAINNET_CHAIN_ID,
       verifyingContract,
     });
   } catch {
@@ -431,7 +431,7 @@ async function detectDaiStylePermit(
     const domain = eip712DomainSchema.parse({
       name,
       version: "1",
-      chainId: XLAYER_TESTNET_CHAIN_ID,
+      chainId: XLAYER_MAINNET_CHAIN_ID,
       verifyingContract: tokenAddress,
     });
     const computedSeparator = hashDomain({
@@ -564,16 +564,16 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   try {
     const [{ id }, input] = await Promise.all([
       context.params,
-      parseJsonBody(request, testnetPreflightRequestSchema, { maxBytes: 2_048 }),
+      parseJsonBody(request, mainnetPreflightRequestSchema, { maxBytes: 2_048 }),
     ]);
     const repository = new PrismaSafeExitRepository(getPrismaClient());
     const incident = await repository.getIncident(id);
     if (!incident) {
       return json({ code: "INCIDENT_NOT_FOUND", message: "Incident was not found" }, 404, rateHeaders);
     }
-    if (incident.chainId !== XLAYER_TESTNET_CHAIN_ID) {
+    if (incident.chainId !== XLAYER_MAINNET_CHAIN_ID) {
       return json(
-        { code: "TESTNET_ONLY", message: "Browser signing is restricted to X Layer testnet" },
+        { code: "MAINNET_ONLY", message: "Browser signing is restricted to X Layer mainnet" },
         409,
         rateHeaders,
       );
@@ -599,17 +599,17 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
     const config = parseDeploymentEnvironment();
     const rpcUrl =
-      config.xLayerTestnetRpcUrl ??
-      (config.nodeEnv === "production" ? undefined : xLayerTestnetConfig.rpcUrls[0]);
+      config.xLayerMainnetRpcUrl ??
+      (config.nodeEnv === "production" ? undefined : xLayerMainnetConfig.rpcUrls[0]);
     if (!rpcUrl) {
       return json(
-        { code: "TESTNET_RPC_UNAVAILABLE", message: "X Layer testnet RPC is not configured" },
+        { code: "MAINNET_RPC_UNAVAILABLE", message: "X Layer mainnet RPC is not configured" },
         503,
         rateHeaders,
       );
     }
     const client = createDedicatedPublicClient(
-      xLayerTestnetConfig,
+      xLayerMainnetConfig,
       rpcUrl,
     );
     const observedAtBlock = await client.getBlockNumber();
@@ -759,9 +759,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         ? [`${entry.collectionAddress}:${entry.tokenId}: ${entry.reason}.`]
         : [],
     );
-    const reader = new ViemStandardReadClient("x-layer-testnet-rpc", client);
+    const reader = new ViemStandardReadClient("x-layer-mainnet-rpc", client);
     const scanner = new DeterministicWalletScanner({
-      config: xLayerTestnetConfig,
+      config: xLayerMainnetConfig,
       reader,
     });
     const report = await scanner.scan({
@@ -780,7 +780,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       status: "PARTIAL",
       warnings: [
         ...report.scan.warnings,
-        "X Layer testnet signing pilot: discovery is limited to native balance and the submitted ERC-20/ERC-721/ERC-1155 manifest.",
+        "X Layer mainnet recovery: discovery is limited to native balance and the submitted ERC-20/ERC-721/ERC-1155 manifest.",
         ...omittedMetadata,
         ...omittedNftMetadata,
         ...omittedErc1155Metadata,
@@ -791,12 +791,12 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     const generatedPlan = new DeterministicRescuePlanner().plan({
       incidentId: incident.id,
       destinationAddress: incident.destinationAddress,
-      policyVersion: "safeexit-xlayer-testnet-v1",
+      policyVersion: "safeexit-xlayer-mainnet-v1",
       scan,
       adapterCandidates: [],
     });
     const planPayload: Omit<RescuePlan, "integrityHash"> = {
-      id: `plan:${incident.id}:testnet:latest`,
+      id: `plan:${incident.id}:mainnet:latest`,
       incidentId: generatedPlan.incidentId,
       version: generatedPlan.version,
       policyVersion: generatedPlan.policyVersion,
@@ -815,10 +815,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     });
     await repository.saveRescuePlan(plan);
     const provider = new LocalSimulationProvider({
-      id: "x-layer-testnet-rpc-preflight-v1",
-      kind: "TEST_RPC",
-      client: new ViemLocalSimulationClient("x-layer-testnet-preflight-client", client),
+      id: "x-layer-mainnet-rpc-preflight-v1",
+      kind: "PRODUCTION_RPC",
+      client: new ViemLocalSimulationClient("x-layer-mainnet-preflight-client", client),
       ttlMs: 300_000,
+      estimateGas: false,
     });
     const simulation = await simulateRescuePlan(plan, provider);
     await Promise.all(simulation.results.map((result) => repository.saveSimulation(result)));
@@ -959,8 +960,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     });
 
     return json(
-      testnetPreflightResponseSchema.parse({
-        chainId: XLAYER_TESTNET_CHAIN_ID,
+      mainnetPreflightResponseSchema.parse({
+        chainId: XLAYER_MAINNET_CHAIN_ID,
         scan,
         plan,
         simulations: simulation.results,
@@ -979,11 +980,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         rateHeaders,
       );
     }
-    console.error("SAFEEXIT_TESTNET_PREFLIGHT_FAILED", {
+    console.error("SAFEEXIT_MAINNET_PREFLIGHT_FAILED", {
       name: error instanceof Error ? error.name : "UnknownError",
     });
     return json(
-      { code: "PREFLIGHT_UNAVAILABLE", message: "Testnet preflight is temporarily unavailable" },
+      { code: "PREFLIGHT_UNAVAILABLE", message: "Mainnet preflight is temporarily unavailable" },
       503,
       rateHeaders,
     );

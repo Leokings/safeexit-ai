@@ -169,6 +169,7 @@ export type LocalSimulationProviderOptions = {
   adapterResolvers?: readonly AdapterSimulationResolver[];
   clock?: () => Date;
   ttlMs?: number;
+  estimateGas?: boolean;
 };
 
 export class LocalSimulationProvider implements SimulationProvider {
@@ -229,8 +230,10 @@ export class LocalSimulationProvider implements SimulationProvider {
       );
       const returnData = await this.options.client.call(prepared.call);
       this.validateReturnData(prepared, returnData);
-      const gasEstimate =
-        prepared.gasEstimate ?? (await this.options.client.estimateGas(prepared.call));
+      const gasEstimate = prepared.gasEstimate ??
+        (this.options.estimateGas === false
+          ? undefined
+          : await this.options.client.estimateGas(prepared.call));
       const warnings = [
         ...(prepared.warnings ?? []),
         ...(prepared.assetChanges.length > 0 ? [inferredEffectsWarning] : []),
@@ -240,7 +243,7 @@ export class LocalSimulationProvider implements SimulationProvider {
         providerId: this.id,
         request,
         status: "SUCCEEDED",
-        gasEstimate,
+        ...(gasEstimate !== undefined ? { gasEstimate } : {}),
         assetChanges: prepared.assetChanges,
         warnings,
         clock: this.clock,

@@ -23,7 +23,6 @@ const authorizationSchema = z.strictObject({
   confirmedAt: timestampSchema,
 });
 
-export const OKX_A2A_XLAYER_TESTNET_CHAIN_ID = 1_952;
 export const OKX_A2A_XLAYER_MAINNET_CHAIN_ID = 196;
 
 export const okxA2AAssetManifestSchema = rescueAssetManifestSchema;
@@ -53,28 +52,15 @@ export const okxA2ATaskRequestSchema = z
     buyerAgentId: agentIdSchema.optional(),
     service: z.literal("compromised-wallet-rescue"),
     walletContext: walletContextSchema,
-    assetManifest: okxA2AAssetManifestSchema.optional(),
+    assetManifest: okxA2AAssetManifestSchema,
     authorization: authorizationSchema,
   })
-  .superRefine(({ walletContext, assetManifest }, context) => {
-    if (
-      walletContext.chainId === OKX_A2A_XLAYER_TESTNET_CHAIN_ID &&
-      !assetManifest
-    ) {
+  .superRefine(({ walletContext }, context) => {
+    if (walletContext.chainId !== OKX_A2A_XLAYER_MAINNET_CHAIN_ID) {
       context.addIssue({
         code: "custom",
-        message: "X Layer testnet tasks require an explicit asset manifest",
-        path: ["assetManifest"],
-      });
-    }
-    if (assetManifest && ![
-      OKX_A2A_XLAYER_MAINNET_CHAIN_ID,
-      OKX_A2A_XLAYER_TESTNET_CHAIN_ID,
-    ].includes(walletContext.chainId)) {
-      context.addIssue({
-        code: "custom",
-        message: "Explicit asset manifests are currently restricted to X Layer",
-        path: ["assetManifest"],
+        message: "SAFEEXIT currently accepts X Layer mainnet tasks only",
+        path: ["walletContext", "chainId"],
       });
     }
   });
@@ -87,28 +73,15 @@ export const okxX402PrepareRequestSchema = z
     buyerAgentId: agentIdSchema.optional(),
     service: z.literal("compromised-wallet-rescue"),
     walletContext: walletContextSchema,
-    assetManifest: okxA2AAssetManifestSchema.optional(),
+    assetManifest: okxA2AAssetManifestSchema,
     authorization: authorizationSchema,
   })
-  .superRefine(({ walletContext, assetManifest }, context) => {
-    if (
-      walletContext.chainId === OKX_A2A_XLAYER_TESTNET_CHAIN_ID &&
-      !assetManifest
-    ) {
+  .superRefine(({ walletContext }, context) => {
+    if (walletContext.chainId !== OKX_A2A_XLAYER_MAINNET_CHAIN_ID) {
       context.addIssue({
         code: "custom",
-        message: "X Layer testnet requests require an explicit asset manifest",
-        path: ["assetManifest"],
-      });
-    }
-    if (assetManifest && ![
-      OKX_A2A_XLAYER_MAINNET_CHAIN_ID,
-      OKX_A2A_XLAYER_TESTNET_CHAIN_ID,
-    ].includes(walletContext.chainId)) {
-      context.addIssue({
-        code: "custom",
-        message: "Explicit asset manifests are currently restricted to X Layer",
-        path: ["assetManifest"],
+        message: "SAFEEXIT currently accepts X Layer mainnet requests only",
+        path: ["walletContext", "chainId"],
       });
     }
   });

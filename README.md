@@ -3,8 +3,9 @@
 The current foundation contains the TypeScript monorepo, shared domain schemas,
 verified chain configuration, deterministic standard-token scanners, and an
 opt-in official OKX Wallet API balance-discovery adapter, and a buyer-local
-signing and settlement runtime. Mainnet execution remains disabled pending an
-independent security review and official wallet transport integration.
+signing and settlement runtime. X Layer mainnet execution is enabled only for
+strictly verified destination-paid permit routes; native and unsupported assets
+remain blocked.
 
 ## Deterministic scanning
 
@@ -24,8 +25,8 @@ Scanner states have distinct meanings:
 - `UNKNOWN`: a configured read failed or could not determine state. It is never
   converted into a zero balance.
 
-Configured chains are X Layer mainnet (primary), X Layer testnet, and local
-Anvil. X Layer values are sourced from the
+Configured chains are X Layer mainnet (production) and local Anvil
+(development/testing). X Layer values are sourced from the
 [official network documentation](https://web3.okx.com/onchainos/dev-docs/xlayer/developer/build-on-xlayer/network-information).
 
 ## Deterministic planning
@@ -138,12 +139,13 @@ Model failure, timeout, invalid output, or token-budget overflow falls back to
 the deterministic explanation without changing the signing package. AI usage
 is persisted per SAFEEXIT job for cost accounting.
 
-## Destination-paid X Layer testnet pilot
+## Destination-paid X Layer mainnet recovery
 
-The X Layer testnet rescue workspace supports multiple destination-paid asset
+The X Layer mainnet rescue workspace supports multiple destination-paid asset
 routes. ERC-3009 is preferred for fungible tokens when its capability and EIP-712 domain are
 verified onchain. The reported source signs a short-lived
-`ReceiveWithAuthorization` message and the destination submits it.
+`ReceiveWithAuthorization` message and the destination submits it with real
+mainnet gas.
 
 ERC-2612 is a fallback for permit-compatible tokens. The source signs a permit
 whose spender is the safe destination. SAFEEXIT verifies that exact permit
@@ -166,8 +168,8 @@ destination atomically submits `permit` and `transferFrom` and pays gas.
 Authorization signatures remain in browser memory and are never sent to or
 stored by SAFEEXIT. Assets without a verified permit route, native OKB,
 ERC-1155 assets, approvals, airdrops, and positions stay blocked until a
-verified destination-paid adapter exists. A successful testnet pilot is not
-approval to enable mainnet execution.
+verified destination-paid adapter exists. The mainnet route is best effort and
+has not received an independent security audit.
 
 Native OKB recovery remains non-executable. The adapter package records
 fail-closed requirements for an audited EIP-7702 sponsor or an official X Layer

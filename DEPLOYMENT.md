@@ -1,9 +1,9 @@
 # SAFEEXIT Deployment
 
 This repository is ready to host the optional web dashboard and the
-provider-neutral agent job API. Mainnet execution is intentionally disabled.
-The hosted service also exposes a narrowly scoped X Layer testnet
-destination-paid pilot described below.
+provider-neutral agent job API. The hosted service exposes a narrowly scoped X
+Layer mainnet destination-paid recovery path described below. Native OKB and
+assets without a verified permit route remain non-executable.
 
 The codebase also contains an opt-in `LIVE_READONLY` mode. It uses the official
 OKX Wallet API to discover X Layer ERC-20 candidates, re-verifies balances with
@@ -70,7 +70,6 @@ OKX_WEB3_API_KEY=<OKX developer API key>
 OKX_WEB3_SECRET_KEY=<OKX developer secret key>
 OKX_WEB3_PASSPHRASE=<OKX developer passphrase>
 XLAYER_MAINNET_RPC_URL=<dedicated HTTPS X Layer RPC URL>
-XLAYER_TESTNET_RPC_URL=<dedicated HTTPS X Layer testnet RPC URL>
 ETHEREUM_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
 BNB_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
 POLYGON_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
@@ -203,7 +202,7 @@ The request body is:
   "buyerAgentId": "5282",
   "service": "compromised-wallet-rescue",
   "walletContext": {
-    "chainId": 1952,
+    "chainId": 196,
     "sourceAddress": "0xSource",
     "destinationAddress": "0xDestination"
   },
@@ -219,7 +218,7 @@ The request body is:
 }
 ```
 
-`buyerAgentId` is optional. Testnet requires an explicit asset manifest.
+`buyerAgentId` is optional. X Layer mainnet requires an explicit asset manifest.
 Unknown fields, credentials, signatures, and arbitrary calldata are rejected.
 
 These are not claimed OKX callback endpoints. After the official runtime emits
@@ -230,12 +229,11 @@ The returned signing-package JSON is delivered through the official A2A task
 flow. After local buyer execution, only the receipt report is mapped into
 `buyer-report`; source signatures must never be included.
 
-The normalized bridge accepts X Layer mainnet (`196`) and the guarded X Layer
-testnet pilot (`1952`). A testnet handoff must declare one to eight ERC-20
-contracts in `assetManifest.erc20TokenAddresses` and explicit NFT entries in
-`assetManifest.erc721Assets` or `assetManifest.erc1155Assets`. The testnet
-analyzer does not use AI or an indexer to infer additional assets. Mainnet
-merges the explicit manifest with OKX-backed ERC-20 discovery and verifies all
+The normalized bridge accepts X Layer mainnet (`196`) only. Every handoff must
+declare one to eight ERC-20 contracts in
+`assetManifest.erc20TokenAddresses` and explicit NFT entries in
+`assetManifest.erc721Assets` or `assetManifest.erc1155Assets`. Mainnet merges
+the explicit manifest with OKX-backed ERC-20 discovery and verifies all
 submitted entries at the pinned RPC block.
 
 Analysis, planning, simulation, and monitoring accept the strict body
@@ -314,9 +312,9 @@ and receipt-verification core are implemented. Mapping them to the official
 OKX A2A transport and an Agentic Wallet destination adapter remains
 official-docs-required and is not represented as connected.
 
-## X Layer testnet destination-paid pilot
+## X Layer mainnet destination-paid recovery
 
-For an incident created on chain ID `1952`, the rescue dashboard scans an
+For an incident created on chain ID `196`, the rescue dashboard scans an
 incident-committed batch of ERC-20, ERC-721, and ERC-1155 assets and ranks
 destination-paid routes. ERC-3009 requires
 verified type-hash, EIP-712 domain, domain separator, and authorization-state
@@ -324,7 +322,7 @@ reads. ERC-2612 requires a verified EIP-712 domain and nonce read, then remains
 provisional until the exact signed permit succeeds and OKX Wallet reports
 atomic batch support. The destination submits either
 `receiveWithAuthorization` or an atomic `permit` plus `transferFrom` batch and
-pays all testnet gas.
+pays all mainnet gas.
 
 DAI-style routes require the exact legacy permit type hash, a version `1`
 domain separator reconstructed from verified token metadata, and the pinned
@@ -339,20 +337,19 @@ atomic `permit` plus `transferFrom` request from the destination.
 
 No server credential, relayer key, or private key is used. The short-lived
 signature remains only in the browser tab. Source-funded transactions are
-disabled in this flow. Keep this testnet-only gate in place until every
-mainnet contract, simulation, submission, monitoring, and incident-response
-control has received an independent security review.
+disabled in this flow. This is a real-money mainnet path and has not received
+an independent security review; use remains best effort and permit-only.
 
 ## Current production limitations
 
 - Hosted scanning and simulation are verified fixture replays unless the agent
   is explicitly switched to `LIVE_READONLY`.
 - Only the fixed local developer incident is accepted by the hosted analyzer.
-- No mainnet wallet signing, relayer, private transaction, paymaster, Permit2,
-  protocol withdrawal, or OKX server-side execution integration is enabled.
-  Testnet execution is limited to ERC-3009, signature-verified ERC-2612,
+- Mainnet browser execution is limited to ERC-3009, signature-verified ERC-2612,
   strict DAI-style permits, or ERC-4494 destination-paid settlement through
-  the user-controlled OKX Wallet.
+  the user-controlled OKX Wallet. Relayer, private transaction, paymaster,
+  Permit2, protocol withdrawal, and OKX server-side execution integrations are
+  not enabled.
 - The agent API can issue strict signing packages in `LIVE_READONLY`, and the
   provider-neutral buyer runtime can collect local signatures, assemble and
   post-simulate settlement, submit through EIP-1193, and return receipt-only

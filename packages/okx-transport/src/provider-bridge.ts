@@ -137,7 +137,7 @@ export class OkxA2AProviderBridge {
       chainId: request.walletContext.chainId,
       sourceAddress: request.walletContext.sourceAddress,
       destinationAddress: request.walletContext.destinationAddress,
-      ...(request.assetManifest ? { assetManifest: request.assetManifest } : {}),
+      assetManifest: request.assetManifest,
       status: "RECEIVED",
       ownershipAttestation: {
         accepted: true,
@@ -205,7 +205,7 @@ export class OkxA2AProviderBridge {
       ...(request.buyerAgentId ? { buyerAgentId: request.buyerAgentId } : {}),
       service: request.service,
       walletContext: request.walletContext,
-      ...(request.assetManifest ? { assetManifest: request.assetManifest } : {}),
+      assetManifest: request.assetManifest,
       authorization: request.authorization,
     });
     return okxX402SigningDeliverableSchema.parse({

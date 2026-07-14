@@ -12,7 +12,7 @@ const destination = "0x4ab2b4be420a82031dc155c0be856ae383e0ba7e";
 
 const incident = incidentSchema.parse({
   id: "incident:ai-test",
-  chainId: 1_952,
+  chainId: 196,
   sourceAddress: source,
   destinationAddress: destination,
   status: "RECEIVED",

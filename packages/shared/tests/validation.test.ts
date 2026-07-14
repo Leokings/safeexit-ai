@@ -30,7 +30,7 @@ describe("EVM address validation", () => {
 });
 
 describe("chain ID validation", () => {
-  it.each([1, 196, 1952, 31_337])("accepts positive safe integer %d", (chainId) => {
+  it.each([1, 196, 8_453, 31_337])("accepts positive safe integer %d", (chainId) => {
     expect(validateChainId(chainId)).toBe(chainId);
   });
 
@@ -63,4 +63,3 @@ describe("incident address validation", () => {
     expect(() => validateIncidentAddresses("not-an-address", destinationAddress)).toThrow();
   });
 });
-

@@ -7,7 +7,7 @@ import {
   createEip3009Authorization,
   createErc2612PermitAuthorization,
   createErc4494PermitAuthorization,
-  ensureXLayerTestnet,
+  ensureXLayerMainnet,
   getOkxCallsStatus,
   signDaiPermitPair,
   signEip3009Authorization,
@@ -21,8 +21,8 @@ import {
 } from "./okx-wallet";
 import {
   gaslessRescueActionSchema,
-  testnetPreflightRequestSchema,
-} from "./testnet-rescue";
+  mainnetPreflightRequestSchema,
+} from "./mainnet-rescue";
 
 const sourceAccount = privateKeyToAccount(
   "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -46,7 +46,7 @@ const action = gaslessRescueActionSchema.parse({
   domain: {
     name: "USD₮0",
     version: "1",
-    chainId: 1_952,
+    chainId: 196,
     verifyingContract: token,
   },
 });
@@ -63,7 +63,7 @@ const permitAction = gaslessRescueActionSchema.parse({
   domain: {
     name: "USD₮0",
     version: "1",
-    chainId: 1_952,
+    chainId: 196,
     verifyingContract: token,
   },
   requiredWalletCapability: "ATOMIC_BATCH",
@@ -81,7 +81,7 @@ const daiPermitAction = gaslessRescueActionSchema.parse({
   domain: {
     name: "Dai Stablecoin",
     version: "1",
-    chainId: 1_952,
+    chainId: 196,
     verifyingContract: token,
   },
   requiredWalletCapability: "ATOMIC_BATCH",
@@ -100,7 +100,7 @@ const nftPermitAction = gaslessRescueActionSchema.parse({
   domain: {
     name: "SAFEEXIT Demo NFT",
     version: "1",
-    chainId: 1_952,
+    chainId: 196,
     verifyingContract: collection,
   },
   requiredWalletCapability: "ATOMIC_BATCH",
@@ -170,11 +170,11 @@ class FakeProvider implements OkxInjectedProvider {
         this.rejectSwitchWith4902 = false;
         throw { code: 4_902 };
       }
-      this.chainId = "0x7a0";
+      this.chainId = "0xc4";
       return null;
     }
     if (request.method === "wallet_addEthereumChain") {
-      this.chainId = "0x7a0";
+      this.chainId = "0xc4";
       return null;
     }
     if (request.method === "eth_signTypedData_v4") {
@@ -258,7 +258,7 @@ class FakeProvider implements OkxInjectedProvider {
       });
     }
     if (request.method === "wallet_getCapabilities") {
-      return { "0x7a0": { atomic: { status: this.atomicStatus } } };
+      return { "0xc4": { atomic: { status: this.atomicStatus } } };
     }
     if (request.method === "wallet_sendCalls") {
       return "0x1234";
@@ -283,11 +283,11 @@ describe("OKX injected wallet guardrails", () => {
     expect(provider.calls[0]?.method).toBe("eth_requestAccounts");
   });
 
-  it("switches to X Layer testnet and adds it only after error 4902", async () => {
+  it("switches to X Layer mainnet and adds it only after error 4902", async () => {
     const provider = new FakeProvider();
     provider.rejectSwitchWith4902 = true;
 
-    await ensureXLayerTestnet(provider);
+    await ensureXLayerMainnet(provider);
 
     expect(provider.calls.map((call) => call.method)).toEqual([
       "eth_chainId",
@@ -295,7 +295,7 @@ describe("OKX injected wallet guardrails", () => {
       "wallet_addEthereumChain",
       "eth_chainId",
     ]);
-    expect(provider.chainId).toBe("0x7a0");
+    expect(provider.chainId).toBe("0xc4");
   });
 
   it("creates a short-lived authorization with a caller-provided nonce", () => {
@@ -329,7 +329,7 @@ describe("OKX injected wallet guardrails", () => {
       nonce: `0x${"56".repeat(32)}`,
     });
     const destinationProvider = new FakeProvider(destinationAccount);
-    destinationProvider.chainId = "0x7a0";
+    destinationProvider.chainId = "0xc4";
 
     await expect(
       submitEip3009Settlement(destinationProvider, signed, destination),
@@ -354,7 +354,7 @@ describe("OKX injected wallet guardrails", () => {
       nonce: `0x${"78".repeat(32)}`,
     });
     const settlementProvider = new FakeProvider();
-    settlementProvider.chainId = "0x7a0";
+    settlementProvider.chainId = "0xc4";
 
     await expect(
       submitEip3009Settlement(settlementProvider, signed, source),
@@ -388,7 +388,7 @@ describe("OKX injected wallet guardrails", () => {
     const sourceProvider = new FakeProvider();
     const signed = await signErc2612Permit(sourceProvider, permitAction, source);
     const destinationProvider = new FakeProvider(destinationAccount);
-    destinationProvider.chainId = "0x7a0";
+    destinationProvider.chainId = "0xc4";
 
     await expect(
       submitErc2612AtomicBatch(destinationProvider, signed, destination),
@@ -401,7 +401,7 @@ describe("OKX injected wallet guardrails", () => {
     const sendRequest = destinationProvider.calls[2];
     expect(sendRequest?.params).toEqual([expect.objectContaining({
       from: destination,
-      chainId: "0x7a0",
+      chainId: "0xc4",
       atomicRequired: true,
       calls: [
         { to: signed.authorization.tokenAddress, data: signed.permitData, value: "0x0" },
@@ -416,7 +416,7 @@ describe("OKX injected wallet guardrails", () => {
     }
     const signed = await signErc2612Permit(new FakeProvider(), permitAction, source);
     const destinationProvider = new FakeProvider(destinationAccount);
-    destinationProvider.chainId = "0x7a0";
+    destinationProvider.chainId = "0xc4";
     destinationProvider.atomicStatus = "unsupported";
 
     await expect(
@@ -463,14 +463,14 @@ describe("OKX injected wallet guardrails", () => {
       source,
     );
     const destinationProvider = new FakeProvider(destinationAccount);
-    destinationProvider.chainId = "0x7a0";
+    destinationProvider.chainId = "0xc4";
 
     await expect(
       submitDaiPermitAtomicBatch(destinationProvider, signed, destination),
     ).resolves.toBe("0x1234");
     expect(destinationProvider.calls[2]?.params).toEqual([expect.objectContaining({
       from: destination,
-      chainId: "0x7a0",
+      chainId: "0xc4",
       atomicRequired: true,
       calls: [
         { to: signed.authorization.tokenAddress, data: signed.allowPermitData, value: "0x0" },
@@ -515,7 +515,7 @@ describe("OKX injected wallet guardrails", () => {
     }
     const signed = await signErc4494Permit(new FakeProvider(), nftPermitAction, source);
     const destinationProvider = new FakeProvider(destinationAccount);
-    destinationProvider.chainId = "0x7a0";
+    destinationProvider.chainId = "0xc4";
 
     await expect(
       submitErc4494AtomicBatch(destinationProvider, signed, destination),
@@ -530,48 +530,48 @@ describe("OKX injected wallet guardrails", () => {
   });
 });
 
-describe("testnet preflight request", () => {
+describe("mainnet preflight request", () => {
   it("accepts at most eight validated EVM token addresses", () => {
-    expect(testnetPreflightRequestSchema.parse({ tokenAddresses: [source] })).toEqual({
+    expect(mainnetPreflightRequestSchema.parse({ tokenAddresses: [source] })).toEqual({
       tokenAddresses: [source],
       erc721Assets: [],
       erc1155Assets: [],
     });
     expect(() =>
-      testnetPreflightRequestSchema.parse({
+      mainnetPreflightRequestSchema.parse({
         tokenAddresses: Array.from({ length: 9 }, (_, index) =>
           `0x${(index + 1).toString(16).padStart(40, "0")}`,
         ),
       }),
     ).toThrow();
     expect(() =>
-      testnetPreflightRequestSchema.parse({ tokenAddresses: ["not-an-address"] }),
+      mainnetPreflightRequestSchema.parse({ tokenAddresses: ["not-an-address"] }),
     ).toThrow();
   });
 
   it("accepts explicit ERC-721 collection and token ID pairs", () => {
-    expect(testnetPreflightRequestSchema.parse({
+    expect(mainnetPreflightRequestSchema.parse({
       tokenAddresses: [],
       erc721Assets: [{ collectionAddress: collection, tokenId: "42" }],
     }).erc721Assets).toEqual([{ collectionAddress: collection, tokenId: "42" }]);
-    expect(() => testnetPreflightRequestSchema.parse({
+    expect(() => mainnetPreflightRequestSchema.parse({
       tokenAddresses: [],
       erc721Assets: [{ collectionAddress: collection, tokenId: "-1" }],
     })).toThrow();
   });
 
   it("accepts explicit ERC-1155 collection and token ID pairs", () => {
-    expect(testnetPreflightRequestSchema.parse({
+    expect(mainnetPreflightRequestSchema.parse({
       tokenAddresses: [],
       erc1155Assets: [{ collectionAddress: collection, tokenId: "7" }],
     }).erc1155Assets).toEqual([{ collectionAddress: collection, tokenId: "7" }]);
-    expect(() => testnetPreflightRequestSchema.parse({
+    expect(() => mainnetPreflightRequestSchema.parse({
       tokenAddresses: [],
       erc1155Assets: [{ collectionAddress: collection, tokenId: "-1" }],
     })).toThrow();
   });
 
   it("rejects an empty asset batch", () => {
-    expect(() => testnetPreflightRequestSchema.parse({ tokenAddresses: [] })).toThrow();
+    expect(() => mainnetPreflightRequestSchema.parse({ tokenAddresses: [] })).toThrow();
   });
 });

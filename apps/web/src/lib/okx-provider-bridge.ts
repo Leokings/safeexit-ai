@@ -19,7 +19,7 @@ export function getOkxProviderBridge(): OkxA2AProviderBridge {
     providerAgentId,
     undefined,
     undefined,
-    [196, 1_952],
+    [196],
   );
 }
 

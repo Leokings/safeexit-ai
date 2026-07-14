@@ -20,7 +20,7 @@ const now = "2026-07-11T12:00:00.000Z";
 
 const erc20Asset = {
   id: "asset-usdc",
-  chainId: 1952,
+  chainId: 196,
   ownerAddress: sourceAddress,
   supportStatus: "SUPPORTED",
   observedAtBlock: "12345",
@@ -36,7 +36,7 @@ const erc20Asset = {
 
 const erc20Approval = {
   id: "approval-usdc",
-  chainId: 1952,
+  chainId: 196,
   ownerAddress: sourceAddress,
   supportStatus: "SUPPORTED",
   observedAtBlock: "12345",
@@ -49,7 +49,7 @@ const erc20Approval = {
 
 const transferAction = {
   id: "action-transfer-usdc",
-  chainId: 1952,
+  chainId: 196,
   sourceAddress,
   dependencies: [],
   evidenceIds: ["asset-usdc"],
@@ -75,7 +75,7 @@ describe("incidentSchema", () => {
   it("parses a non-custodial incident record", () => {
     const result = incidentSchema.parse({
       id: "incident-1",
-      chainId: 1952,
+      chainId: 196,
       sourceAddress,
       destinationAddress,
       status: "RECEIVED",
@@ -111,7 +111,7 @@ describe("incidentSchema", () => {
   it("rejects a destination equal to the source", () => {
     const result = incidentSchema.safeParse({
       id: "incident-1",
-      chainId: 1952,
+      chainId: 196,
       sourceAddress,
       destinationAddress: sourceAddress.toUpperCase().replace("0X", "0x"),
       status: "RECEIVED",
@@ -130,7 +130,7 @@ describe("incidentSchema", () => {
   it("requires an affirmative ownership attestation", () => {
     const result = incidentSchema.safeParse({
       id: "incident-1",
-      chainId: 1952,
+      chainId: 196,
       sourceAddress,
       destinationAddress,
       status: "RECEIVED",
@@ -155,7 +155,7 @@ describe("wallet evidence schemas", () => {
     const scan = walletScanSchema.parse({
       id: "scan-1",
       incidentId: "incident-1",
-      chainId: 1952,
+      chainId: 196,
       address: sourceAddress,
       status: "COMPLETE",
       providerId: "demo-provider",
@@ -228,7 +228,7 @@ describe("rescue action and plan schemas", () => {
       incidentId: "incident-1",
       version: 1,
       policyVersion: "phase-1",
-      chainId: 1952,
+      chainId: 196,
       sourceAddress,
       destinationAddress,
       observedAtBlock: "12345",
@@ -258,7 +258,7 @@ describe("rescue action and plan schemas", () => {
         incidentId: "incident-1",
         version: 1,
         policyVersion: "phase-1",
-        chainId: 1952,
+        chainId: 196,
         sourceAddress,
         destinationAddress,
         observedAtBlock: "12345",

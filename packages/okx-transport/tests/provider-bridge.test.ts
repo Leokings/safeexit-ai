@@ -15,7 +15,6 @@ import {
 
 import {
   OKX_A2A_XLAYER_MAINNET_CHAIN_ID,
-  OKX_A2A_XLAYER_TESTNET_CHAIN_ID,
   OkxA2AProviderBridge,
   SAFEEXIT_AUTHORIZATION_STATEMENT,
   okxA2ATaskRequestSchema,
@@ -33,7 +32,7 @@ const txHash = `0x${"a".repeat(64)}`;
 
 const incident: Incident = {
   id: "incident:test",
-  chainId: 31_337,
+  chainId: OKX_A2A_XLAYER_MAINNET_CHAIN_ID,
   sourceAddress: source,
   destinationAddress: destination,
   status: "RECEIVED",
@@ -261,6 +260,11 @@ const request: OkxA2ATaskRequest = {
     sourceAddress: source,
     destinationAddress: destination,
   },
+  assetManifest: {
+    erc20TokenAddresses: [token],
+    erc721Assets: [],
+    erc1155Assets: [],
+  },
   authorization: { statement: SAFEEXIT_AUTHORIZATION_STATEMENT, confirmedAt: now },
 };
 
@@ -285,27 +289,17 @@ describe("OKX A2A provider bridge", () => {
     expect(() => okxA2ATaskRequestSchema.parse({ ...request, privateKey: "0xsecret" })).toThrow();
   });
 
-  it("requires a bounded explicit asset manifest for testnet and accepts X Layer mainnet batches", () => {
-    const testnetRequest = {
+  it("requires a bounded explicit asset manifest and X Layer mainnet", () => {
+    expect(() => okxA2ATaskRequestSchema.parse({
       ...request,
-      walletContext: {
-        ...request.walletContext,
-        chainId: OKX_A2A_XLAYER_TESTNET_CHAIN_ID,
-      },
-    };
-    expect(() => okxA2ATaskRequestSchema.parse(testnetRequest)).toThrow(
-      "explicit asset manifest",
-    );
-    expect(okxA2ATaskRequestSchema.parse({
-      ...testnetRequest,
-      assetManifest: { erc20TokenAddresses: [token] },
-    }).assetManifest?.erc20TokenAddresses).toEqual([token]);
+      assetManifest: undefined,
+    })).toThrow();
+    expect(() => okxA2ATaskRequestSchema.parse({
+      ...request,
+      walletContext: { ...request.walletContext, chainId: 1 },
+    })).toThrow("X Layer mainnet");
     expect(okxA2ATaskRequestSchema.parse({
       ...request,
-      walletContext: {
-        ...request.walletContext,
-        chainId: OKX_A2A_XLAYER_MAINNET_CHAIN_ID,
-      },
       assetManifest: {
         erc20TokenAddresses: [token],
         erc721Assets: [{ collectionAddress: destination, tokenId: "42" }],
@@ -315,12 +309,12 @@ describe("OKX A2A provider bridge", () => {
     ]);
   });
 
-  it("binds the canonical testnet manifest to the persisted incident scope", async () => {
+  it("binds the canonical mainnet manifest to the persisted incident scope", async () => {
     const bridge = new OkxA2AProviderBridge(
       "5196",
       () => new Date(now),
       undefined,
-      [OKX_A2A_XLAYER_TESTNET_CHAIN_ID],
+      [OKX_A2A_XLAYER_MAINNET_CHAIN_ID],
     );
     const versions: string[] = [];
     for (const tokenAddress of [token, destination]) {
@@ -329,14 +323,14 @@ describe("OKX A2A provider bridge", () => {
         ...request,
         walletContext: {
           ...request.walletContext,
-          chainId: OKX_A2A_XLAYER_TESTNET_CHAIN_ID,
+          chainId: OKX_A2A_XLAYER_MAINNET_CHAIN_ID,
         },
         assetManifest: {
           erc20TokenAddresses: [tokenAddress],
           erc721Assets: [],
           erc1155Assets: [],
         },
-      })).rejects.toThrow("outside the normalized task scope");
+      })).resolves.toMatchObject({ status: "SIGNING_PACKAGE_READY" });
       const createIncident = vi.mocked(service.createIncident);
       const input = createIncident.mock.calls[0]?.[0];
       versions.push(input?.incident?.ownershipAttestation.statementVersion ?? "");
@@ -348,7 +342,7 @@ describe("OKX A2A provider bridge", () => {
   });
 
   it("prepares a strict signing deliverable without source signatures", async () => {
-    const bridge = new OkxA2AProviderBridge("5196", () => new Date(now), undefined, [31_337]);
+    const bridge = new OkxA2AProviderBridge("5196", () => new Date(now));
     const result = await bridge.prepareSigningDeliverable(lifecycle(), request);
 
     expect(result.safeExitJobId).toBe("job:test");
@@ -358,7 +352,7 @@ describe("OKX A2A provider bridge", () => {
   });
 
   it("prepares a paid direct deliverable without a conversational task round-trip", async () => {
-    const bridge = new OkxA2AProviderBridge("5196", () => new Date(now), undefined, [31_337]);
+    const bridge = new OkxA2AProviderBridge("5196", () => new Date(now));
     const service = lifecycle();
     const paidRequest = okxX402PrepareRequestSchema.parse({
       schemaVersion: "safeexit-okx-x402-v1",
@@ -367,6 +361,7 @@ describe("OKX A2A provider bridge", () => {
       buyerAgentId: "100",
       service: "compromised-wallet-rescue",
       walletContext: request.walletContext,
+      assetManifest: request.assetManifest,
       authorization: request.authorization,
     });
 
@@ -387,6 +382,7 @@ describe("OKX A2A provider bridge", () => {
       requestId: "paid-request-1",
       service: "compromised-wallet-rescue",
       walletContext: request.walletContext,
+      assetManifest: request.assetManifest,
       authorization: request.authorization,
     };
     expect(() => okxX402PrepareRequestSchema.parse({
@@ -400,7 +396,7 @@ describe("OKX A2A provider bridge", () => {
   });
 
   it("rejects a task targeting another provider agent", async () => {
-    const bridge = new OkxA2AProviderBridge("5196", () => new Date(now), undefined, [31_337]);
+    const bridge = new OkxA2AProviderBridge("5196", () => new Date(now));
     await expect(bridge.prepareSigningDeliverable(lifecycle(), {
       ...request,
       providerAgentId: "9999",
@@ -408,7 +404,7 @@ describe("OKX A2A provider bridge", () => {
   });
 
   it("accepts only a receipt report bound to the original OKX task", async () => {
-    const bridge = new OkxA2AProviderBridge("5196", () => new Date(now), undefined, [31_337]);
+    const bridge = new OkxA2AProviderBridge("5196", () => new Date(now));
     const result = await bridge.recordBuyerReport(lifecycle(), {
       schemaVersion: "safeexit-okx-a2a-v1",
       transportMode: "SAFEEXIT_NORMALIZED",
@@ -423,18 +419,13 @@ describe("OKX A2A provider bridge", () => {
     expect(result.verification.sourceSignaturesReceivedBySafeExit).toBe(false);
   });
 
-  it("rejects stale authorization and an unsupported production chain", async () => {
+  it("rejects stale authorization and a non-mainnet chain", async () => {
     const bridge = new OkxA2AProviderBridge("5196", () => new Date(now));
-    await expect(bridge.prepareSigningDeliverable(lifecycle(), request)).rejects.toThrow(
-      "chain is not enabled",
-    );
-    const localBridge = new OkxA2AProviderBridge(
-      "5196",
-      () => new Date(now),
-      undefined,
-      [31_337],
-    );
-    await expect(localBridge.prepareSigningDeliverable(lifecycle(), {
+    await expect(bridge.prepareSigningDeliverable(lifecycle(), {
+      ...request,
+      walletContext: { ...request.walletContext, chainId: 1 },
+    })).rejects.toThrow("X Layer mainnet");
+    await expect(bridge.prepareSigningDeliverable(lifecycle(), {
       ...request,
       authorization: {
         ...request.authorization,

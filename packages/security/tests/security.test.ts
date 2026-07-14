@@ -51,7 +51,7 @@ describe("secure API validation", () => {
   it("requires a bounded explicit asset manifest", () => {
     expect(() =>
       createIncidentRequestSchema.parse({
-        chainId: 1_952,
+        chainId: 196,
         sourceAddress: source,
         destinationAddress: destination,
         assetManifest: {
@@ -65,7 +65,7 @@ describe("secure API validation", () => {
 
     expect(() =>
       createIncidentRequestSchema.parse({
-        chainId: 1_952,
+        chainId: 196,
         sourceAddress: source,
         destinationAddress: destination,
         assetManifest: {
@@ -180,6 +180,8 @@ describe("security headers", () => {
     const policy = createContentSecurityPolicy(false);
     expect(policy).toContain("frame-ancestors 'none'");
     expect(policy).toContain("object-src 'none'");
+    expect(policy).toContain("https://rpc.xlayer.tech");
+    expect(policy).toContain("https://xlayerrpc.okx.com");
     expect(policy).not.toContain("'unsafe-eval'");
     expect(createSecurityHeaders(false)).toContainEqual({
       key: "X-Content-Type-Options",

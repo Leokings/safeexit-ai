@@ -1,8 +1,4 @@
 import {
-  createDedicatedPublicClient,
-  xLayerTestnetConfig,
-} from "@safeexit/chain";
-import {
   checkDatabaseConnection,
   checkSharedRateLimitStore,
   getPrismaClient,
@@ -64,16 +60,6 @@ export async function GET(): Promise<Response> {
       checks.okxWalletApi = "configured";
     }
     Object.assign(checks, await probeConfiguredRpcEndpoints(config));
-    if (config.nodeEnv === "production") {
-      if (!config.xLayerTestnetRpcUrl) {
-        throw new Error("XLAYER_TESTNET_RPC_URL is required for the signing pilot");
-      }
-      const testnetBlock = await createDedicatedPublicClient(
-        xLayerTestnetConfig,
-        config.xLayerTestnetRpcUrl,
-      ).getBlockNumber();
-      checks.xLayerTestnetRpc = `connected:${testnetBlock.toString()}`;
-    }
     if (config.aiMode === "GATEWAY" && !config.aiModel?.includes("/")) {
       throw new Error("SAFEEXIT_AI_MODEL must use provider/model format");
     }

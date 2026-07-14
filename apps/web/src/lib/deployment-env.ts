@@ -25,7 +25,6 @@ const deploymentEnvironmentSchema = z.strictObject({
   baseMainnetRpcUrl: z.string().url().optional(),
   avalancheMainnetRpcUrl: z.string().url().optional(),
   xLayerMainnetRpcUrl: z.string().url().optional(),
-  xLayerTestnetRpcUrl: z.string().url().optional(),
   deploymentId: z.string().min(1).max(128).optional(),
 });
 
@@ -66,7 +65,6 @@ export function parseDeploymentEnvironment(
     avalancheMainnetRpcUrl: environment.AVALANCHE_MAINNET_RPC_URL,
     xLayerMainnetRpcUrl:
       environment.XLAYER_MAINNET_RPC_URL ?? environment.OKX_XLAYER_MAINNET_RPC_URL,
-    xLayerTestnetRpcUrl: environment.XLAYER_TESTNET_RPC_URL,
     deploymentId:
       environment.VERCEL_GIT_COMMIT_SHA ?? environment.SAFEEXIT_DEPLOYMENT_ID,
   });

@@ -8,13 +8,13 @@ import {
 } from "viem";
 
 import {
-  XLAYER_TESTNET_CHAIN_HEX,
-  XLAYER_TESTNET_CHAIN_ID,
+  XLAYER_MAINNET_CHAIN_HEX,
+  XLAYER_MAINNET_CHAIN_ID,
   type DaiPermitRescueAction,
   type Erc2612RescueAction,
   type Erc4494RescueAction,
   type GaslessRescueAction,
-} from "./testnet-rescue";
+} from "./mainnet-rescue";
 
 export type OkxInjectedProvider = {
   request(request: { method: string; params?: readonly unknown[] }): Promise<unknown>;
@@ -356,16 +356,16 @@ export async function connectOkxWallet(
   return parseAccount(await provider.request({ method: "eth_requestAccounts" }));
 }
 
-export async function ensureXLayerTestnet(provider: OkxInjectedProvider): Promise<void> {
+export async function ensureXLayerMainnet(provider: OkxInjectedProvider): Promise<void> {
   const current = await provider.request({ method: "eth_chainId" });
-  if (typeof current === "string" && current.toLowerCase() === XLAYER_TESTNET_CHAIN_HEX) {
+  if (typeof current === "string" && current.toLowerCase() === XLAYER_MAINNET_CHAIN_HEX) {
     return;
   }
 
   try {
     await provider.request({
       method: "wallet_switchEthereumChain",
-      params: [{ chainId: XLAYER_TESTNET_CHAIN_HEX }],
+      params: [{ chainId: XLAYER_MAINNET_CHAIN_HEX }],
     });
   } catch (error) {
     if (providerErrorCode(error) !== 4_902) {
@@ -375,22 +375,22 @@ export async function ensureXLayerTestnet(provider: OkxInjectedProvider): Promis
       method: "wallet_addEthereumChain",
       params: [
         {
-          chainId: XLAYER_TESTNET_CHAIN_HEX,
-          chainName: "X Layer testnet",
+          chainId: XLAYER_MAINNET_CHAIN_HEX,
+          chainName: "X Layer mainnet",
           nativeCurrency: { name: "OKB", symbol: "OKB", decimals: 18 },
           rpcUrls: [
-            "https://testrpc.xlayer.tech/terigon",
-            "https://xlayertestrpc.okx.com/terigon",
+            "https://rpc.xlayer.tech",
+            "https://xlayerrpc.okx.com",
           ],
-          blockExplorerUrls: ["https://www.okx.com/web3/explorer/xlayer-test"],
+          blockExplorerUrls: ["https://www.okx.com/web3/explorer/xlayer"],
         },
       ],
     });
   }
 
   const selected = await provider.request({ method: "eth_chainId" });
-  if (typeof selected !== "string" || selected.toLowerCase() !== XLAYER_TESTNET_CHAIN_HEX) {
-    throw new Error("OKX Wallet is not connected to X Layer testnet");
+  if (typeof selected !== "string" || selected.toLowerCase() !== XLAYER_MAINNET_CHAIN_HEX) {
+    throw new Error("OKX Wallet is not connected to X Layer mainnet");
   }
 }
 
@@ -401,8 +401,8 @@ export function createEip3009Authorization(
   if (action.standard !== "ERC3009_RECEIVE_WITH_AUTHORIZATION") {
     throw new Error("The action is not a verified ERC-3009 rescue action");
   }
-  if (action.domain.chainId !== XLAYER_TESTNET_CHAIN_ID) {
-    throw new Error("Only X Layer testnet authorizations are enabled");
+  if (action.domain.chainId !== XLAYER_MAINNET_CHAIN_ID) {
+    throw new Error("Only X Layer mainnet authorizations are enabled");
   }
   if (action.tokenAddress.toLowerCase() !== action.domain.verifyingContract.toLowerCase()) {
     throw new Error("The verified signing domain does not match the token contract");
@@ -522,8 +522,8 @@ export function createErc2612PermitAuthorization(
   action: Erc2612RescueAction,
   options: { now?: Date } = {},
 ): Erc2612PermitAuthorization {
-  if (action.domain.chainId !== XLAYER_TESTNET_CHAIN_ID) {
-    throw new Error("Only X Layer testnet permit authorizations are enabled");
+  if (action.domain.chainId !== XLAYER_MAINNET_CHAIN_ID) {
+    throw new Error("Only X Layer mainnet permit authorizations are enabled");
   }
   if (action.tokenAddress.toLowerCase() !== action.domain.verifyingContract.toLowerCase()) {
     throw new Error("The verified signing domain does not match the token contract");
@@ -656,8 +656,8 @@ export function createDaiPermitPairAuthorization(
   action: DaiPermitRescueAction,
   options: { now?: Date } = {},
 ): DaiPermitPairAuthorization {
-  if (action.domain.chainId !== XLAYER_TESTNET_CHAIN_ID) {
-    throw new Error("Only X Layer testnet DAI-style permits are enabled");
+  if (action.domain.chainId !== XLAYER_MAINNET_CHAIN_ID) {
+    throw new Error("Only X Layer mainnet DAI-style permits are enabled");
   }
   if (action.tokenAddress.toLowerCase() !== action.domain.verifyingContract.toLowerCase()) {
     throw new Error("The verified signing domain does not match the token contract");
@@ -806,8 +806,8 @@ export function createErc4494PermitAuthorization(
   action: Erc4494RescueAction,
   options: { now?: Date } = {},
 ): Erc4494PermitAuthorization {
-  if (action.domain.chainId !== XLAYER_TESTNET_CHAIN_ID) {
-    throw new Error("Only X Layer testnet NFT permit authorizations are enabled");
+  if (action.domain.chainId !== XLAYER_MAINNET_CHAIN_ID) {
+    throw new Error("Only X Layer mainnet NFT permit authorizations are enabled");
   }
   if (action.collectionAddress.toLowerCase() !== action.domain.verifyingContract.toLowerCase()) {
     throw new Error("The verified signing domain does not match the NFT collection");
@@ -888,20 +888,20 @@ export async function requireOkxAtomicBatchCapability(
 ): Promise<void> {
   const result = await provider.request({
     method: "wallet_getCapabilities",
-    params: [account, [XLAYER_TESTNET_CHAIN_HEX]],
+    params: [account, [XLAYER_MAINNET_CHAIN_HEX]],
   });
   if (!result || typeof result !== "object") {
     throw new Error("OKX Wallet did not return atomic batch capabilities");
   }
   const capabilities = Object.entries(result).find(
-    ([chainId]) => chainId.toLowerCase() === XLAYER_TESTNET_CHAIN_HEX,
+    ([chainId]) => chainId.toLowerCase() === XLAYER_MAINNET_CHAIN_HEX,
   )?.[1];
   const atomicStatus =
     capabilities && typeof capabilities === "object" && "atomic" in capabilities
       ? (capabilities.atomic as { status?: unknown }).status
       : undefined;
   if (atomicStatus !== "supported" && atomicStatus !== "ready") {
-    throw new Error("OKX Wallet does not report atomic batch support on X Layer testnet");
+    throw new Error("OKX Wallet does not report atomic batch support on X Layer mainnet");
   }
 }
 
@@ -918,8 +918,8 @@ export async function submitErc2612AtomicBatch(
     throw new Error("The source permit has expired; create a fresh permit");
   }
   const chainId = await provider.request({ method: "eth_chainId" });
-  if (typeof chainId !== "string" || chainId.toLowerCase() !== XLAYER_TESTNET_CHAIN_HEX) {
-    throw new Error("OKX Wallet is not connected to X Layer testnet");
+  if (typeof chainId !== "string" || chainId.toLowerCase() !== XLAYER_MAINNET_CHAIN_HEX) {
+    throw new Error("OKX Wallet is not connected to X Layer mainnet");
   }
   await requireOkxAtomicBatchCapability(provider, connectedAccount);
   const result = await provider.request({
@@ -927,7 +927,7 @@ export async function submitErc2612AtomicBatch(
     params: [{
       version: "2.0.0",
       from: connectedAccount,
-      chainId: XLAYER_TESTNET_CHAIN_HEX,
+      chainId: XLAYER_MAINNET_CHAIN_HEX,
       atomicRequired: true,
       calls: [
         { to: signed.authorization.tokenAddress, data: signed.permitData, value: "0x0" },
@@ -957,8 +957,8 @@ export async function submitDaiPermitAtomicBatch(
     throw new Error("The source DAI-style permits have expired; create fresh permits");
   }
   const chainId = await provider.request({ method: "eth_chainId" });
-  if (typeof chainId !== "string" || chainId.toLowerCase() !== XLAYER_TESTNET_CHAIN_HEX) {
-    throw new Error("OKX Wallet is not connected to X Layer testnet");
+  if (typeof chainId !== "string" || chainId.toLowerCase() !== XLAYER_MAINNET_CHAIN_HEX) {
+    throw new Error("OKX Wallet is not connected to X Layer mainnet");
   }
   await requireOkxAtomicBatchCapability(provider, connectedAccount);
   const result = await provider.request({
@@ -966,7 +966,7 @@ export async function submitDaiPermitAtomicBatch(
     params: [{
       version: "2.0.0",
       from: connectedAccount,
-      chainId: XLAYER_TESTNET_CHAIN_HEX,
+      chainId: XLAYER_MAINNET_CHAIN_HEX,
       atomicRequired: true,
       calls: [
         { to: signed.authorization.tokenAddress, data: signed.allowPermitData, value: "0x0" },
@@ -994,8 +994,8 @@ export async function submitErc4494AtomicBatch(
     throw new Error("The source NFT permit has expired; create a fresh permit");
   }
   const chainId = await provider.request({ method: "eth_chainId" });
-  if (typeof chainId !== "string" || chainId.toLowerCase() !== XLAYER_TESTNET_CHAIN_HEX) {
-    throw new Error("OKX Wallet is not connected to X Layer testnet");
+  if (typeof chainId !== "string" || chainId.toLowerCase() !== XLAYER_MAINNET_CHAIN_HEX) {
+    throw new Error("OKX Wallet is not connected to X Layer mainnet");
   }
   await requireOkxAtomicBatchCapability(provider, connectedAccount);
   const result = await provider.request({
@@ -1003,7 +1003,7 @@ export async function submitErc4494AtomicBatch(
     params: [{
       version: "2.0.0",
       from: connectedAccount,
-      chainId: XLAYER_TESTNET_CHAIN_HEX,
+      chainId: XLAYER_MAINNET_CHAIN_HEX,
       atomicRequired: true,
       calls: [
         { to: signed.authorization.collectionAddress, data: signed.permitData, value: "0x0" },
@@ -1060,8 +1060,8 @@ export async function submitEip3009Settlement(
     throw new Error("The source authorization is not currently valid; create a fresh authorization");
   }
   const chainId = await provider.request({ method: "eth_chainId" });
-  if (typeof chainId !== "string" || chainId.toLowerCase() !== XLAYER_TESTNET_CHAIN_HEX) {
-    throw new Error("OKX Wallet is not connected to X Layer testnet");
+  if (typeof chainId !== "string" || chainId.toLowerCase() !== XLAYER_MAINNET_CHAIN_HEX) {
+    throw new Error("OKX Wallet is not connected to X Layer mainnet");
   }
   const result = await provider.request({
     method: "eth_sendTransaction",

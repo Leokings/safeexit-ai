@@ -102,7 +102,6 @@ export function StartRescueForm() {
   const router = useRouter();
   const [source, setSource] = useState("");
   const [destination, setDestination] = useState("");
-  const [chainId, setChainId] = useState("1952");
   const [erc20Input, setErc20Input] = useState("");
   const [erc721Input, setErc721Input] = useState("");
   const [erc1155Input, setErc1155Input] = useState("");
@@ -145,7 +144,7 @@ export function StartRescueForm() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chainId: Number(chainId),
+          chainId: 196,
           sourceAddress: source,
           destinationAddress: destination,
           assetManifest,
@@ -195,17 +194,12 @@ export function StartRescueForm() {
         </label>
       </div>
 
-      <label className="mt-1 block max-w-sm">
+      <div className="mt-1 max-w-sm">
         <span className="mb-2 block text-sm font-semibold">Network</span>
-        <select
-          value={chainId}
-          onChange={(event) => setChainId(event.target.value)}
-          className="h-11 w-full rounded-md border border-border-strong bg-background px-3 text-sm text-foreground focus:border-accent focus:outline focus:outline-1"
-        >
-          <option value="1952">X Layer testnet - signing pilot</option>
-          <option value="196">X Layer mainnet - read-only</option>
-        </select>
-      </label>
+        <div className="flex h-11 items-center rounded-md border border-border-strong bg-background px-3 text-sm text-foreground">
+          X Layer mainnet / 196
+        </div>
+      </div>
 
       <div className="mt-6 border-t border-border pt-5">
         <div className="mb-4">
@@ -282,9 +276,7 @@ export function StartRescueForm() {
       <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="flex items-center gap-2 text-xs text-muted">
           <ShieldCheck className="size-4 text-accent" />
-          {chainId === "1952"
-            ? "Testnet signing requires a fresh deterministic preflight."
-            : "Mainnet remains read-only; no transaction can be signed."}
+          Mainnet signing requires a fresh deterministic preflight for every action.
         </p>
         <Button type="submit" size="lg" className="sm:min-w-44" disabled={submitting}>
           {submitting ? "Creating incident..." : "Create rescue incident"}

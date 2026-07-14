@@ -46,7 +46,7 @@ const common = {
   planId: "plan:test",
   planHash,
   actionId: "action:test",
-  chainId: 1_952,
+  chainId: 196,
   sourceAddress: sourceAccount.address,
   destinationAddress: destination,
   observedAtBlock: "100",
@@ -63,7 +63,7 @@ const common = {
 const domain = (verifyingContract: `0x${string}`) => ({
   name: "Rescue Asset",
   version: "1",
-  chainId: 1_952,
+  chainId: 196,
   verifyingContract,
 });
 
@@ -270,7 +270,7 @@ function destinationWallet(
 ): DestinationSettlementWalletPort {
   return {
     getAddress: async () => options.address ?? destination,
-    getChainId: async () => options.chainId ?? 1_952,
+    getChainId: async () => options.chainId ?? 196,
     supportsAtomicBatch: async () => options.atomic ?? true,
     submit: async (batch) => {
       submitted.push(batch);
@@ -352,7 +352,7 @@ describe("buyer-local rescue runtime", () => {
     await expect(runtime.execute(
       second,
       successfulSimulator([]),
-      destinationWallet([], { chainId: 196 }),
+      destinationWallet([], { chainId: 1 }),
     )).rejects.toMatchObject({ code: "CHAIN_MISMATCH" });
   });
 

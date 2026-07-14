@@ -2,7 +2,11 @@ export type SecurityHeader = Readonly<{ key: string; value: string }>;
 
 export function createContentSecurityPolicy(isDevelopment: boolean): string {
   const scriptSources = ["'self'", "'unsafe-inline'"];
-  const connectSources = ["'self'"];
+  const connectSources = [
+    "'self'",
+    "https://rpc.xlayer.tech",
+    "https://xlayerrpc.okx.com",
+  ];
   if (isDevelopment) {
     scriptSources.push("'unsafe-eval'");
     connectSources.push("http://localhost:*", "ws://localhost:*");

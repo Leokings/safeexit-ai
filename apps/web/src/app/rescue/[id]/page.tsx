@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-import { DraftWorkspace } from "@/components/draft-workspace";
-import { TestnetRescueWorkspace } from "@/components/testnet-rescue-workspace";
+import { MainnetRescueWorkspace } from "@/components/mainnet-rescue-workspace";
 import { getPrismaClient, PrismaSafeExitRepository } from "@safeexit/persistence";
 import { getAgentIncidentService } from "@/lib/agent-runtime";
 
@@ -28,23 +27,16 @@ export default async function RescuePage({ params }: { params: Promise<{ id: str
     notFound();
   }
 
-  if (incident.chainId === 1_952) {
-    return (
-      <TestnetRescueWorkspace
-        incidentId={incident.id}
-        source={incident.sourceAddress}
-        destination={incident.destinationAddress}
-        {...(incident.assetManifest ? { assetManifest: incident.assetManifest } : {})}
-      />
-    );
+  if (incident.chainId !== 196) {
+    notFound();
   }
 
   return (
-    <DraftWorkspace
+    <MainnetRescueWorkspace
       incidentId={incident.id}
       source={incident.sourceAddress}
       destination={incident.destinationAddress}
-      chainName={incident.chainId === 196 ? "X Layer mainnet / 196" : `Chain ${incident.chainId}`}
+      {...(incident.assetManifest ? { assetManifest: incident.assetManifest } : {})}
     />
   );
 }

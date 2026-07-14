@@ -15,7 +15,7 @@ const now = new Date("2026-07-13T10:00:00.000Z");
 function batch(atomicRequired: boolean, callCount = 1): SettlementBatch {
   return {
     packageId: "package:test",
-    chainId: 1_952,
+    chainId: 196,
     from: destination,
     atomicRequired,
     calls: Array.from({ length: callCount }, () => ({
@@ -76,9 +76,9 @@ describe("EIP-1193 buyer adapters", () => {
       request: async ({ method }) => {
         methods.push(method);
         if (method === "eth_requestAccounts") return [destination];
-        if (method === "eth_chainId") return "0x7a0";
+        if (method === "eth_chainId") return "0xc4";
         if (method === "wallet_getCapabilities") {
-          return { "0x7a0": { atomic: { status: "supported" } } };
+          return { "0xc4": { atomic: { status: "supported" } } };
         }
         if (method === "wallet_sendCalls") return "0x1234";
         if (method === "wallet_getCallsStatus") {
@@ -98,8 +98,8 @@ describe("EIP-1193 buyer adapters", () => {
     });
 
     expect(await wallet.getAddress()).toBe(destination);
-    expect(await wallet.getChainId()).toBe(1_952);
-    expect(await wallet.supportsAtomicBatch(1_952, destination)).toBe(true);
+    expect(await wallet.getChainId()).toBe(196);
+    expect(await wallet.supportsAtomicBatch(196, destination)).toBe(true);
     const submission = await wallet.submit(batch(true, 2));
     const receipt = await wallet.waitForReceipt(submission);
 

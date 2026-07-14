@@ -14,7 +14,6 @@ import {
   createDedicatedPublicClient,
   type ChainAdapterConfig,
   xLayerMainnetConfig,
-  xLayerTestnetConfig,
 } from "@safeexit/chain";
 import type { OkxA2AAssetManifest } from "@safeexit/okx-transport";
 import {
@@ -83,7 +82,6 @@ function safeOnchainMetadata(value: string, maximum: number, fallback: string): 
 import { parseDeploymentEnvironment } from "./deployment-env";
 import { LivePermitSigningPackageBuilder } from "./live-signing-package-builder";
 import { LiveBuyerExecutionVerifier } from "./live-buyer-report-verifier";
-import { LiveXLayerTestnetManifestAnalyzer } from "./live-testnet-analyzer";
 
 class LiveXLayerAnalyzer implements IncidentAnalyzerPort {
   private readonly discovery: OkxWalletBalanceDiscoveryClient;
@@ -456,34 +454,6 @@ function createMainnetService(
   });
 }
 
-function createTestnetService(
-  config: ReturnType<typeof parseDeploymentEnvironment>,
-  assetManifest?: OkxA2AAssetManifest,
-): AgentIncidentService {
-  if (!config.xLayerTestnetRpcUrl) {
-    throw new Error("Live X Layer testnet RPC is not configured");
-  }
-  return new AgentIncidentService({
-    store: createStore(),
-    analyzer: new LiveXLayerTestnetManifestAnalyzer(
-      config.xLayerTestnetRpcUrl,
-      assetManifest,
-    ),
-    planner: new LiveDeterministicPlanner(),
-    simulator: new LiveRpcSimulator(xLayerTestnetConfig, config.xLayerTestnetRpcUrl),
-    dashboard: new LiveDashboardLocator(config.publicBaseUrl),
-    signingPackages: new LivePermitSigningPackageBuilder(
-      xLayerTestnetConfig,
-      config.xLayerTestnetRpcUrl,
-    ),
-    executionVerifier: new LiveBuyerExecutionVerifier(
-      xLayerTestnetConfig,
-      config.xLayerTestnetRpcUrl,
-    ),
-    monitor: new ReviewOnlyMonitor(),
-  });
-}
-
 export function getAgentIncidentService(
   request: AgentRuntimeRequest = {},
 ): AgentIncidentService {
@@ -494,9 +464,6 @@ export function getAgentIncidentService(
   const chainId = request.chainId ?? xLayerMainnetConfig.chain.id;
   if (chainId === xLayerMainnetConfig.chain.id) {
     return createMainnetService(config, request.assetManifest);
-  }
-  if (chainId === xLayerTestnetConfig.chain.id) {
-    return createTestnetService(config, request.assetManifest);
   }
   throw new Error(`Live SAFEEXIT does not support chain ${chainId}`);
 }

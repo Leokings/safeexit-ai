@@ -7,15 +7,15 @@ import {
   walletScanSchema,
 } from "@safeexit/shared";
 
-export const XLAYER_TESTNET_CHAIN_ID = 1_952;
-export const XLAYER_TESTNET_CHAIN_HEX = "0x7a0";
+export const XLAYER_MAINNET_CHAIN_ID = 196;
+export const XLAYER_MAINNET_CHAIN_HEX = "0xc4";
 
 const requestedNftSchema = z.strictObject({
   collectionAddress: evmAddressSchema,
   tokenId: z.string().regex(/^(0|[1-9]\d*)$/),
 });
 
-export const testnetPreflightRequestSchema = z
+export const mainnetPreflightRequestSchema = z
   .strictObject({
     tokenAddresses: z.array(evmAddressSchema).max(8),
     erc721Assets: z.array(requestedNftSchema).max(8).default([]),
@@ -45,7 +45,7 @@ export const testnetPreflightRequestSchema = z
 export const eip712DomainSchema = z.strictObject({
   name: z.string().min(1).max(128),
   version: z.string().min(1).max(32),
-  chainId: z.literal(XLAYER_TESTNET_CHAIN_ID),
+  chainId: z.literal(XLAYER_MAINNET_CHAIN_ID),
   verifyingContract: evmAddressSchema,
 });
 
@@ -112,8 +112,8 @@ export const blockedGaslessActionSchema = z.strictObject({
   reason: z.string().min(1).max(500),
 });
 
-export const testnetPreflightResponseSchema = z.strictObject({
-  chainId: z.literal(XLAYER_TESTNET_CHAIN_ID),
+export const mainnetPreflightResponseSchema = z.strictObject({
+  chainId: z.literal(XLAYER_MAINNET_CHAIN_ID),
   scan: walletScanSchema,
   plan: rescuePlanSchema,
   simulations: z.array(simulationResultSchema),
@@ -122,8 +122,8 @@ export const testnetPreflightResponseSchema = z.strictObject({
   blockedActions: z.array(blockedGaslessActionSchema),
 });
 
-export type TestnetPreflightRequest = z.infer<typeof testnetPreflightRequestSchema>;
-export type TestnetPreflightResponse = z.infer<typeof testnetPreflightResponseSchema>;
+export type MainnetPreflightRequest = z.infer<typeof mainnetPreflightRequestSchema>;
+export type MainnetPreflightResponse = z.infer<typeof mainnetPreflightResponseSchema>;
 export type Eip712Domain = z.infer<typeof eip712DomainSchema>;
 export type GaslessRescueAction = z.infer<typeof gaslessRescueActionSchema>;
 export type Eip3009RescueAction = z.infer<typeof eip3009RescueActionSchema>;

@@ -1,6 +1,6 @@
 import { createPublicClient, defineChain, http, type Chain } from "viem";
 
-export type ChainEnvironment = "MAINNET" | "TESTNET" | "LOCAL";
+export type ChainEnvironment = "MAINNET" | "LOCAL";
 export type ScannerCapabilitySupport = "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
 
 export type ScannerCapabilities = {
@@ -53,31 +53,6 @@ export const xLayerMainnet = defineChain({
   },
 });
 
-export const xLayerTestnet = defineChain({
-  id: 1952,
-  name: "X Layer Testnet",
-  nativeCurrency: {
-    name: "OKB",
-    symbol: "OKB",
-    decimals: 18,
-  },
-  rpcUrls: {
-    default: {
-      http: [
-        "https://testrpc.xlayer.tech/terigon",
-        "https://xlayertestrpc.okx.com/terigon",
-      ],
-    },
-  },
-  blockExplorers: {
-    default: {
-      name: "OKX Explorer",
-      url: "https://www.okx.com/web3/explorer/xlayer-test",
-    },
-  },
-  testnet: true,
-});
-
 export const anvilLocal = defineChain({
   id: 31_337,
   name: "Anvil Local",
@@ -106,18 +81,6 @@ export const xLayerMainnetConfig: ChainAdapterConfig = {
   configurationSource: officialXLayerSource,
 };
 
-export const xLayerTestnetConfig: ChainAdapterConfig = {
-  id: "x-layer-testnet",
-  environment: "TESTNET",
-  chain: xLayerTestnet,
-  rpcUrls: [
-    "https://testrpc.xlayer.tech/terigon",
-    "https://xlayertestrpc.okx.com/terigon",
-  ],
-  scannerCapabilities: standardScannerCapabilities,
-  configurationSource: officialXLayerSource,
-};
-
 export const anvilLocalConfig: ChainAdapterConfig = {
   id: "anvil-local",
   environment: "LOCAL",
@@ -132,7 +95,6 @@ export const anvilLocalConfig: ChainAdapterConfig = {
 
 export const configuredChains = [
   xLayerMainnetConfig,
-  xLayerTestnetConfig,
   anvilLocalConfig,
 ] as const;
 

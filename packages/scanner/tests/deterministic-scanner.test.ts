@@ -241,10 +241,10 @@ describe("deterministic wallet scanner", () => {
     await expect(
       createScanner(createMockReader()).scan({
         incidentId: "incident-5",
-        chainId: 1952,
+        chainId: 10_001,
         address: ownerAddress,
       }),
-    ).rejects.toThrow("Scanner is not configured for chain ID 1952");
+    ).rejects.toThrow("Scanner is not configured for chain ID 10001");
   });
 
   it("scopes evidence IDs to the incident scan", async () => {

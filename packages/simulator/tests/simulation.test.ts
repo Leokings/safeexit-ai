@@ -130,6 +130,23 @@ describe("LocalSimulationProvider", () => {
     );
   });
 
+  it("can validate a destination-paid call without source-funded gas estimation", async () => {
+    const client = createMockClient();
+    const provider = new LocalSimulationProvider({
+      id: "mainnet-permit-preflight",
+      kind: "PRODUCTION_RPC",
+      client,
+      estimateGas: false,
+      clock: () => now,
+    });
+
+    const result = await provider.simulate(requestFor(erc20TransferAction));
+
+    expect(result.status).toBe("SUCCEEDED");
+    expect(result.gasEstimate).toBeUndefined();
+    expect(client.estimateGas).not.toHaveBeenCalled();
+  });
+
   it("captures a revert reason and emits no balance effects", async () => {
     const client = createMockClient({
       call: vi.fn(async () => {

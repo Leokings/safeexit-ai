@@ -9,7 +9,6 @@ import {
   getChainAdapterConfig,
   primaryChainConfig,
   xLayerMainnetConfig,
-  xLayerTestnetConfig,
 } from "../src/config";
 
 describe("chain adapter configuration", () => {
@@ -20,15 +19,6 @@ describe("chain adapter configuration", () => {
     expect(primaryChainConfig.rpcUrls).toEqual([
       "https://rpc.xlayer.tech",
       "https://xlayerrpc.okx.com",
-    ]);
-  });
-
-  it("includes X Layer testnet with the official chain ID and RPCs", () => {
-    expect(xLayerTestnetConfig.chain.id).toBe(1952);
-    expect(xLayerTestnetConfig.environment).toBe("TESTNET");
-    expect(xLayerTestnetConfig.rpcUrls).toEqual([
-      "https://testrpc.xlayer.tech/terigon",
-      "https://xlayertestrpc.okx.com/terigon",
     ]);
   });
 
@@ -43,10 +33,10 @@ describe("chain adapter configuration", () => {
 
   it("resolves only configured chain IDs", () => {
     expect(getChainAdapterConfig(196)).toBe(xLayerMainnetConfig);
-    expect(getChainAdapterConfig(1952)).toBe(xLayerTestnetConfig);
     expect(getChainAdapterConfig(31_337)).toBe(anvilLocalConfig);
+    expect(() => getChainAdapterConfig(10_001)).toThrow("Unsupported chain ID: 10001");
     expect(() => getChainAdapterConfig(1)).toThrow("Unsupported chain ID: 1");
-    expect(configuredChains).toHaveLength(3);
+    expect(configuredChains).toHaveLength(2);
   });
 
   it("refuses an RPC URL that is not in the chain configuration", () => {
