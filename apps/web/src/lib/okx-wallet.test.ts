@@ -1,3 +1,4 @@
+import { encodeAbiParameters, encodeEventTopics } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it } from "vitest";
 
@@ -8,7 +9,9 @@ import {
   createErc2612PermitAuthorization,
   createErc4494PermitAuthorization,
   ensureXLayerMainnet,
+  getOkxConnectedAccount,
   getOkxCallsStatus,
+  receiptProvesCommittedTransfer,
   signDaiPermitPair,
   signEip3009Authorization,
   signErc2612Permit,
@@ -20,8 +23,10 @@ import {
   type OkxInjectedProvider,
 } from "./okx-wallet";
 import {
+  gaslessRouteKey,
   gaslessRescueActionSchema,
   mainnetPreflightRequestSchema,
+  requireReviewedGaslessRoute,
 } from "./mainnet-rescue";
 
 const sourceAccount = privateKeyToAccount(
@@ -162,6 +167,9 @@ class FakeProvider implements OkxInjectedProvider {
     if (request.method === "eth_requestAccounts") {
       return [this.account.address];
     }
+    if (request.method === "eth_accounts") {
+      return [this.account.address];
+    }
     if (request.method === "eth_chainId") {
       return this.chainId;
     }
@@ -261,7 +269,7 @@ class FakeProvider implements OkxInjectedProvider {
       return { "0xc4": { atomic: { status: this.atomicStatus } } };
     }
     if (request.method === "wallet_sendCalls") {
-      return "0x1234";
+      return { id: "0x1234" };
     }
     if (request.method === "wallet_getCallsStatus") {
       return {
@@ -281,6 +289,12 @@ describe("OKX injected wallet guardrails", () => {
     const provider = new FakeProvider();
     await expect(connectOkxWallet(provider)).resolves.toBe(source);
     expect(provider.calls[0]?.method).toBe("eth_requestAccounts");
+  });
+
+  it("reads the active account without requesting a new connection", async () => {
+    const provider = new FakeProvider();
+    await expect(getOkxConnectedAccount(provider)).resolves.toBe(source);
+    expect(provider.calls[0]?.method).toBe("eth_accounts");
   });
 
   it("switches to X Layer mainnet and adds it only after error 4902", async () => {
@@ -336,6 +350,7 @@ describe("OKX injected wallet guardrails", () => {
     ).resolves.toBe(`0x${"a".repeat(64)}`);
     expect(destinationProvider.calls).toEqual([
       { method: "eth_chainId" },
+      { method: "eth_accounts" },
       {
         method: "eth_sendTransaction",
         params: [{
@@ -395,10 +410,11 @@ describe("OKX injected wallet guardrails", () => {
     ).resolves.toBe("0x1234");
     expect(destinationProvider.calls.map((call) => call.method)).toEqual([
       "eth_chainId",
+      "eth_accounts",
       "wallet_getCapabilities",
       "wallet_sendCalls",
     ]);
-    const sendRequest = destinationProvider.calls[2];
+    const sendRequest = destinationProvider.calls[3];
     expect(sendRequest?.params).toEqual([expect.objectContaining({
       from: destination,
       chainId: "0xc4",
@@ -424,6 +440,7 @@ describe("OKX injected wallet guardrails", () => {
     ).rejects.toThrow("does not report atomic batch support");
     expect(destinationProvider.calls.map((call) => call.method)).toEqual([
       "eth_chainId",
+      "eth_accounts",
       "wallet_getCapabilities",
     ]);
   });
@@ -468,7 +485,7 @@ describe("OKX injected wallet guardrails", () => {
     await expect(
       submitDaiPermitAtomicBatch(destinationProvider, signed, destination),
     ).resolves.toBe("0x1234");
-    expect(destinationProvider.calls[2]?.params).toEqual([expect.objectContaining({
+    expect(destinationProvider.calls[3]?.params).toEqual([expect.objectContaining({
       from: destination,
       chainId: "0xc4",
       atomicRequired: true,
@@ -520,7 +537,7 @@ describe("OKX injected wallet guardrails", () => {
     await expect(
       submitErc4494AtomicBatch(destinationProvider, signed, destination),
     ).resolves.toBe("0x1234");
-    expect(destinationProvider.calls[2]?.params).toEqual([expect.objectContaining({
+    expect(destinationProvider.calls[3]?.params).toEqual([expect.objectContaining({
       atomicRequired: true,
       calls: [
         { to: collection, data: signed.permitData, value: "0x0" },
@@ -528,9 +545,65 @@ describe("OKX injected wallet guardrails", () => {
       ],
     })]);
   });
+
+  it("rejects submission if the active destination account changed", async () => {
+    if (permitAction.standard !== "ERC2612_PERMIT_ATOMIC_BATCH") {
+      throw new Error("Expected an ERC-2612 action fixture");
+    }
+    const signed = await signErc2612Permit(new FakeProvider(), permitAction, source);
+    const wrongProvider = new FakeProvider(sourceAccount);
+    wrongProvider.chainId = "0xc4";
+
+    await expect(
+      submitErc2612AtomicBatch(wrongProvider, signed, destination),
+    ).rejects.toThrow("active OKX Wallet account changed");
+    expect(wrongProvider.calls.map((call) => call.method)).toEqual([
+      "eth_chainId",
+      "eth_accounts",
+    ]);
+  });
+
+  it("requires an exact committed transfer event before reporting success", async () => {
+    if (permitAction.standard !== "ERC2612_PERMIT_ATOMIC_BATCH") {
+      throw new Error("Expected an ERC-2612 action fixture");
+    }
+    const signed = await signErc2612Permit(new FakeProvider(), permitAction, source);
+    const transferAbi = [{
+      type: "event",
+      name: "Transfer",
+      inputs: [
+        { name: "from", type: "address", indexed: true },
+        { name: "to", type: "address", indexed: true },
+        { name: "value", type: "uint256", indexed: false },
+      ],
+    }] as const;
+    const exactLog = {
+      address: token,
+      topics: encodeEventTopics({
+        abi: transferAbi,
+        eventName: "Transfer",
+        args: { from: source, to: destination },
+      }) as readonly `0x${string}`[],
+      data: encodeAbiParameters([{ type: "uint256" }], [1_250_000n]),
+    };
+
+    expect(receiptProvesCommittedTransfer(signed, [exactLog])).toBe(true);
+    expect(receiptProvesCommittedTransfer(signed, [{
+      ...exactLog,
+      data: encodeAbiParameters([{ type: "uint256" }], [1_249_999n]),
+    }])).toBe(false);
+  });
 });
 
 describe("mainnet preflight request", () => {
+  it("fails closed when the reviewed route disappears after fresh preflight", () => {
+    const reviewed = gaslessRouteKey(permitAction);
+    expect(requireReviewedGaslessRoute([permitAction], reviewed)).toBe(permitAction);
+    expect(() => requireReviewedGaslessRoute([action], reviewed)).toThrow(
+      "selected recovery route changed",
+    );
+  });
+
   it("accepts at most eight validated EVM token addresses", () => {
     expect(mainnetPreflightRequestSchema.parse({ tokenAddresses: [source] })).toEqual({
       tokenAddresses: [source],

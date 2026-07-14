@@ -38,6 +38,18 @@ function parseHash(value: unknown): Hex {
   return value as Hex;
 }
 
+function parseCallsId(value: unknown): string {
+  const id = typeof value === "string"
+    ? value
+    : value && typeof value === "object" && "id" in value
+      ? value.id
+      : undefined;
+  if (typeof id !== "string" || !/^0x[a-fA-F0-9]{2,8192}$/.test(id)) {
+    throw new Error("Wallet did not return a valid call-batch identifier");
+  }
+  return id;
+}
+
 function chainHex(chainId: number): Hex {
   return `0x${chainId.toString(16)}`;
 }
@@ -138,10 +150,7 @@ export class Eip1193DestinationWallet implements DestinationSettlementWalletPort
         calls: batch.calls,
       }],
     });
-    if (typeof result !== "string" || !/^0x[a-fA-F0-9]{2,8192}$/.test(result)) {
-      throw new Error("Wallet did not return a valid call-batch identifier");
-    }
-    return destinationSubmissionSchema.parse({ submissionId: result });
+    return destinationSubmissionSchema.parse({ submissionId: parseCallsId(result) });
   }
 
   async waitForReceipt(submission: DestinationSubmission): Promise<DestinationReceipt> {

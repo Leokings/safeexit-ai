@@ -17,12 +17,9 @@
     "db:validate": "prisma validate",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "contracts:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/contracts/forge.ps1 build",
-    "contracts:test": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/contracts/forge.ps1 test"
+    "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
-    "@openzeppelin/contracts": "^5.6.1",
     "@types/node": "^20.19.0",
     "dotenv": "17.4.2",
     "eslint": "^9.39.2",

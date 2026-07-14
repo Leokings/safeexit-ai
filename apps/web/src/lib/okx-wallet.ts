@@ -1,4 +1,5 @@
 import {
+  decodeEventLog,
   encodeFunctionData,
   getAddress,
   isAddress,
@@ -113,6 +114,12 @@ export type SignedRecoveryAuthorization =
 export type OkxCallsStatus = {
   status: 100 | 200 | 400 | 500;
   transactionHashes: Hex[];
+};
+
+export type SettlementReceiptLog = {
+  address: `0x${string}`;
+  data: Hex;
+  topics: readonly Hex[];
 };
 
 declare global {
@@ -266,6 +273,26 @@ const erc4494SettlementAbi = [
   },
 ] as const;
 
+const erc20TransferEventAbi = [{
+  type: "event",
+  name: "Transfer",
+  inputs: [
+    { name: "from", type: "address", indexed: true },
+    { name: "to", type: "address", indexed: true },
+    { name: "value", type: "uint256", indexed: false },
+  ],
+}] as const;
+
+const erc721TransferEventAbi = [{
+  type: "event",
+  name: "Transfer",
+  inputs: [
+    { name: "from", type: "address", indexed: true },
+    { name: "to", type: "address", indexed: true },
+    { name: "tokenId", type: "uint256", indexed: true },
+  ],
+}] as const;
+
 function providerErrorCode(error: unknown): number | undefined {
   if (!error || typeof error !== "object") {
     return undefined;
@@ -279,6 +306,22 @@ function parseAccount(value: unknown): `0x${string}` {
     throw new Error("OKX Wallet did not return a valid EVM account");
   }
   return getAddress(value[0]);
+}
+
+function parseCallsId(value: unknown): string {
+  const id = typeof value === "string"
+    ? value
+    : value && typeof value === "object" && "id" in value
+      ? value.id
+      : undefined;
+  if (typeof id !== "string" || !/^0x[a-fA-F0-9]{2,8192}$/.test(id)) {
+    throw new Error("OKX Wallet did not return a valid atomic call identifier");
+  }
+  return id;
+}
+
+function sameAddress(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
 }
 
 function randomNonce(): Hex {
@@ -354,6 +397,22 @@ export async function connectOkxWallet(
   provider: OkxInjectedProvider,
 ): Promise<`0x${string}`> {
   return parseAccount(await provider.request({ method: "eth_requestAccounts" }));
+}
+
+export async function getOkxConnectedAccount(
+  provider: OkxInjectedProvider,
+): Promise<`0x${string}`> {
+  return parseAccount(await provider.request({ method: "eth_accounts" }));
+}
+
+async function requireActiveAccount(
+  provider: OkxInjectedProvider,
+  expectedAccount: `0x${string}`,
+): Promise<void> {
+  const activeAccount = await getOkxConnectedAccount(provider);
+  if (!sameAddress(activeAccount, expectedAccount)) {
+    throw new Error("The active OKX Wallet account changed before submission");
+  }
 }
 
 export async function ensureXLayerMainnet(provider: OkxInjectedProvider): Promise<void> {
@@ -921,6 +980,7 @@ export async function submitErc2612AtomicBatch(
   if (typeof chainId !== "string" || chainId.toLowerCase() !== XLAYER_MAINNET_CHAIN_HEX) {
     throw new Error("OKX Wallet is not connected to X Layer mainnet");
   }
+  await requireActiveAccount(provider, connectedAccount);
   await requireOkxAtomicBatchCapability(provider, connectedAccount);
   const result = await provider.request({
     method: "wallet_sendCalls",
@@ -935,10 +995,7 @@ export async function submitErc2612AtomicBatch(
       ],
     }],
   });
-  if (typeof result !== "string" || !/^0x[a-fA-F0-9]{2,512}$/.test(result)) {
-    throw new Error("OKX Wallet did not return a valid atomic call identifier");
-  }
-  return result;
+  return parseCallsId(result);
 }
 
 export async function submitDaiPermitAtomicBatch(
@@ -960,6 +1017,7 @@ export async function submitDaiPermitAtomicBatch(
   if (typeof chainId !== "string" || chainId.toLowerCase() !== XLAYER_MAINNET_CHAIN_HEX) {
     throw new Error("OKX Wallet is not connected to X Layer mainnet");
   }
+  await requireActiveAccount(provider, connectedAccount);
   await requireOkxAtomicBatchCapability(provider, connectedAccount);
   const result = await provider.request({
     method: "wallet_sendCalls",
@@ -975,10 +1033,7 @@ export async function submitDaiPermitAtomicBatch(
       ],
     }],
   });
-  if (typeof result !== "string" || !/^0x[a-fA-F0-9]{2,512}$/.test(result)) {
-    throw new Error("OKX Wallet did not return a valid DAI-style atomic call identifier");
-  }
-  return result;
+  return parseCallsId(result);
 }
 
 export async function submitErc4494AtomicBatch(
@@ -997,6 +1052,7 @@ export async function submitErc4494AtomicBatch(
   if (typeof chainId !== "string" || chainId.toLowerCase() !== XLAYER_MAINNET_CHAIN_HEX) {
     throw new Error("OKX Wallet is not connected to X Layer mainnet");
   }
+  await requireActiveAccount(provider, connectedAccount);
   await requireOkxAtomicBatchCapability(provider, connectedAccount);
   const result = await provider.request({
     method: "wallet_sendCalls",
@@ -1011,10 +1067,7 @@ export async function submitErc4494AtomicBatch(
       ],
     }],
   });
-  if (typeof result !== "string" || !/^0x[a-fA-F0-9]{2,512}$/.test(result)) {
-    throw new Error("OKX Wallet did not return a valid NFT atomic call identifier");
-  }
-  return result;
+  return parseCallsId(result);
 }
 
 export async function getOkxCallsStatus(
@@ -1063,6 +1116,7 @@ export async function submitEip3009Settlement(
   if (typeof chainId !== "string" || chainId.toLowerCase() !== XLAYER_MAINNET_CHAIN_HEX) {
     throw new Error("OKX Wallet is not connected to X Layer mainnet");
   }
+  await requireActiveAccount(provider, connectedAccount);
   const result = await provider.request({
     method: "eth_sendTransaction",
     params: [
@@ -1078,4 +1132,66 @@ export async function submitEip3009Settlement(
     throw new Error("OKX Wallet did not return a valid transaction hash");
   }
   return result as Hex;
+}
+
+export function receiptProvesCommittedTransfer(
+  signed: SignedRecoveryAuthorization,
+  logs: readonly SettlementReceiptLog[],
+): boolean {
+  if (signed.standard === "ERC4494_PERMIT_ATOMIC_BATCH") {
+    return logs.some((log) => {
+      if (!sameAddress(log.address, signed.authorization.collectionAddress)) return false;
+      try {
+        const decoded = decodeEventLog({
+          abi: erc721TransferEventAbi,
+          data: log.data,
+          topics: [...log.topics] as [Hex, ...Hex[]],
+        });
+        return decoded.eventName === "Transfer" &&
+          sameAddress(decoded.args.from, signed.authorization.owner) &&
+          sameAddress(decoded.args.to, signed.authorization.spender) &&
+          decoded.args.tokenId === signed.authorization.tokenId;
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  const expected = signed.standard === "ERC3009_RECEIVE_WITH_AUTHORIZATION"
+    ? {
+        token: signed.authorization.tokenAddress,
+        from: signed.authorization.from,
+        to: signed.authorization.to,
+        amount: BigInt(signed.authorization.value),
+      }
+    : signed.standard === "ERC2612_PERMIT_ATOMIC_BATCH"
+      ? {
+          token: signed.authorization.tokenAddress,
+          from: signed.authorization.owner,
+          to: signed.authorization.spender,
+          amount: BigInt(signed.authorization.value),
+        }
+      : {
+          token: signed.authorization.tokenAddress,
+          from: signed.authorization.holder,
+          to: signed.authorization.spender,
+          amount: BigInt(signed.authorization.value),
+        };
+
+  return logs.some((log) => {
+    if (!sameAddress(log.address, expected.token)) return false;
+    try {
+      const decoded = decodeEventLog({
+        abi: erc20TransferEventAbi,
+        data: log.data,
+        topics: [...log.topics] as [Hex, ...Hex[]],
+      });
+      return decoded.eventName === "Transfer" &&
+        sameAddress(decoded.args.from, expected.from) &&
+        sameAddress(decoded.args.to, expected.to) &&
+        decoded.args.value === expected.amount;
+    } catch {
+      return false;
+    }
+  });
 }

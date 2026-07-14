@@ -54,6 +54,21 @@ describe("deployment environment", () => {
     })).toThrow();
   });
 
+  it("rejects line-broken credentials and non-HTTPS RPC endpoints", () => {
+    expect(() => parseDeploymentEnvironment({
+      NODE_ENV: "production",
+      OKX_WEB3_API_KEY: "api-key\n",
+    })).toThrow();
+    expect(() => parseDeploymentEnvironment({
+      NODE_ENV: "production",
+      XLAYER_MAINNET_RPC_URL: "https://xlayer.example/rpc\n",
+    })).toThrow();
+    expect(() => parseDeploymentEnvironment({
+      NODE_ENV: "production",
+      XLAYER_MAINNET_RPC_URL: "http://xlayer.example/rpc",
+    })).toThrow();
+  });
+
   it("parses bounded hosted-model controls and rejects excessive output", () => {
     const config = parseDeploymentEnvironment({
       NODE_ENV: "production",

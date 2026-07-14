@@ -25,8 +25,9 @@ Scanner states have distinct meanings:
 - `UNKNOWN`: a configured read failed or could not determine state. It is never
   converted into a zero balance.
 
-Configured chains are X Layer mainnet (production) and local Anvil
-(development/testing). X Layer values are sourced from the
+Production recovery supports X Layer mainnet only. A local Anvil adapter remains
+available to deterministic unit tests, but the production repository no longer
+contains a demo UI, attacker fixture, or demo deployment scripts. X Layer values are sourced from the
 [official network documentation](https://web3.okx.com/onchainos/dev-docs/xlayer/developer/build-on-xlayer/network-information).
 
 ## Deterministic planning
@@ -74,6 +75,9 @@ npm run build
 ```
 
 The workspace uses npm workspaces under `apps/*` and `packages/*`.
+
+Security review boundaries, threats, and current findings are documented in
+`AUDIT_SCOPE.md`, `THREAT_MODEL.md`, and `INTERNAL_SECURITY_REVIEW.md`.
 
 ## Hosted service preparation
 

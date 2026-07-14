@@ -80,7 +80,7 @@ describe("EIP-1193 buyer adapters", () => {
         if (method === "wallet_getCapabilities") {
           return { "0xc4": { atomic: { status: "supported" } } };
         }
-        if (method === "wallet_sendCalls") return "0x1234";
+        if (method === "wallet_sendCalls") return { id: "0x1234" };
         if (method === "wallet_getCallsStatus") {
           statusReads += 1;
           return statusReads === 1

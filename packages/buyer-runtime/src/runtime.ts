@@ -481,6 +481,19 @@ export class BuyerRescueRuntime {
       );
     }
     assertFresh(signingPackage, this.clock());
+    const destinationBeforeSubmission = getAddress(await wallet.getAddress());
+    if (!sameAddress(destinationBeforeSubmission, signingPackage.destinationAddress)) {
+      throw new BuyerRuntimeError(
+        "DESTINATION_MISMATCH",
+        "The active destination wallet changed after simulation",
+      );
+    }
+    if (await wallet.getChainId() !== signingPackage.chainId) {
+      throw new BuyerRuntimeError(
+        "CHAIN_MISMATCH",
+        "The destination wallet chain changed after simulation",
+      );
+    }
     authorizedStates.delete(handle);
     const submission = destinationSubmissionSchema.parse(await wallet.submit(batch));
     const receipt = destinationReceiptSchema.parse(await wallet.waitForReceipt(submission));

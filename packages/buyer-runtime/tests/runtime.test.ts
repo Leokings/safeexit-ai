@@ -388,6 +388,48 @@ describe("buyer-local rescue runtime", () => {
     expect(submitted).toHaveLength(0);
   });
 
+  it("rechecks destination account and chain after simulation", async () => {
+    const signingPackage = packageFor("ERC2612_PERMIT_ATOMIC_BATCH");
+    const runtime = new BuyerRescueRuntime(() => now);
+    const handle = await runtime.authorize(
+      signingPackage,
+      confirmation(signingPackage),
+      signer(),
+    );
+    let activeAddress = destination;
+    let submitted = false;
+    const wallet: DestinationSettlementWalletPort = {
+      getAddress: async () => activeAddress,
+      getChainId: async () => 196,
+      supportsAtomicBatch: async () => true,
+      submit: async () => {
+        submitted = true;
+        return { submissionId: "submission:test" };
+      },
+      waitForReceipt: async () => ({
+        status: "CONFIRMED",
+        transactionHashes: [txHash],
+        observedAt: now.toISOString(),
+      }),
+    };
+    const simulator: AtomicSettlementSimulatorPort = {
+      simulate: async (batch) => {
+        activeAddress = wrongAccount.address;
+        return {
+          status: "SUCCEEDED",
+          providerId: "test",
+          simulatedAt: now.toISOString(),
+          callCount: batch.calls.length,
+        };
+      },
+    };
+
+    await expect(runtime.execute(handle, simulator, wallet)).rejects.toMatchObject({
+      code: "DESTINATION_MISMATCH",
+    });
+    expect(submitted).toBe(false);
+  });
+
   it("keeps authorizations process-local and one-use", async () => {
     const signingPackage = packageFor("ERC3009_RECEIVE_WITH_AUTHORIZATION");
     const runtime = new BuyerRescueRuntime(() => now);

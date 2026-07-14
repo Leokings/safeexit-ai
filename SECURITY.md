@@ -32,7 +32,8 @@ the active five-minute-or-shorter window, re-simulates the exact settlement
 after signing, and permits only the confirmed destination wallet to submit it.
 
 This is an internal engineering review, not an independent smart-contract or
-protocol audit. The mainnet route is enabled for narrowly scoped permit-only
+protocol audit. See `INTERNAL_SECURITY_REVIEW.md`, `THREAT_MODEL.md`, and
+`AUDIT_SCOPE.md`. The mainnet route is enabled for narrowly scoped permit-only
 recovery, but high-value use still requires a controlled canary with
 operator-owned funds followed by independent security review.
 

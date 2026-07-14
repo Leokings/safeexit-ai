@@ -229,4 +229,12 @@ describe("logging redaction", () => {
       '{"message":"test","mnemonic":"[REDACTED]","incidentId":"incident-1"}',
     );
   });
+
+  it("removes RPC URLs and authorization material embedded in error strings", () => {
+    expect(redactSensitive(
+      "request to https://example.quiknode.pro/secret-token failed with Bearer abc.def and OK-ACCESS-KEY: key-123",
+    )).toBe(
+      "request to [REDACTED_URL] failed with Bearer [REDACTED] and OK-ACCESS-KEY: [REDACTED]",
+    );
+  });
 });

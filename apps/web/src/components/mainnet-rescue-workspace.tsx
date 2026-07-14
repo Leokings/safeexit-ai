@@ -30,9 +30,10 @@ import { CopyAddress } from "@/components/copy-address";
 import {
   connectOkxWallet,
   ensureXLayerMainnet,
+  getOkxConnectedAccount,
   getOkxCallsStatus,
   getOkxProvider,
-  requireOkxAtomicBatchCapability,
+  receiptProvesCommittedTransfer,
   signDaiPermitPair,
   signEip3009Authorization,
   signErc2612Permit,
@@ -44,7 +45,9 @@ import {
   type SignedRecoveryAuthorization,
 } from "@/lib/okx-wallet";
 import {
+  gaslessRouteKey,
   mainnetPreflightResponseSchema,
+  requireReviewedGaslessRoute,
   type MainnetPreflightResponse,
 } from "@/lib/mainnet-rescue";
 
@@ -137,10 +140,6 @@ function routeContract(route: MainnetPreflightResponse["gaslessActions"][number]
     : route.tokenAddress;
 }
 
-function routeKey(route: { actionId: string; standard: string }): string {
-  return `${route.actionId}:${route.standard}`;
-}
-
 function actionTarget(action: RescueAction): EvmAddress {
   switch (action.actionType) {
     case "TRANSFER_NATIVE":
@@ -192,7 +191,7 @@ export function MainnetRescueWorkspace({
   const sourceConnected = connectedAccount?.toLowerCase() === source.toLowerCase();
   const destinationConnected = connectedAccount?.toLowerCase() === destination.toLowerCase();
   const nextGaslessAction =
-    preflight?.gaslessActions.find((route) => routeKey(route) === selectedRoute) ??
+    preflight?.gaslessActions.find((route) => gaslessRouteKey(route) === selectedRoute) ??
     preflight?.gaslessActions[0];
 
   async function connectExpected(role: "SOURCE" | "DESTINATION") {
@@ -200,8 +199,9 @@ export function MainnetRescueWorkspace({
     setError(undefined);
     try {
       const provider = getOkxProvider();
-      const account = await connectOkxWallet(provider);
+      await connectOkxWallet(provider);
       await ensureXLayerMainnet(provider);
+      const account = await getOkxConnectedAccount(provider);
       setConnectedAccount(account);
       const expected = role === "SOURCE" ? source : destination;
       if (account.toLowerCase() !== expected.toLowerCase()) {
@@ -239,9 +239,9 @@ export function MainnetRescueWorkspace({
     const result = mainnetPreflightResponseSchema.parse(body);
     setPreflight(result);
     setSelectedRoute((current) =>
-      result.gaslessActions.some((route) => routeKey(route) === current)
+      result.gaslessActions.some((route) => gaslessRouteKey(route) === current)
         ? current
-        : result.gaslessActions[0] ? routeKey(result.gaslessActions[0]) : undefined,
+        : result.gaslessActions[0] ? gaslessRouteKey(result.gaslessActions[0]) : undefined,
     );
     return result;
   }
@@ -268,20 +268,21 @@ export function MainnetRescueWorkspace({
     setError(undefined);
     try {
       const provider = getOkxProvider();
-      const account = await connectOkxWallet(provider);
+      await connectOkxWallet(provider);
       await ensureXLayerMainnet(provider);
+      const account = await getOkxConnectedAccount(provider);
       setConnectedAccount(account);
       if (account.toLowerCase() !== source.toLowerCase()) {
         throw new Error("Switch OKX Wallet to the reported source account before signing.");
       }
 
-      const fresh = await requestPreflight();
-      const action =
-        fresh.gaslessActions.find((route) => routeKey(route) === selectedRoute) ??
-        fresh.gaslessActions[0];
-      if (!action) {
-        throw new Error("No destination-paid recovery route is available.");
+      const intendedRoute = selectedRoute ??
+        (nextGaslessAction ? gaslessRouteKey(nextGaslessAction) : undefined);
+      if (!intendedRoute) {
+        throw new Error("Select a destination-paid recovery route before signing.");
       }
+      const fresh = await requestPreflight();
+      const action = requireReviewedGaslessRoute(fresh.gaslessActions, intendedRoute);
       const publicClient = createPublicClient({
         chain: xLayerMainnetConfig.chain,
         transport: http(xLayerMainnetConfig.rpcUrls[0]),
@@ -291,7 +292,6 @@ export function MainnetRescueWorkspace({
         result = await signEip3009Authorization(provider, action, account);
       } else {
         const destinationAccount = getAddress(action.to);
-        await requireOkxAtomicBatchCapability(provider, destinationAccount);
         if (action.standard === "ERC2612_PERMIT_ATOMIC_BATCH") {
           result = await signErc2612Permit(provider, action, account);
           await publicClient.call({
@@ -333,8 +333,9 @@ export function MainnetRescueWorkspace({
     setError(undefined);
     try {
       const provider = getOkxProvider();
-      const account = await connectOkxWallet(provider);
+      await connectOkxWallet(provider);
       await ensureXLayerMainnet(provider);
+      const account = await getOkxConnectedAccount(provider);
       setConnectedAccount(account);
       if (account.toLowerCase() !== destination.toLowerCase()) {
         throw new Error("Switch OKX Wallet to the safe destination account before settlement.");
@@ -431,12 +432,19 @@ export function MainnetRescueWorkspace({
         confirmations: 1,
         timeout: 120_000,
       });
-      const status = receipt.status === "success" ? "CONFIRMED" : "FAILED";
+      const transferProved = receipt.status === "success" &&
+        receiptProvesCommittedTransfer(signed, receipt.logs);
+      const status = transferProved ? "CONFIRMED" : "FAILED";
       setTransactions((current) =>
         current.map((item) => (item.hash === hash ? { ...item, status } : item)),
       );
-      if (status === "FAILED") {
+      if (receipt.status !== "success") {
         throw new Error("The destination-paid settlement was included but reverted.");
+      }
+      if (!transferProved) {
+        throw new Error(
+          "The confirmed receipt does not prove the exact committed asset transfer.",
+        );
       }
       setSigned(undefined);
       await requestPreflight();
@@ -602,10 +610,10 @@ export function MainnetRescueWorkspace({
                         key={`${route.actionId}:${route.standard}`}
                         type="button"
                         onClick={() => {
-                          setSelectedRoute(routeKey(route));
+                          setSelectedRoute(gaslessRouteKey(route));
                           setSigned(undefined);
                         }}
-                        className={`flex items-center justify-between gap-4 border px-3 py-3 text-left text-sm ${nextGaslessAction && routeKey(nextGaslessAction) === routeKey(route) ? "border-accent bg-accent/5" : "border-border bg-background"}`}
+                        className={`flex items-center justify-between gap-4 border px-3 py-3 text-left text-sm ${nextGaslessAction && gaslessRouteKey(nextGaslessAction) === gaslessRouteKey(route) ? "border-accent bg-accent/5" : "border-border bg-background"}`}
                       >
                         <span>{routeLabel(route.standard)}</span>
                         <Badge variant={route.capabilityStatus === "VERIFIED" ? "success" : "info"}>

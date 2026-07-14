@@ -1,5 +1,24 @@
 import { z } from "zod";
 
+const httpsUrlSchema = z.string().max(2_048).superRefine((value, context) => {
+  if (value !== value.trim() || /[\r\n]/.test(value)) {
+    context.addIssue({ code: "custom", message: "URL must not contain surrounding whitespace" });
+    return;
+  }
+  try {
+    if (new URL(value).protocol !== "https:") {
+      context.addIssue({ code: "custom", message: "Production RPC URL must use HTTPS" });
+    }
+  } catch {
+    context.addIssue({ code: "custom", message: "Production RPC URL must be valid" });
+  }
+});
+
+const serverCredentialSchema = z.string().min(1).max(1_024).refine(
+  (value) => !/[\r\n]/.test(value),
+  "Server credential must not contain line breaks",
+);
+
 const deploymentEnvironmentSchema = z.strictObject({
   nodeEnv: z.enum(["development", "test", "production"]),
   publicBaseUrl: z.string().url(),
@@ -10,21 +29,21 @@ const deploymentEnvironmentSchema = z.strictObject({
   aiMaxEstimatedInputTokens: z.coerce.number().int().min(512).max(32_000),
   aiMaxOutputTokens: z.coerce.number().int().min(32).max(512),
   aiTimeoutMs: z.coerce.number().int().min(1_000).max(15_000),
-  agentApiKey: z.string().min(32).optional(),
+  agentApiKey: serverCredentialSchema.min(32).optional(),
   okxProviderAgentId: z.string().regex(/^\d{1,32}$/).optional(),
-  okxWeb3ApiKey: z.string().min(1).optional(),
-  okxWeb3SecretKey: z.string().min(1).optional(),
-  okxWeb3Passphrase: z.string().min(1).optional(),
+  okxWeb3ApiKey: serverCredentialSchema.optional(),
+  okxWeb3SecretKey: serverCredentialSchema.optional(),
+  okxWeb3Passphrase: serverCredentialSchema.optional(),
   x402Mode: z.enum(["DISABLED", "MAINNET"]),
   x402PayToAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
-  ethereumMainnetRpcUrl: z.string().url().optional(),
-  bnbMainnetRpcUrl: z.string().url().optional(),
-  polygonMainnetRpcUrl: z.string().url().optional(),
-  arbitrumMainnetRpcUrl: z.string().url().optional(),
-  optimismMainnetRpcUrl: z.string().url().optional(),
-  baseMainnetRpcUrl: z.string().url().optional(),
-  avalancheMainnetRpcUrl: z.string().url().optional(),
-  xLayerMainnetRpcUrl: z.string().url().optional(),
+  ethereumMainnetRpcUrl: httpsUrlSchema.optional(),
+  bnbMainnetRpcUrl: httpsUrlSchema.optional(),
+  polygonMainnetRpcUrl: httpsUrlSchema.optional(),
+  arbitrumMainnetRpcUrl: httpsUrlSchema.optional(),
+  optimismMainnetRpcUrl: httpsUrlSchema.optional(),
+  baseMainnetRpcUrl: httpsUrlSchema.optional(),
+  avalancheMainnetRpcUrl: httpsUrlSchema.optional(),
+  xLayerMainnetRpcUrl: httpsUrlSchema.optional(),
   deploymentId: z.string().min(1).max(128).optional(),
 });
 

@@ -130,3 +130,22 @@ export type Eip3009RescueAction = z.infer<typeof eip3009RescueActionSchema>;
 export type Erc2612RescueAction = z.infer<typeof erc2612RescueActionSchema>;
 export type DaiPermitRescueAction = z.infer<typeof daiPermitRescueActionSchema>;
 export type Erc4494RescueAction = z.infer<typeof erc4494RescueActionSchema>;
+
+export function gaslessRouteKey(
+  route: Pick<GaslessRescueAction, "actionId" | "standard">,
+): string {
+  return `${route.actionId}:${route.standard}`;
+}
+
+export function requireReviewedGaslessRoute(
+  routes: readonly GaslessRescueAction[],
+  reviewedRouteKey: string,
+): GaslessRescueAction {
+  const route = routes.find((candidate) => gaslessRouteKey(candidate) === reviewedRouteKey);
+  if (!route) {
+    throw new Error(
+      "The selected recovery route changed during fresh preflight. Review the new result before signing.",
+    );
+  }
+  return route;
+}

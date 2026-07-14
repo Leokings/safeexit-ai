@@ -25,10 +25,14 @@ function normalizeKey(key: string): string {
 }
 
 function redactString(value: string): string {
-  return value.replace(
-    /postgres(?:ql)?:\/\/[^\s/@:]+:[^\s/@]+@[^\s]+/gi,
-    REDACTED,
-  );
+  return value
+    .replace(/\bBearer\s+[^\s,;]+/gi, `Bearer ${REDACTED}`)
+    .replace(
+      /(OK-ACCESS-(?:KEY|SIGN|PASSPHRASE)\s*[:=]\s*)[^\s,;]+/gi,
+      `$1${REDACTED}`,
+    )
+    .replace(/postgres(?:ql)?:\/\/[^\s]+/gi, REDACTED)
+    .replace(/https?:\/\/[^\s"')]+/gi, "[REDACTED_URL]");
 }
 
 export function redactSensitive(value: unknown, depth = 0): unknown {
