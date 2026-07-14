@@ -28,12 +28,14 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CopyAddress } from "@/components/copy-address";
 import {
+  assertRecoveryAuthorizationCurrent,
   connectOkxWallet,
   ensureRescueMainnet,
   getOkxConnectedAccount,
   getOkxCallsStatus,
   getOkxProvider,
   receiptProvesCommittedTransfer,
+  recoveryAuthorizationExpiresAt,
   signDaiPermitPair,
   signEip3009Authorization,
   signErc2612Permit,
@@ -196,6 +198,12 @@ export function MainnetRescueWorkspace({
   const nextGaslessAction =
     preflight?.gaslessActions.find((route) => gaslessRouteKey(route) === selectedRoute) ??
     preflight?.gaslessActions[0];
+  const signedExpiresAt = signed
+    ? new Date(Number(recoveryAuthorizationExpiresAt(signed)) * 1_000).toLocaleTimeString(
+        "en-GB",
+        { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC" },
+      )
+    : undefined;
 
   async function connectExpected(role: "SOURCE" | "DESTINATION") {
     setBusy("CONNECT");
@@ -345,6 +353,13 @@ export function MainnetRescueWorkspace({
       setConnectedAccount(account);
       if (account.toLowerCase() !== destination.toLowerCase()) {
         throw new Error("Switch OKX Wallet to the safe destination account before settlement.");
+      }
+
+      try {
+        assertRecoveryAuthorizationCurrent(signed);
+      } catch (authorizationError) {
+        setSigned(undefined);
+        throw authorizationError;
       }
 
       const publicClient = createPublicClient({
@@ -665,6 +680,7 @@ export function MainnetRescueWorkspace({
               {nextGaslessAction?.standard === "ERC4494_PERMIT_ATOMIC_BATCH" && <div className="flex justify-between gap-4"><span className="text-muted">Token ID</span><span className="font-mono">{nextGaslessAction.tokenId}</span></div>}
               {nextGaslessAction?.standard === "DAI_PERMIT_ATOMIC_BATCH" && <div className="flex justify-between gap-4"><span className="text-muted">Source signatures</span><span className="font-mono">2 (allow + revoke)</span></div>}
               <div className="flex justify-between gap-4"><span className="text-muted">Authorization</span><Badge variant={signed ? "success" : "neutral"}>{signed ? "SIGNED IN MEMORY" : "NOT SIGNED"}</Badge></div>
+              {signedExpiresAt && <div className="flex justify-between gap-4"><span className="text-muted">Valid until</span><span className="font-mono">{signedExpiresAt} UTC</span></div>}
               <div className="flex justify-between gap-4"><span className="text-muted">Preflight block</span><span className="font-mono">{preflight?.scan.observedAtBlock ?? "--"}</span></div>
             </div>
 

@@ -3,6 +3,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it } from "vitest";
 
 import {
+  assertRecoveryAuthorizationCurrent,
   connectOkxWallet,
   createDaiPermitPairAuthorization,
   createEip3009Authorization,
@@ -14,6 +15,7 @@ import {
   getOkxCallsStatus,
   getOkxProvider,
   receiptProvesCommittedTransfer,
+  RECOVERY_AUTHORIZATION_TTL_SECONDS,
   signDaiPermitPair,
   signEip3009Authorization,
   signErc2612Permit,
@@ -438,7 +440,9 @@ describe("OKX injected wallet guardrails", () => {
     });
 
     expect(authorization.nonce).toBe(nonce);
-    expect(authorization.validBefore - authorization.validAfter).toBe(330n);
+    expect(authorization.validBefore - authorization.validAfter).toBe(
+      RECOVERY_AUTHORIZATION_TTL_SECONDS + 30n,
+    );
     expect(authorization.from).toBe(source);
     expect(authorization.to).toBe(destination);
   });
@@ -453,6 +457,22 @@ describe("OKX injected wallet guardrails", () => {
     expect(provider.calls.map((call) => call.method)).toEqual(["eth_signTypedData_v4"]);
     expect(signed.signature).toMatch(/^0x[0-9a-f]{130}$/i);
     expect(signed.settlementData.startsWith("0xef55bec6")).toBe(true);
+  });
+
+  it("rejects an expired authorization before settlement simulation", async () => {
+    const signed = await signEip3009Authorization(
+      new FakeProvider(),
+      action,
+      source,
+      {
+        now: new Date("2026-07-13T12:00:00.000Z"),
+        nonce: `0x${"45".repeat(32)}`,
+      },
+    );
+
+    expect(() => assertRecoveryAuthorizationCurrent(signed, {
+      now: new Date("2026-07-13T12:15:01.000Z"),
+    })).toThrow("expired before settlement");
   });
 
   it("lets only the destination submit and pay for settlement", async () => {
@@ -504,7 +524,7 @@ describe("OKX injected wallet guardrails", () => {
     });
     expect(authorization.spender).toBe(destination);
     expect(authorization.nonce).toBe(7n);
-    expect(authorization.deadline).toBe(1_783_944_300n);
+    expect(authorization.deadline).toBe(1_783_944_900n);
 
     const provider = new FakeProvider();
     const signed = await signErc2612Permit(provider, permitAction, source, {
@@ -573,7 +593,7 @@ describe("OKX injected wallet guardrails", () => {
     expect(authorization.spender).toBe(destination);
     expect(authorization.allowNonce).toBe(11n);
     expect(authorization.revokeNonce).toBe(12n);
-    expect(authorization.expiry).toBe(1_783_944_300n);
+    expect(authorization.expiry).toBe(1_783_944_900n);
 
     const provider = new FakeProvider();
     const signed = await signDaiPermitPair(provider, daiPermitAction, source, {

@@ -213,6 +213,8 @@ const nftPermitTypes = {
   ],
 } as const;
 
+export const RECOVERY_AUTHORIZATION_TTL_SECONDS = 15n * 60n;
+
 const erc2612SettlementAbi = [
   {
     type: "function",
@@ -567,7 +569,7 @@ export function createEip3009Authorization(
     to: getAddress(action.to),
     value: action.amount,
     validAfter: now - 30n,
-    validBefore: now + 300n,
+    validBefore: now + RECOVERY_AUTHORIZATION_TTL_SECONDS,
     nonce: options.nonce ?? randomNonce(),
     domain: action.domain,
   };
@@ -688,7 +690,7 @@ export function createErc2612PermitAuthorization(
     spender: getAddress(action.to),
     value: action.amount,
     nonce: BigInt(action.nonce),
-    deadline: now + 300n,
+    deadline: now + RECOVERY_AUTHORIZATION_TTL_SECONDS,
     domain: action.domain,
   };
 }
@@ -824,7 +826,7 @@ export function createDaiPermitPairAuthorization(
     value: action.amount,
     allowNonce,
     revokeNonce: allowNonce + 1n,
-    expiry: now + 300n,
+    expiry: now + RECOVERY_AUTHORIZATION_TTL_SECONDS,
     domain: action.domain,
   };
 }
@@ -972,7 +974,7 @@ export function createErc4494PermitAuthorization(
     spender: getAddress(action.to),
     tokenId: BigInt(action.tokenId),
     nonce: BigInt(action.nonce),
-    deadline: now + 300n,
+    deadline: now + RECOVERY_AUTHORIZATION_TTL_SECONDS,
     domain: action.domain,
   };
 }
@@ -1059,6 +1061,38 @@ export async function requireOkxAtomicBatchCapability(
   }
 }
 
+export function recoveryAuthorizationExpiresAt(
+  signed: SignedRecoveryAuthorization,
+): bigint {
+  if (signed.standard === "ERC3009_RECEIVE_WITH_AUTHORIZATION") {
+    return signed.authorization.validBefore;
+  }
+  if (signed.standard === "DAI_PERMIT_ATOMIC_BATCH") {
+    return signed.authorization.expiry;
+  }
+  return signed.authorization.deadline;
+}
+
+export function assertRecoveryAuthorizationCurrent(
+  signed: SignedRecoveryAuthorization,
+  options: { now?: Date } = {},
+): void {
+  const now = BigInt(Math.floor((options.now ?? new Date()).getTime() / 1_000));
+  if (
+    signed.standard === "ERC3009_RECEIVE_WITH_AUTHORIZATION" &&
+    now <= signed.authorization.validAfter
+  ) {
+    throw new Error(
+      "The source authorization is not valid yet. Check the device clock and sign a fresh authorization.",
+    );
+  }
+  if (now >= recoveryAuthorizationExpiresAt(signed)) {
+    throw new Error(
+      "The source authorization expired before settlement. Switch back to the source account and sign a fresh authorization.",
+    );
+  }
+}
+
 export async function submitErc2612AtomicBatch(
   provider: OkxInjectedProvider,
   signed: SignedErc2612Permit,
@@ -1067,10 +1101,7 @@ export async function submitErc2612AtomicBatch(
   if (connectedAccount.toLowerCase() !== signed.authorization.spender.toLowerCase()) {
     throw new Error("Only the designated safe destination can submit this permit batch");
   }
-  const now = BigInt(Math.floor(Date.now() / 1_000));
-  if (now >= signed.authorization.deadline) {
-    throw new Error("The source permit has expired; create a fresh permit");
-  }
+  assertRecoveryAuthorizationCurrent(signed);
   const chainId = await provider.request({ method: "eth_chainId" });
   const expectedChainHex = rescueChainHex(signed.authorization.domain.chainId);
   if (typeof chainId !== "string" || chainId.toLowerCase() !== expectedChainHex) {
@@ -1109,10 +1140,7 @@ export async function submitDaiPermitAtomicBatch(
   if (signed.authorization.revokeNonce !== signed.authorization.allowNonce + 1n) {
     throw new Error("The DAI-style revoke nonce must immediately follow the allow nonce");
   }
-  const now = BigInt(Math.floor(Date.now() / 1_000));
-  if (now >= signed.authorization.expiry) {
-    throw new Error("The source DAI-style permits have expired; create fresh permits");
-  }
+  assertRecoveryAuthorizationCurrent(signed);
   const chainId = await provider.request({ method: "eth_chainId" });
   const expectedChainHex = rescueChainHex(signed.authorization.domain.chainId);
   if (typeof chainId !== "string" || chainId.toLowerCase() !== expectedChainHex) {
@@ -1149,10 +1177,7 @@ export async function submitErc4494AtomicBatch(
   if (connectedAccount.toLowerCase() !== signed.authorization.spender.toLowerCase()) {
     throw new Error("Only the designated safe destination can submit this NFT permit batch");
   }
-  const now = BigInt(Math.floor(Date.now() / 1_000));
-  if (now >= signed.authorization.deadline) {
-    throw new Error("The source NFT permit has expired; create a fresh permit");
-  }
+  assertRecoveryAuthorizationCurrent(signed);
   const chainId = await provider.request({ method: "eth_chainId" });
   const expectedChainHex = rescueChainHex(signed.authorization.domain.chainId);
   if (typeof chainId !== "string" || chainId.toLowerCase() !== expectedChainHex) {
@@ -1218,10 +1243,7 @@ export async function submitEip3009Settlement(
   if (connectedAccount.toLowerCase() !== signed.authorization.to.toLowerCase()) {
     throw new Error("Only the designated safe destination can submit this authorization");
   }
-  const now = BigInt(Math.floor(Date.now() / 1_000));
-  if (now <= signed.authorization.validAfter || now >= signed.authorization.validBefore) {
-    throw new Error("The source authorization is not currently valid; create a fresh authorization");
-  }
+  assertRecoveryAuthorizationCurrent(signed);
   const chainId = await provider.request({ method: "eth_chainId" });
   const expectedChainHex = rescueChainHex(signed.authorization.domain.chainId);
   if (typeof chainId !== "string" || chainId.toLowerCase() !== expectedChainHex) {
