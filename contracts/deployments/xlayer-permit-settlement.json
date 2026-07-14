@@ -1,0 +1,21 @@
+{
+  "warning": "UNAUDITED - DO NOT ENABLE FOR VALUABLE ASSETS UNTIL INDEPENDENT REVIEW",
+  "chainId": 196,
+  "chainName": "X Layer",
+  "factoryAddress": "0x4e59b44847b379578588920cA78FbF26c0B4956C",
+  "contractName": "SafeExitPermitSettlement",
+  "address": "0x964FDCfE0A0bCE568309f3f7D07ab08Fc8F93103",
+  "salt": "0x7f9c1392cac1a389cff84a0daf4b0e7f0fa39f22b66f4294b71eb537f9a0f032",
+  "initCodeHash": "0xa66e512529cdf6d4a53a59893da8d77b25b9582add7cf90d31f9707ee2e887db",
+  "expectedRuntimeHash": "0x27420eef3fdd6178099f4ae2dafb8b997eb3015776fda764d2b1a26b05e37113",
+  "expectedTemplateHash": "0x8ff1beb5ed9e44fb8b943a7aa2e12f61d1e3a433fa0cf12cf95a4e6295a40e71",
+  "actualRuntimeHash": "0x27420eef3fdd6178099f4ae2dafb8b997eb3015776fda764d2b1a26b05e37113",
+  "actualTemplateHash": "0x8ff1beb5ed9e44fb8b943a7aa2e12f61d1e3a433fa0cf12cf95a4e6295a40e71",
+  "behavior": {
+    "verified": true,
+    "reason": null
+  },
+  "status": "VERIFIED",
+  "observedAtBlock": "65293892",
+  "generatedAt": "2026-07-14T21:02:10.196Z"
+}

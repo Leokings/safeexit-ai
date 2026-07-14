@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { evmAddressSchema, type Incident, type RescuePlan, type WalletScan } from "@safeexit/shared";
+import {
+  getConfiguredPermitSettlementAddress,
+  PERMIT_KIND_ERC2612,
+  PERMIT_SETTLEMENT_NAME,
+  PERMIT_SETTLEMENT_VERSION,
+} from "@safeexit/adapters";
 
 import {
   AgentIncidentService,
@@ -21,13 +27,14 @@ const source = evmAddressSchema.parse("0x70997970C51812dc3A010C7d01b50e0d17dc79C
 const destination = evmAddressSchema.parse("0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65");
 const otherDestination = evmAddressSchema.parse("0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc");
 const token = evmAddressSchema.parse("0x5FbDB2315678afecb367f032d93F642f64180aa3");
+const settlementContract = getConfiguredPermitSettlementAddress(196)!;
 const planHash = `0x${"3".repeat(64)}`;
 const txHash = `0x${"a".repeat(64)}`;
 const now = "2026-07-12T10:00:00.000Z";
 
 const incident: Incident = {
   id: "incident:test",
-  chainId: 31_337,
+  chainId: 196,
   sourceAddress: source,
   destinationAddress: destination,
   status: "RECEIVED",
@@ -146,46 +153,78 @@ function signingPackage(overrides: Partial<SigningPackage> = {}): SigningPackage
     planId: plan.id,
     planHash,
     actionId: "action:transfer",
-    route: "ERC2612_PERMIT_ATOMIC_BATCH",
+    route: "ERC2612_PERMIT_SETTLEMENT",
     chainId: incident.chainId,
     sourceAddress: source,
     destinationAddress: destination,
     observedAtBlock: plan.observedAtBlock,
     expiresAt: "2026-07-12T10:04:00.000Z",
     tokenAddress: token,
+    settlementContract,
     amount: "100",
-    sourceSigningRequests: [{
-      id: "source-permit",
-      signer: source,
-      method: "EIP712",
-      rpcMethod: "eth_signTypedData_v4",
-      typedData: {
-        primaryType: "Permit",
-        types: {
-          EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
-          Permit: [...SIGNING_PACKAGE_EIP712_TYPES.ERC2612Permit],
-        },
-        domain: {
-          name: "Test Token",
-          version: "1",
-          chainId: incident.chainId,
-          verifyingContract: token,
-        },
-        message: {
-          owner: source,
-          spender: destination,
-          value: "100",
-          nonce: "0",
-          deadline: "1783850640",
+    sourceSigningRequests: [
+      {
+        id: "source-permit",
+        signer: source,
+        method: "EIP712",
+        rpcMethod: "eth_signTypedData_v4",
+        typedData: {
+          primaryType: "Permit",
+          types: {
+            EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+            Permit: [...SIGNING_PACKAGE_EIP712_TYPES.ERC2612Permit],
+          },
+          domain: {
+            name: "Test Token",
+            version: "1",
+            chainId: incident.chainId,
+            verifyingContract: token,
+          },
+          message: {
+            owner: source,
+            spender: settlementContract,
+            value: "100",
+            nonce: "0",
+            deadline: "1783850640",
+          },
         },
       },
-    }],
+      {
+        id: "source-rescue-authorization",
+        signer: source,
+        method: "EIP712",
+        rpcMethod: "eth_signTypedData_v4",
+        typedData: {
+          primaryType: "ERC20Rescue",
+          types: {
+            EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+            ERC20Rescue: [...SIGNING_PACKAGE_EIP712_TYPES.ERC20Rescue],
+          },
+          domain: {
+            name: PERMIT_SETTLEMENT_NAME,
+            version: PERMIT_SETTLEMENT_VERSION,
+            chainId: incident.chainId,
+            verifyingContract: settlementContract,
+          },
+          message: {
+            token,
+            owner: source,
+            destination,
+            amount: "100",
+            permitNonce: "0",
+            deadline: "1783850640",
+            rescueNonce: `0x${"9".repeat(64)}`,
+            permitKind: PERMIT_KIND_ERC2612,
+          },
+        },
+      },
+    ],
     destinationSettlement: {
       executor: destination,
       payer: "DESTINATION",
       assembly: "BUYER_LOCAL_RUNTIME",
-      atomicRequired: true,
-      operations: ["PERMIT_ERC2612", "TRANSFER_FROM_ERC20"],
+      atomicRequired: false,
+      operations: ["SETTLE_ERC2612"],
     },
     simulation: {
       resultId: "simulation:test",
@@ -227,7 +266,7 @@ function buyerReport(): BuyerExecutionReport {
     planId: plan.id,
     planHash,
     actionId: "action:transfer",
-    route: "ERC2612_PERMIT_ATOMIC_BATCH",
+    route: "ERC2612_PERMIT_SETTLEMENT",
     chainId: incident.chainId,
     sourceAddress: source,
     destinationAddress: destination,
@@ -346,7 +385,7 @@ describe("agent service lifecycle", () => {
     expect((await service.generatePlan("job:test")).status).toBe("PLAN_READY");
     expect((await service.simulatePlan("job:test")).status).toBe("WAITING_FOR_USER");
     expect((await service.getSigningPackage("job:test")).route).toBe(
-      "ERC2612_PERMIT_ATOMIC_BATCH",
+      "ERC2612_PERMIT_SETTLEMENT",
     );
     expect(await service.getDashboardUrl("job:test")).toBe(
       "http://localhost:3001/rescue/job%3Atest",
@@ -386,8 +425,8 @@ describe("agent service lifecycle", () => {
         executor: maliciousDestination,
         payer: "DESTINATION",
         assembly: "BUYER_LOCAL_RUNTIME",
-        atomicRequired: true,
-        operations: ["PERMIT_ERC2612", "TRANSFER_FROM_ERC20"],
+        atomicRequired: false,
+        operations: ["SETTLE_ERC2612"],
       },
     });
     const { service } = createService({ signingPackage: unsafe });

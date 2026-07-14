@@ -3,6 +3,12 @@ import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it } from "vitest";
 
 import {
+  erc20RescueTypes,
+  erc721RescueTypes,
+  getConfiguredPermitSettlementAddress,
+} from "@safeexit/adapters";
+
+import {
   assertRecoveryAuthorizationCurrent,
   connectOkxWallet,
   createDaiPermitPairAuthorization,
@@ -12,7 +18,6 @@ import {
   ensureRescueMainnet,
   ensureXLayerMainnet,
   getOkxConnectedAccount,
-  getOkxCallsStatus,
   getOkxProvider,
   receiptProvesCommittedTransfer,
   RECOVERY_AUTHORIZATION_TTL_SECONDS,
@@ -44,6 +49,7 @@ const source = sourceAccount.address;
 const destination = destinationAccount.address;
 const token = "0x9e29b3AADA05BF2d2c827Af80BD28dC0b9B4fb0c" as const;
 const collection = "0x3333333333333333333333333333333333333333" as const;
+const settlementContract = getConfiguredPermitSettlementAddress(196)!;
 
 const action = gaslessRescueActionSchema.parse({
   actionId: "action:test",
@@ -63,7 +69,7 @@ const action = gaslessRescueActionSchema.parse({
 
 const permitAction = gaslessRescueActionSchema.parse({
   actionId: "action:permit-test",
-  standard: "ERC2612_PERMIT_ATOMIC_BATCH",
+  standard: "ERC2612_PERMIT_SETTLEMENT",
   capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED",
   tokenAddress: token,
   from: source,
@@ -76,12 +82,13 @@ const permitAction = gaslessRescueActionSchema.parse({
     chainId: 196,
     verifyingContract: token,
   },
-  requiredWalletCapability: "ATOMIC_BATCH",
+  settlementContract,
+  requiredSignatures: 2,
 });
 
 const daiPermitAction = gaslessRescueActionSchema.parse({
   actionId: "action:dai-permit-test",
-  standard: "DAI_PERMIT_ATOMIC_BATCH",
+  standard: "DAI_PERMIT_SETTLEMENT",
   capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED",
   tokenAddress: token,
   from: source,
@@ -94,13 +101,13 @@ const daiPermitAction = gaslessRescueActionSchema.parse({
     chainId: 196,
     verifyingContract: token,
   },
-  requiredWalletCapability: "ATOMIC_BATCH",
-  requiredSignatures: 2,
+  settlementContract,
+  requiredSignatures: 3,
 });
 
 const nftPermitAction = gaslessRescueActionSchema.parse({
   actionId: "action:nft-permit-test",
-  standard: "ERC4494_PERMIT_ATOMIC_BATCH",
+  standard: "ERC4494_PERMIT_SETTLEMENT",
   capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED",
   collectionAddress: collection,
   from: source,
@@ -113,7 +120,8 @@ const nftPermitAction = gaslessRescueActionSchema.parse({
     chainId: 196,
     verifyingContract: collection,
   },
-  requiredWalletCapability: "ATOMIC_BATCH",
+  settlementContract,
+  requiredSignatures: 2,
 });
 
 const receiveWithAuthorizationTypes = {
@@ -160,7 +168,6 @@ class FakeProvider implements OkxInjectedProvider {
   readonly calls: { method: string; params?: readonly unknown[] }[] = [];
   chainId = "0x1";
   rejectSwitchWith4902 = false;
-  atomicStatus: "supported" | "ready" | "unsupported" = "supported";
 
   constructor(
     readonly account = sourceAccount,
@@ -198,15 +205,22 @@ class FakeProvider implements OkxInjectedProvider {
           chainId: number;
           verifyingContract: `0x${string}`;
         };
-        primaryType: "ReceiveWithAuthorization" | "Permit";
+        primaryType: "ReceiveWithAuthorization" | "Permit" | "ERC20Rescue" | "ERC721Rescue";
         message: {
+          token?: `0x${string}`;
+          collection?: `0x${string}`;
           from?: `0x${string}`;
           to?: `0x${string}`;
           owner?: `0x${string}`;
           holder?: `0x${string}`;
+          destination?: `0x${string}`;
           spender?: `0x${string}`;
+          amount?: string;
           value?: string;
           tokenId?: string;
+          permitNonce?: string;
+          rescueNonce?: `0x${string}`;
+          permitKind?: string;
           validAfter?: string;
           validBefore?: string;
           nonce: string;
@@ -215,6 +229,39 @@ class FakeProvider implements OkxInjectedProvider {
           allowed?: boolean;
         };
       };
+      if (payload.primaryType === "ERC20Rescue") {
+        return this.account.signTypedData({
+          domain: payload.domain,
+          types: erc20RescueTypes,
+          primaryType: "ERC20Rescue",
+          message: {
+            token: payload.message.token!,
+            owner: payload.message.owner!,
+            destination: payload.message.destination!,
+            amount: BigInt(payload.message.amount!),
+            permitNonce: BigInt(payload.message.permitNonce!),
+            deadline: BigInt(payload.message.deadline!),
+            rescueNonce: payload.message.rescueNonce!,
+            permitKind: Number(payload.message.permitKind!),
+          },
+        });
+      }
+      if (payload.primaryType === "ERC721Rescue") {
+        return this.account.signTypedData({
+          domain: payload.domain,
+          types: erc721RescueTypes,
+          primaryType: "ERC721Rescue",
+          message: {
+            collection: payload.message.collection!,
+            owner: payload.message.owner!,
+            destination: payload.message.destination!,
+            tokenId: BigInt(payload.message.tokenId!),
+            permitNonce: BigInt(payload.message.permitNonce!),
+            deadline: BigInt(payload.message.deadline!),
+            rescueNonce: payload.message.rescueNonce!,
+          },
+        });
+      }
       if (payload.primaryType === "Permit") {
         if (payload.message.tokenId !== undefined) {
           return this.account.signTypedData({
@@ -269,21 +316,6 @@ class FakeProvider implements OkxInjectedProvider {
           validBefore: BigInt(payload.message.validBefore!),
         },
       });
-    }
-    if (request.method === "wallet_getCapabilities") {
-      const requestedChains = request.params?.[1] as string[];
-      return Object.fromEntries(
-        requestedChains.map((chainId) => [chainId, { atomic: { status: this.atomicStatus } }]),
-      );
-    }
-    if (request.method === "wallet_sendCalls") {
-      return { id: "0x1234" };
-    }
-    if (request.method === "wallet_getCallsStatus") {
-      return {
-        status: 200,
-        receipts: [{ transactionHash: this.transactionHash }],
-      };
     }
     if (request.method === "eth_sendTransaction") {
       return this.transactionHash;
@@ -515,14 +547,15 @@ describe("OKX injected wallet guardrails", () => {
     expect(settlementProvider.calls).toHaveLength(0);
   });
 
-  it("creates and signs an ERC-2612 permit to the destination", async () => {
-    if (permitAction.standard !== "ERC2612_PERMIT_ATOMIC_BATCH") {
+  it("creates an ERC-2612 permit plus a destination-bound rescue authorization", async () => {
+    if (permitAction.standard !== "ERC2612_PERMIT_SETTLEMENT") {
       throw new Error("Expected an ERC-2612 action fixture");
     }
     const authorization = createErc2612PermitAuthorization(permitAction, {
       now: new Date("2026-07-13T12:00:00.000Z"),
     });
-    expect(authorization.spender).toBe(destination);
+    expect(authorization.spender).toBe(settlementContract);
+    expect(authorization.destination).toBe(destination);
     expect(authorization.nonce).toBe(7n);
     expect(authorization.deadline).toBe(1_783_944_900n);
 
@@ -530,12 +563,15 @@ describe("OKX injected wallet guardrails", () => {
     const signed = await signErc2612Permit(provider, permitAction, source, {
       now: new Date("2026-07-13T12:00:00.000Z"),
     });
-    expect(signed.permitData.startsWith("0xd505accf")).toBe(true);
-    expect(signed.transferFromData.startsWith("0x23b872dd")).toBe(true);
+    expect(provider.calls.map((call) => call.method)).toEqual([
+      "eth_signTypedData_v4",
+      "eth_signTypedData_v4",
+    ]);
+    expect(signed.settlementData).toMatch(/^0x[a-fA-F0-9]+$/);
   });
 
-  it("requires destination atomic support for permit settlement", async () => {
-    if (permitAction.standard !== "ERC2612_PERMIT_ATOMIC_BATCH") {
+  it("submits ERC-2612 settlement as one ordinary destination transaction", async () => {
+    if (permitAction.standard !== "ERC2612_PERMIT_SETTLEMENT") {
       throw new Error("Expected an ERC-2612 action fixture");
     }
     const sourceProvider = new FakeProvider();
@@ -545,52 +581,49 @@ describe("OKX injected wallet guardrails", () => {
 
     await expect(
       submitErc2612AtomicBatch(destinationProvider, signed, destination),
-    ).resolves.toBe("0x1234");
+    ).resolves.toBe(`0x${"a".repeat(64)}`);
     expect(destinationProvider.calls.map((call) => call.method)).toEqual([
       "eth_chainId",
       "eth_accounts",
-      "wallet_getCapabilities",
-      "wallet_sendCalls",
+      "eth_sendTransaction",
     ]);
-    const sendRequest = destinationProvider.calls[3];
+    const sendRequest = destinationProvider.calls[2];
     expect(sendRequest?.params).toEqual([expect.objectContaining({
       from: destination,
-      chainId: "0xc4",
-      atomicRequired: true,
-      calls: [
-        { to: signed.authorization.tokenAddress, data: signed.permitData, value: "0x0" },
-        { to: signed.authorization.tokenAddress, data: signed.transferFromData, value: "0x0" },
-      ],
+      to: settlementContract,
+      data: signed.settlementData,
+      value: "0x0",
     })]);
   });
 
-  it("blocks permit settlement when atomic batching is unavailable", async () => {
-    if (permitAction.standard !== "ERC2612_PERMIT_ATOMIC_BATCH") {
+  it("does not depend on wallet atomic-batch capability", async () => {
+    if (permitAction.standard !== "ERC2612_PERMIT_SETTLEMENT") {
       throw new Error("Expected an ERC-2612 action fixture");
     }
     const signed = await signErc2612Permit(new FakeProvider(), permitAction, source);
     const destinationProvider = new FakeProvider(destinationAccount);
     destinationProvider.chainId = "0xc4";
-    destinationProvider.atomicStatus = "unsupported";
-
-    await expect(
-      submitErc2612AtomicBatch(destinationProvider, signed, destination),
-    ).rejects.toThrow("does not report atomic batch support");
+    await expect(submitErc2612AtomicBatch(
+      destinationProvider,
+      signed,
+      destination,
+    )).resolves.toBe(`0x${"a".repeat(64)}`);
     expect(destinationProvider.calls.map((call) => call.method)).toEqual([
       "eth_chainId",
       "eth_accounts",
-      "wallet_getCapabilities",
+      "eth_sendTransaction",
     ]);
   });
 
   it("creates consecutive DAI-style allow and revoke authorizations", async () => {
-    if (daiPermitAction.standard !== "DAI_PERMIT_ATOMIC_BATCH") {
+    if (daiPermitAction.standard !== "DAI_PERMIT_SETTLEMENT") {
       throw new Error("Expected a DAI-style action fixture");
     }
     const authorization = createDaiPermitPairAuthorization(daiPermitAction, {
       now: new Date("2026-07-13T12:00:00.000Z"),
     });
-    expect(authorization.spender).toBe(destination);
+    expect(authorization.spender).toBe(settlementContract);
+    expect(authorization.destination).toBe(destination);
     expect(authorization.allowNonce).toBe(11n);
     expect(authorization.revokeNonce).toBe(12n);
     expect(authorization.expiry).toBe(1_783_944_900n);
@@ -602,14 +635,13 @@ describe("OKX injected wallet guardrails", () => {
     expect(provider.calls.map((call) => call.method)).toEqual([
       "eth_signTypedData_v4",
       "eth_signTypedData_v4",
+      "eth_signTypedData_v4",
     ]);
-    expect(signed.allowPermitData.startsWith("0x8fcbaf0c")).toBe(true);
-    expect(signed.transferFromData.startsWith("0x23b872dd")).toBe(true);
-    expect(signed.revokePermitData.startsWith("0x8fcbaf0c")).toBe(true);
+    expect(signed.settlementData).toMatch(/^0x[a-fA-F0-9]+$/);
   });
 
   it("atomically grants, pulls, and revokes a DAI-style allowance", async () => {
-    if (daiPermitAction.standard !== "DAI_PERMIT_ATOMIC_BATCH") {
+    if (daiPermitAction.standard !== "DAI_PERMIT_SETTLEMENT") {
       throw new Error("Expected a DAI-style action fixture");
     }
     const signed = await signDaiPermitPair(
@@ -622,35 +654,24 @@ describe("OKX injected wallet guardrails", () => {
 
     await expect(
       submitDaiPermitAtomicBatch(destinationProvider, signed, destination),
-    ).resolves.toBe("0x1234");
-    expect(destinationProvider.calls[3]?.params).toEqual([expect.objectContaining({
+    ).resolves.toBe(`0x${"a".repeat(64)}`);
+    expect(destinationProvider.calls[2]?.params).toEqual([expect.objectContaining({
       from: destination,
-      chainId: "0xc4",
-      atomicRequired: true,
-      calls: [
-        { to: signed.authorization.tokenAddress, data: signed.allowPermitData, value: "0x0" },
-        { to: signed.authorization.tokenAddress, data: signed.transferFromData, value: "0x0" },
-        { to: signed.authorization.tokenAddress, data: signed.revokePermitData, value: "0x0" },
-      ],
+      to: settlementContract,
+      data: signed.settlementData,
+      value: "0x0",
     })]);
   });
 
-  it("parses confirmed OKX atomic call receipts", async () => {
-    const provider = new FakeProvider(destinationAccount);
-    await expect(getOkxCallsStatus(provider, "0x1234")).resolves.toEqual({
-      status: 200,
-      transactionHashes: [`0x${"a".repeat(64)}`],
-    });
-  });
-
   it("signs an ERC-4494 permit that binds the NFT and destination", async () => {
-    if (nftPermitAction.standard !== "ERC4494_PERMIT_ATOMIC_BATCH") {
+    if (nftPermitAction.standard !== "ERC4494_PERMIT_SETTLEMENT") {
       throw new Error("Expected an ERC-4494 action fixture");
     }
     const authorization = createErc4494PermitAuthorization(nftPermitAction, {
       now: new Date("2026-07-13T12:00:00.000Z"),
     });
-    expect(authorization.spender).toBe(destination);
+    expect(authorization.spender).toBe(settlementContract);
+    expect(authorization.destination).toBe(destination);
     expect(authorization.tokenId).toBe(42n);
     expect(authorization.nonce).toBe(3n);
 
@@ -660,12 +681,11 @@ describe("OKX injected wallet guardrails", () => {
       source,
       { now: new Date("2026-07-13T12:00:00.000Z") },
     );
-    expect(signed.permitData.startsWith("0x745a41bc")).toBe(true);
-    expect(signed.transferFromData.startsWith("0x23b872dd")).toBe(true);
+    expect(signed.settlementData).toMatch(/^0x[a-fA-F0-9]+$/);
   });
 
-  it("submits NFT permit and transfer as one destination-paid atomic batch", async () => {
-    if (nftPermitAction.standard !== "ERC4494_PERMIT_ATOMIC_BATCH") {
+  it("submits NFT permit settlement as one destination-paid transaction", async () => {
+    if (nftPermitAction.standard !== "ERC4494_PERMIT_SETTLEMENT") {
       throw new Error("Expected an ERC-4494 action fixture");
     }
     const signed = await signErc4494Permit(new FakeProvider(), nftPermitAction, source);
@@ -674,18 +694,17 @@ describe("OKX injected wallet guardrails", () => {
 
     await expect(
       submitErc4494AtomicBatch(destinationProvider, signed, destination),
-    ).resolves.toBe("0x1234");
-    expect(destinationProvider.calls[3]?.params).toEqual([expect.objectContaining({
-      atomicRequired: true,
-      calls: [
-        { to: collection, data: signed.permitData, value: "0x0" },
-        { to: collection, data: signed.transferFromData, value: "0x0" },
-      ],
+    ).resolves.toBe(`0x${"a".repeat(64)}`);
+    expect(destinationProvider.calls[2]?.params).toEqual([expect.objectContaining({
+      from: destination,
+      to: settlementContract,
+      data: signed.settlementData,
+      value: "0x0",
     })]);
   });
 
   it("rejects submission if the active destination account changed", async () => {
-    if (permitAction.standard !== "ERC2612_PERMIT_ATOMIC_BATCH") {
+    if (permitAction.standard !== "ERC2612_PERMIT_SETTLEMENT") {
       throw new Error("Expected an ERC-2612 action fixture");
     }
     const signed = await signErc2612Permit(new FakeProvider(), permitAction, source);
@@ -702,7 +721,7 @@ describe("OKX injected wallet guardrails", () => {
   });
 
   it("requires an exact committed transfer event before reporting success", async () => {
-    if (permitAction.standard !== "ERC2612_PERMIT_ATOMIC_BATCH") {
+    if (permitAction.standard !== "ERC2612_PERMIT_SETTLEMENT") {
       throw new Error("Expected an ERC-2612 action fixture");
     }
     const signed = await signErc2612Permit(new FakeProvider(), permitAction, source);
@@ -745,7 +764,7 @@ describe("mainnet preflight request", () => {
   });
 
   it("fails closed when a reviewed route commitment changes", () => {
-    if (permitAction.standard !== "ERC2612_PERMIT_ATOMIC_BATCH") {
+    if (permitAction.standard !== "ERC2612_PERMIT_SETTLEMENT") {
       throw new Error("Expected an ERC-2612 action fixture");
     }
     const reviewed = gaslessRouteKey(permitAction);

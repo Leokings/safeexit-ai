@@ -461,7 +461,7 @@ export class AgentIncidentService {
     if (packageExpiry > simulationExpiry || packageExpiry <= this.clock().getTime()) {
       throw new Error("Signing package must expire before its live simulation");
     }
-    if (value.route === "ERC4494_PERMIT_ATOMIC_BATCH") {
+    if (value.route === "ERC4494_PERMIT_SETTLEMENT") {
       if (
         action.actionType !== "TRANSFER_ERC721" ||
         value.collectionAddress.toLowerCase() !== action.parameters.collectionAddress.toLowerCase() ||

@@ -9,6 +9,15 @@ import {
 } from "viem";
 
 import {
+  erc20RescueTypes,
+  erc721RescueTypes,
+  PERMIT_KIND_DAI,
+  PERMIT_KIND_ERC2612,
+  PERMIT_SETTLEMENT_NAME,
+  PERMIT_SETTLEMENT_VERSION,
+  permitSettlementAbi,
+} from "@safeexit/adapters";
+import {
   getRescueMainnetChainConfig,
   isRescueMainnetChainId,
 } from "@safeexit/chain";
@@ -75,18 +84,21 @@ export type Erc2612PermitAuthorization = {
   tokenAddress: `0x${string}`;
   owner: `0x${string}`;
   spender: `0x${string}`;
+  destination: `0x${string}`;
+  settlementContract: `0x${string}`;
   value: string;
   nonce: bigint;
   deadline: bigint;
+  rescueNonce: Hex;
   domain: Erc2612RescueAction["domain"];
 };
 
 export type SignedErc2612Permit = {
-  standard: "ERC2612_PERMIT_ATOMIC_BATCH";
+  standard: "ERC2612_PERMIT_SETTLEMENT";
   authorization: Erc2612PermitAuthorization;
   signature: Hex;
-  permitData: Hex;
-  transferFromData: Hex;
+  rescueSignature: Hex;
+  settlementData: Hex;
 };
 
 export type DaiPermitPairAuthorization = {
@@ -94,21 +106,23 @@ export type DaiPermitPairAuthorization = {
   tokenAddress: `0x${string}`;
   holder: `0x${string}`;
   spender: `0x${string}`;
+  destination: `0x${string}`;
+  settlementContract: `0x${string}`;
   value: string;
   allowNonce: bigint;
   revokeNonce: bigint;
   expiry: bigint;
+  rescueNonce: Hex;
   domain: DaiPermitRescueAction["domain"];
 };
 
 export type SignedDaiPermitPair = {
-  standard: "DAI_PERMIT_ATOMIC_BATCH";
+  standard: "DAI_PERMIT_SETTLEMENT";
   authorization: DaiPermitPairAuthorization;
   allowSignature: Hex;
   revokeSignature: Hex;
-  allowPermitData: Hex;
-  transferFromData: Hex;
-  revokePermitData: Hex;
+  rescueSignature: Hex;
+  settlementData: Hex;
 };
 
 export type Erc4494PermitAuthorization = {
@@ -116,18 +130,21 @@ export type Erc4494PermitAuthorization = {
   collectionAddress: `0x${string}`;
   owner: `0x${string}`;
   spender: `0x${string}`;
+  destination: `0x${string}`;
+  settlementContract: `0x${string}`;
   tokenId: bigint;
   nonce: bigint;
   deadline: bigint;
+  rescueNonce: Hex;
   domain: Erc4494RescueAction["domain"];
 };
 
 export type SignedErc4494Permit = {
-  standard: "ERC4494_PERMIT_ATOMIC_BATCH";
+  standard: "ERC4494_PERMIT_SETTLEMENT";
   authorization: Erc4494PermitAuthorization;
   signature: Hex;
-  permitData: Hex;
-  transferFromData: Hex;
+  rescueSignature: Hex;
+  settlementData: Hex;
 };
 
 export type SignedRecoveryAuthorization =
@@ -135,11 +152,6 @@ export type SignedRecoveryAuthorization =
   | SignedErc2612Permit
   | SignedDaiPermitPair
   | SignedErc4494Permit;
-
-export type OkxCallsStatus = {
-  status: 100 | 200 | 400 | 500;
-  transactionHashes: Hex[];
-};
 
 export type SettlementReceiptLog = {
   address: `0x${string}`;
@@ -215,91 +227,6 @@ const nftPermitTypes = {
 
 export const RECOVERY_AUTHORIZATION_TTL_SECONDS = 15n * 60n;
 
-const erc2612SettlementAbi = [
-  {
-    type: "function",
-    name: "permit",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "owner", type: "address" },
-      { name: "spender", type: "address" },
-      { name: "value", type: "uint256" },
-      { name: "deadline", type: "uint256" },
-      { name: "v", type: "uint8" },
-      { name: "r", type: "bytes32" },
-      { name: "s", type: "bytes32" },
-    ],
-    outputs: [],
-  },
-  {
-    type: "function",
-    name: "transferFrom",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "from", type: "address" },
-      { name: "to", type: "address" },
-      { name: "value", type: "uint256" },
-    ],
-    outputs: [{ name: "", type: "bool" }],
-  },
-] as const;
-
-const daiPermitSettlementAbi = [
-  {
-    type: "function",
-    name: "permit",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "holder", type: "address" },
-      { name: "spender", type: "address" },
-      { name: "nonce", type: "uint256" },
-      { name: "expiry", type: "uint256" },
-      { name: "allowed", type: "bool" },
-      { name: "v", type: "uint8" },
-      { name: "r", type: "bytes32" },
-      { name: "s", type: "bytes32" },
-    ],
-    outputs: [],
-  },
-  {
-    type: "function",
-    name: "transferFrom",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "from", type: "address" },
-      { name: "to", type: "address" },
-      { name: "value", type: "uint256" },
-    ],
-    outputs: [{ name: "", type: "bool" }],
-  },
-] as const;
-
-const erc4494SettlementAbi = [
-  {
-    type: "function",
-    name: "permit",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "spender", type: "address" },
-      { name: "tokenId", type: "uint256" },
-      { name: "deadline", type: "uint256" },
-      { name: "signature", type: "bytes" },
-    ],
-    outputs: [],
-  },
-  {
-    type: "function",
-    name: "transferFrom",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "from", type: "address" },
-      { name: "to", type: "address" },
-      { name: "tokenId", type: "uint256" },
-    ],
-    outputs: [],
-  },
-] as const;
-
 const erc20TransferEventAbi = [{
   type: "event",
   name: "Transfer",
@@ -333,18 +260,6 @@ function parseAccount(value: unknown): `0x${string}` {
     throw new Error("OKX Wallet did not return a valid EVM account");
   }
   return getAddress(value[0]);
-}
-
-function parseCallsId(value: unknown): string {
-  const id = typeof value === "string"
-    ? value
-    : value && typeof value === "object" && "id" in value
-      ? value.id
-      : undefined;
-  if (typeof id !== "string" || !/^0x[a-fA-F0-9]{2,8192}$/.test(id)) {
-    throw new Error("OKX Wallet did not return a valid atomic call identifier");
-  }
-  return id;
 }
 
 function sameAddress(left: string, right: string): boolean {
@@ -669,6 +584,57 @@ function erc2612TypedDataRpcPayload(authorization: Erc2612PermitAuthorization): 
   });
 }
 
+function erc20RescueTypedDataFor(
+  authorization: Erc2612PermitAuthorization | DaiPermitPairAuthorization,
+) {
+  const isErc2612 = "owner" in authorization;
+  return {
+    domain: {
+      name: PERMIT_SETTLEMENT_NAME,
+      version: PERMIT_SETTLEMENT_VERSION,
+      chainId: authorization.domain.chainId,
+      verifyingContract: getAddress(authorization.settlementContract),
+    },
+    types: erc20RescueTypes,
+    primaryType: "ERC20Rescue" as const,
+    message: {
+      token: authorization.tokenAddress,
+      owner: isErc2612 ? authorization.owner : authorization.holder,
+      destination: authorization.destination,
+      amount: BigInt(authorization.value),
+      permitNonce: isErc2612 ? authorization.nonce : authorization.allowNonce,
+      deadline: isErc2612 ? authorization.deadline : authorization.expiry,
+      rescueNonce: authorization.rescueNonce,
+      permitKind: isErc2612 ? PERMIT_KIND_ERC2612 : PERMIT_KIND_DAI,
+    },
+  };
+}
+
+function erc20RescueTypedDataRpcPayload(
+  authorization: Erc2612PermitAuthorization | DaiPermitPairAuthorization,
+): string {
+  const typedData = erc20RescueTypedDataFor(authorization);
+  return JSON.stringify({
+    ...typedData,
+    types: {
+      EIP712Domain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "uint256" },
+        { name: "verifyingContract", type: "address" },
+      ],
+      ...typedData.types,
+    },
+    message: {
+      ...typedData.message,
+      amount: typedData.message.amount.toString(),
+      permitNonce: typedData.message.permitNonce.toString(),
+      deadline: typedData.message.deadline.toString(),
+      permitKind: typedData.message.permitKind.toString(),
+    },
+  });
+}
+
 export function createErc2612PermitAuthorization(
   action: Erc2612RescueAction,
   options: { now?: Date } = {},
@@ -687,10 +653,13 @@ export function createErc2612PermitAuthorization(
     actionId: action.actionId,
     tokenAddress: getAddress(action.tokenAddress),
     owner: getAddress(action.from),
-    spender: getAddress(action.to),
+    spender: getAddress(action.settlementContract),
+    destination: getAddress(action.to),
+    settlementContract: getAddress(action.settlementContract),
     value: action.amount,
     nonce: BigInt(action.nonce),
     deadline: now + RECOVERY_AUTHORIZATION_TTL_SECONDS,
+    rescueNonce: randomNonce(),
     domain: action.domain,
   };
 }
@@ -698,29 +667,22 @@ export function createErc2612PermitAuthorization(
 export function encodeErc2612PermitSettlement(
   authorization: Erc2612PermitAuthorization,
   signature: Hex,
-): Pick<SignedErc2612Permit, "permitData" | "transferFromData"> {
-  const { v, r, s } = signatureParts(signature);
+  rescueSignature: Hex,
+): Pick<SignedErc2612Permit, "settlementData"> {
   return {
-    permitData: encodeFunctionData({
-      abi: erc2612SettlementAbi,
-      functionName: "permit",
+    settlementData: encodeFunctionData({
+      abi: permitSettlementAbi,
+      functionName: "settleERC2612",
       args: [
+        authorization.tokenAddress,
         authorization.owner,
-        authorization.spender,
+        authorization.destination,
         BigInt(authorization.value),
+        authorization.nonce,
         authorization.deadline,
-        v,
-        r,
-        s,
-      ],
-    }),
-    transferFromData: encodeFunctionData({
-      abi: erc2612SettlementAbi,
-      functionName: "transferFrom",
-      args: [
-        authorization.owner,
-        authorization.spender,
-        BigInt(authorization.value),
+        authorization.rescueNonce,
+        signatureParts(signature),
+        signatureParts(rescueSignature),
       ],
     }),
   };
@@ -748,11 +710,24 @@ export async function signErc2612Permit(
   if (recovered.toLowerCase() !== authorization.owner.toLowerCase()) {
     throw new Error("The permit signature does not recover to the reported source");
   }
+  const rescueSignature = await provider.request({
+    method: "eth_signTypedData_v4",
+    params: [connectedAccount, erc20RescueTypedDataRpcPayload(authorization)],
+  });
+  assertSignature(rescueSignature);
+  const rescueSigner = await recoverTypedDataAddress({
+    ...erc20RescueTypedDataFor(authorization),
+    signature: rescueSignature,
+  });
+  if (rescueSigner.toLowerCase() !== authorization.owner.toLowerCase()) {
+    throw new Error("The rescue authorization does not recover to the reported source");
+  }
   return {
-    standard: "ERC2612_PERMIT_ATOMIC_BATCH",
+    standard: "ERC2612_PERMIT_SETTLEMENT",
     authorization,
     signature: result,
-    ...encodeErc2612PermitSettlement(authorization, result),
+    rescueSignature,
+    ...encodeErc2612PermitSettlement(authorization, result, rescueSignature),
   };
 }
 
@@ -822,50 +797,41 @@ export function createDaiPermitPairAuthorization(
     actionId: action.actionId,
     tokenAddress: getAddress(action.tokenAddress),
     holder: getAddress(action.from),
-    spender: getAddress(action.to),
+    spender: getAddress(action.settlementContract),
+    destination: getAddress(action.to),
+    settlementContract: getAddress(action.settlementContract),
     value: action.amount,
     allowNonce,
     revokeNonce: allowNonce + 1n,
     expiry: now + RECOVERY_AUTHORIZATION_TTL_SECONDS,
+    rescueNonce: randomNonce(),
     domain: action.domain,
   };
-}
-
-function encodeDaiPermitCall(
-  authorization: DaiPermitPairAuthorization,
-  allowed: boolean,
-  signature: Hex,
-): Hex {
-  const { v, r, s } = signatureParts(signature);
-  return encodeFunctionData({
-    abi: daiPermitSettlementAbi,
-    functionName: "permit",
-    args: [
-      authorization.holder,
-      authorization.spender,
-      allowed ? authorization.allowNonce : authorization.revokeNonce,
-      authorization.expiry,
-      allowed,
-      v,
-      r,
-      s,
-    ],
-  });
 }
 
 export function encodeDaiPermitSettlement(
   authorization: DaiPermitPairAuthorization,
   allowSignature: Hex,
   revokeSignature: Hex,
-): Pick<SignedDaiPermitPair, "allowPermitData" | "transferFromData" | "revokePermitData"> {
+  rescueSignature: Hex,
+): Pick<SignedDaiPermitPair, "settlementData"> {
   return {
-    allowPermitData: encodeDaiPermitCall(authorization, true, allowSignature),
-    transferFromData: encodeFunctionData({
-      abi: daiPermitSettlementAbi,
-      functionName: "transferFrom",
-      args: [authorization.holder, authorization.spender, BigInt(authorization.value)],
+    settlementData: encodeFunctionData({
+      abi: permitSettlementAbi,
+      functionName: "settleDaiPermit",
+      args: [
+        authorization.tokenAddress,
+        authorization.holder,
+        authorization.destination,
+        BigInt(authorization.value),
+        authorization.allowNonce,
+        authorization.expiry,
+        authorization.rescueNonce,
+        signatureParts(allowSignature),
+        signatureParts(revokeSignature),
+        signatureParts(rescueSignature),
+      ],
     }),
-    revokePermitData: encodeDaiPermitCall(authorization, false, revokeSignature),
   };
 }
 
@@ -903,12 +869,30 @@ export async function signDaiPermitPair(
   if (revokeSigner.toLowerCase() !== authorization.holder.toLowerCase()) {
     throw new Error("The DAI-style revoke signature does not recover to the reported source");
   }
+  const rescueSignature = await provider.request({
+    method: "eth_signTypedData_v4",
+    params: [connectedAccount, erc20RescueTypedDataRpcPayload(authorization)],
+  });
+  assertSignature(rescueSignature);
+  const rescueSigner = await recoverTypedDataAddress({
+    ...erc20RescueTypedDataFor(authorization),
+    signature: rescueSignature,
+  });
+  if (rescueSigner.toLowerCase() !== authorization.holder.toLowerCase()) {
+    throw new Error("The rescue authorization does not recover to the reported source");
+  }
   return {
-    standard: "DAI_PERMIT_ATOMIC_BATCH",
+    standard: "DAI_PERMIT_SETTLEMENT",
     authorization,
     allowSignature,
     revokeSignature,
-    ...encodeDaiPermitSettlement(authorization, allowSignature, revokeSignature),
+    rescueSignature,
+    ...encodeDaiPermitSettlement(
+      authorization,
+      allowSignature,
+      revokeSignature,
+      rescueSignature,
+    ),
   };
 }
 
@@ -953,6 +937,52 @@ function erc4494TypedDataRpcPayload(authorization: Erc4494PermitAuthorization): 
   });
 }
 
+function erc721RescueTypedDataFor(authorization: Erc4494PermitAuthorization) {
+  return {
+    domain: {
+      name: PERMIT_SETTLEMENT_NAME,
+      version: PERMIT_SETTLEMENT_VERSION,
+      chainId: authorization.domain.chainId,
+      verifyingContract: getAddress(authorization.settlementContract),
+    },
+    types: erc721RescueTypes,
+    primaryType: "ERC721Rescue" as const,
+    message: {
+      collection: authorization.collectionAddress,
+      owner: authorization.owner,
+      destination: authorization.destination,
+      tokenId: authorization.tokenId,
+      permitNonce: authorization.nonce,
+      deadline: authorization.deadline,
+      rescueNonce: authorization.rescueNonce,
+    },
+  };
+}
+
+function erc721RescueTypedDataRpcPayload(
+  authorization: Erc4494PermitAuthorization,
+): string {
+  const typedData = erc721RescueTypedDataFor(authorization);
+  return JSON.stringify({
+    ...typedData,
+    types: {
+      EIP712Domain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "uint256" },
+        { name: "verifyingContract", type: "address" },
+      ],
+      ...typedData.types,
+    },
+    message: {
+      ...typedData.message,
+      tokenId: typedData.message.tokenId.toString(),
+      permitNonce: typedData.message.permitNonce.toString(),
+      deadline: typedData.message.deadline.toString(),
+    },
+  });
+}
+
 export function createErc4494PermitAuthorization(
   action: Erc4494RescueAction,
   options: { now?: Date } = {},
@@ -971,10 +1001,13 @@ export function createErc4494PermitAuthorization(
     actionId: action.actionId,
     collectionAddress: getAddress(action.collectionAddress),
     owner: getAddress(action.from),
-    spender: getAddress(action.to),
+    spender: getAddress(action.settlementContract),
+    destination: getAddress(action.to),
+    settlementContract: getAddress(action.settlementContract),
     tokenId: BigInt(action.tokenId),
     nonce: BigInt(action.nonce),
     deadline: now + RECOVERY_AUTHORIZATION_TTL_SECONDS,
+    rescueNonce: randomNonce(),
     domain: action.domain,
   };
 }
@@ -982,23 +1015,24 @@ export function createErc4494PermitAuthorization(
 export function encodeErc4494PermitSettlement(
   authorization: Erc4494PermitAuthorization,
   signature: Hex,
-): Pick<SignedErc4494Permit, "permitData" | "transferFromData"> {
+  rescueSignature: Hex,
+): Pick<SignedErc4494Permit, "settlementData"> {
   assertSignature(signature);
   return {
-    permitData: encodeFunctionData({
-      abi: erc4494SettlementAbi,
-      functionName: "permit",
+    settlementData: encodeFunctionData({
+      abi: permitSettlementAbi,
+      functionName: "settleERC4494",
       args: [
-        authorization.spender,
+        authorization.collectionAddress,
+        authorization.owner,
+        authorization.destination,
         authorization.tokenId,
+        authorization.nonce,
         authorization.deadline,
+        authorization.rescueNonce,
         signature,
+        signatureParts(rescueSignature),
       ],
-    }),
-    transferFromData: encodeFunctionData({
-      abi: erc4494SettlementAbi,
-      functionName: "transferFrom",
-      args: [authorization.owner, authorization.spender, authorization.tokenId],
     }),
   };
 }
@@ -1025,40 +1059,25 @@ export async function signErc4494Permit(
   if (recovered.toLowerCase() !== authorization.owner.toLowerCase()) {
     throw new Error("The NFT permit signature does not recover to the reported source");
   }
+  const rescueSignature = await provider.request({
+    method: "eth_signTypedData_v4",
+    params: [connectedAccount, erc721RescueTypedDataRpcPayload(authorization)],
+  });
+  assertSignature(rescueSignature);
+  const rescueSigner = await recoverTypedDataAddress({
+    ...erc721RescueTypedDataFor(authorization),
+    signature: rescueSignature,
+  });
+  if (rescueSigner.toLowerCase() !== authorization.owner.toLowerCase()) {
+    throw new Error("The NFT rescue authorization does not recover to the reported source");
+  }
   return {
-    standard: "ERC4494_PERMIT_ATOMIC_BATCH",
+    standard: "ERC4494_PERMIT_SETTLEMENT",
     authorization,
     signature: result,
-    ...encodeErc4494PermitSettlement(authorization, result),
+    rescueSignature,
+    ...encodeErc4494PermitSettlement(authorization, result, rescueSignature),
   };
-}
-
-export async function requireOkxAtomicBatchCapability(
-  provider: OkxInjectedProvider,
-  account: `0x${string}`,
-  chainId: number,
-): Promise<void> {
-  const expectedChainHex = rescueChainHex(chainId);
-  const chain = getRescueMainnetChainConfig(chainId).chain;
-  const result = await provider.request({
-    method: "wallet_getCapabilities",
-    params: [account, [expectedChainHex]],
-  });
-  if (!result || typeof result !== "object") {
-    throw new Error("OKX Wallet did not return atomic batch capabilities");
-  }
-  const capabilities = Object.entries(result).find(
-    ([reportedChainId]) => reportedChainId.toLowerCase() === expectedChainHex,
-  )?.[1];
-  const atomicStatus =
-    capabilities && typeof capabilities === "object" && "atomic" in capabilities
-      ? (capabilities.atomic as { status?: unknown }).status
-      : undefined;
-  if (atomicStatus !== "supported" && atomicStatus !== "ready") {
-    throw new Error(
-      `OKX Wallet does not report atomic batch support on ${chain.name}`,
-    );
-  }
 }
 
 export function recoveryAuthorizationExpiresAt(
@@ -1067,7 +1086,7 @@ export function recoveryAuthorizationExpiresAt(
   if (signed.standard === "ERC3009_RECEIVE_WITH_AUTHORIZATION") {
     return signed.authorization.validBefore;
   }
-  if (signed.standard === "DAI_PERMIT_ATOMIC_BATCH") {
+  if (signed.standard === "DAI_PERMIT_SETTLEMENT") {
     return signed.authorization.expiry;
   }
   return signed.authorization.deadline;
@@ -1097,9 +1116,9 @@ export async function submitErc2612AtomicBatch(
   provider: OkxInjectedProvider,
   signed: SignedErc2612Permit,
   connectedAccount: `0x${string}`,
-): Promise<string> {
-  if (connectedAccount.toLowerCase() !== signed.authorization.spender.toLowerCase()) {
-    throw new Error("Only the designated safe destination can submit this permit batch");
+): Promise<Hex> {
+  if (connectedAccount.toLowerCase() !== signed.authorization.destination.toLowerCase()) {
+    throw new Error("Only the designated safe destination can submit this settlement");
   }
   assertRecoveryAuthorizationCurrent(signed);
   const chainId = await provider.request({ method: "eth_chainId" });
@@ -1108,34 +1127,28 @@ export async function submitErc2612AtomicBatch(
     throw new Error("OKX Wallet is not connected to the authorization chain");
   }
   await requireActiveAccount(provider, connectedAccount);
-  await requireOkxAtomicBatchCapability(
-    provider,
-    connectedAccount,
-    signed.authorization.domain.chainId,
-  );
   const result = await provider.request({
-    method: "wallet_sendCalls",
+    method: "eth_sendTransaction",
     params: [{
-      version: "2.0.0",
       from: connectedAccount,
-      chainId: expectedChainHex,
-      atomicRequired: true,
-      calls: [
-        { to: signed.authorization.tokenAddress, data: signed.permitData, value: "0x0" },
-        { to: signed.authorization.tokenAddress, data: signed.transferFromData, value: "0x0" },
-      ],
+      to: signed.authorization.settlementContract,
+      value: "0x0",
+      data: signed.settlementData,
     }],
   });
-  return parseCallsId(result);
+  if (typeof result !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(result)) {
+    throw new Error("OKX Wallet did not return a valid transaction hash");
+  }
+  return result as Hex;
 }
 
 export async function submitDaiPermitAtomicBatch(
   provider: OkxInjectedProvider,
   signed: SignedDaiPermitPair,
   connectedAccount: `0x${string}`,
-): Promise<string> {
-  if (connectedAccount.toLowerCase() !== signed.authorization.spender.toLowerCase()) {
-    throw new Error("Only the designated safe destination can submit this DAI-style permit batch");
+): Promise<Hex> {
+  if (connectedAccount.toLowerCase() !== signed.authorization.destination.toLowerCase()) {
+    throw new Error("Only the designated safe destination can submit this DAI-style settlement");
   }
   if (signed.authorization.revokeNonce !== signed.authorization.allowNonce + 1n) {
     throw new Error("The DAI-style revoke nonce must immediately follow the allow nonce");
@@ -1147,35 +1160,28 @@ export async function submitDaiPermitAtomicBatch(
     throw new Error("OKX Wallet is not connected to the authorization chain");
   }
   await requireActiveAccount(provider, connectedAccount);
-  await requireOkxAtomicBatchCapability(
-    provider,
-    connectedAccount,
-    signed.authorization.domain.chainId,
-  );
   const result = await provider.request({
-    method: "wallet_sendCalls",
+    method: "eth_sendTransaction",
     params: [{
-      version: "2.0.0",
       from: connectedAccount,
-      chainId: expectedChainHex,
-      atomicRequired: true,
-      calls: [
-        { to: signed.authorization.tokenAddress, data: signed.allowPermitData, value: "0x0" },
-        { to: signed.authorization.tokenAddress, data: signed.transferFromData, value: "0x0" },
-        { to: signed.authorization.tokenAddress, data: signed.revokePermitData, value: "0x0" },
-      ],
+      to: signed.authorization.settlementContract,
+      value: "0x0",
+      data: signed.settlementData,
     }],
   });
-  return parseCallsId(result);
+  if (typeof result !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(result)) {
+    throw new Error("OKX Wallet did not return a valid transaction hash");
+  }
+  return result as Hex;
 }
 
 export async function submitErc4494AtomicBatch(
   provider: OkxInjectedProvider,
   signed: SignedErc4494Permit,
   connectedAccount: `0x${string}`,
-): Promise<string> {
-  if (connectedAccount.toLowerCase() !== signed.authorization.spender.toLowerCase()) {
-    throw new Error("Only the designated safe destination can submit this NFT permit batch");
+): Promise<Hex> {
+  if (connectedAccount.toLowerCase() !== signed.authorization.destination.toLowerCase()) {
+    throw new Error("Only the designated safe destination can submit this NFT settlement");
   }
   assertRecoveryAuthorizationCurrent(signed);
   const chainId = await provider.request({ method: "eth_chainId" });
@@ -1184,55 +1190,19 @@ export async function submitErc4494AtomicBatch(
     throw new Error("OKX Wallet is not connected to the authorization chain");
   }
   await requireActiveAccount(provider, connectedAccount);
-  await requireOkxAtomicBatchCapability(
-    provider,
-    connectedAccount,
-    signed.authorization.domain.chainId,
-  );
   const result = await provider.request({
-    method: "wallet_sendCalls",
+    method: "eth_sendTransaction",
     params: [{
-      version: "2.0.0",
       from: connectedAccount,
-      chainId: expectedChainHex,
-      atomicRequired: true,
-      calls: [
-        { to: signed.authorization.collectionAddress, data: signed.permitData, value: "0x0" },
-        { to: signed.authorization.collectionAddress, data: signed.transferFromData, value: "0x0" },
-      ],
+      to: signed.authorization.settlementContract,
+      value: "0x0",
+      data: signed.settlementData,
     }],
   });
-  return parseCallsId(result);
-}
-
-export async function getOkxCallsStatus(
-  provider: OkxInjectedProvider,
-  callsId: string,
-): Promise<OkxCallsStatus> {
-  const result = await provider.request({
-    method: "wallet_getCallsStatus",
-    params: [callsId],
-  });
-  if (!result || typeof result !== "object" || !("status" in result)) {
-    throw new Error("OKX Wallet returned an invalid atomic call status");
+  if (typeof result !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(result)) {
+    throw new Error("OKX Wallet did not return a valid transaction hash");
   }
-  const status = Number(result.status);
-  if (status !== 100 && status !== 200 && status !== 400 && status !== 500) {
-    throw new Error("OKX Wallet returned an unknown atomic call status");
-  }
-  const receipts = "receipts" in result && Array.isArray(result.receipts)
-    ? result.receipts
-    : [];
-  const transactionHashes = receipts.flatMap((receipt) => {
-    if (!receipt || typeof receipt !== "object" || !("transactionHash" in receipt)) {
-      return [];
-    }
-    const hash = receipt.transactionHash;
-    return typeof hash === "string" && /^0x[a-fA-F0-9]{64}$/.test(hash)
-      ? [hash as Hex]
-      : [];
-  });
-  return { status, transactionHashes };
+  return result as Hex;
 }
 
 export async function submitEip3009Settlement(
@@ -1271,7 +1241,7 @@ export function receiptProvesCommittedTransfer(
   signed: SignedRecoveryAuthorization,
   logs: readonly SettlementReceiptLog[],
 ): boolean {
-  if (signed.standard === "ERC4494_PERMIT_ATOMIC_BATCH") {
+  if (signed.standard === "ERC4494_PERMIT_SETTLEMENT") {
     return logs.some((log) => {
       if (!sameAddress(log.address, signed.authorization.collectionAddress)) return false;
       try {
@@ -1282,7 +1252,7 @@ export function receiptProvesCommittedTransfer(
         });
         return decoded.eventName === "Transfer" &&
           sameAddress(decoded.args.from, signed.authorization.owner) &&
-          sameAddress(decoded.args.to, signed.authorization.spender) &&
+          sameAddress(decoded.args.to, signed.authorization.destination) &&
           decoded.args.tokenId === signed.authorization.tokenId;
       } catch {
         return false;
@@ -1297,17 +1267,17 @@ export function receiptProvesCommittedTransfer(
         to: signed.authorization.to,
         amount: BigInt(signed.authorization.value),
       }
-    : signed.standard === "ERC2612_PERMIT_ATOMIC_BATCH"
+    : signed.standard === "ERC2612_PERMIT_SETTLEMENT"
       ? {
           token: signed.authorization.tokenAddress,
           from: signed.authorization.owner,
-          to: signed.authorization.spender,
+          to: signed.authorization.destination,
           amount: BigInt(signed.authorization.value),
         }
       : {
           token: signed.authorization.tokenAddress,
           from: signed.authorization.holder,
-          to: signed.authorization.spender,
+          to: signed.authorization.destination,
           amount: BigInt(signed.authorization.value),
         };
 

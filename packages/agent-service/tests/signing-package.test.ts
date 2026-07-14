@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { evmAddressSchema } from "@safeexit/shared";
+import {
+  getConfiguredPermitSettlementAddress,
+  PERMIT_KIND_DAI,
+  PERMIT_SETTLEMENT_NAME,
+  PERMIT_SETTLEMENT_VERSION,
+} from "@safeexit/adapters";
 
 import { SIGNING_PACKAGE_EIP712_TYPES, signingPackageSchema } from "../src";
 
@@ -8,6 +14,7 @@ const source = evmAddressSchema.parse("0x70997970C51812dc3A010C7d01b50e0d17dc79C
 const destination = evmAddressSchema.parse("0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65");
 const token = evmAddressSchema.parse("0x5FbDB2315678afecb367f032d93F642f64180aa3");
 const planHash = `0x${"3".repeat(64)}`;
+const settlementContract = getConfiguredPermitSettlementAddress(196)!;
 
 function daiPackage(): Record<string, unknown> {
   const request = (id: "source-allow-permit" | "source-revoke-permit", nonce: string, allowed: boolean) => ({
@@ -24,18 +31,47 @@ function daiPackage(): Record<string, unknown> {
       domain: {
         name: "Dai Stablecoin",
         version: "1",
-        chainId: 1,
+        chainId: 196,
         verifyingContract: token,
       },
       message: {
         holder: source,
-        spender: destination,
+        spender: settlementContract,
         nonce,
         expiry: "1783937040",
         allowed,
       },
     },
   });
+  const rescueRequest = {
+    id: "source-rescue-authorization",
+    signer: source,
+    method: "EIP712",
+    rpcMethod: "eth_signTypedData_v4",
+    typedData: {
+      primaryType: "ERC20Rescue",
+      types: {
+        EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+        ERC20Rescue: [...SIGNING_PACKAGE_EIP712_TYPES.ERC20Rescue],
+      },
+      domain: {
+        name: PERMIT_SETTLEMENT_NAME,
+        version: PERMIT_SETTLEMENT_VERSION,
+        chainId: 196,
+        verifyingContract: settlementContract,
+      },
+      message: {
+        token,
+        owner: source,
+        destination,
+        amount: "100",
+        permitNonce: "7",
+        deadline: "1783937040",
+        rescueNonce: `0x${"9".repeat(64)}`,
+        permitKind: PERMIT_KIND_DAI,
+      },
+    },
+  };
 
   return {
     schemaVersion: "safeexit-signing-package-v1",
@@ -45,24 +81,26 @@ function daiPackage(): Record<string, unknown> {
     planId: "plan:test",
     planHash,
     actionId: "action:transfer",
-    route: "DAI_PERMIT_ATOMIC_BATCH",
-    chainId: 1,
+    route: "DAI_PERMIT_SETTLEMENT",
+    chainId: 196,
     sourceAddress: source,
     destinationAddress: destination,
     observedAtBlock: "123",
     expiresAt: "2026-07-13T10:04:00.000Z",
     tokenAddress: token,
+    settlementContract,
     amount: "100",
     sourceSigningRequests: [
       request("source-allow-permit", "7", true),
       request("source-revoke-permit", "8", false),
+      rescueRequest,
     ],
     destinationSettlement: {
       executor: destination,
       payer: "DESTINATION",
       assembly: "BUYER_LOCAL_RUNTIME",
-      atomicRequired: true,
-      operations: ["PERMIT_DAI_ALLOW", "TRANSFER_FROM_ERC20", "PERMIT_DAI_REVOKE"],
+      atomicRequired: false,
+      operations: ["SETTLE_DAI_PERMIT"],
     },
     simulation: {
       resultId: "simulation:test",
@@ -152,15 +190,11 @@ function eip3009Package(): Record<string, unknown> {
 }
 
 describe("agent signing package", () => {
-  it("accepts a tightly scoped DAI allow-transfer-revoke package", () => {
+  it("accepts a tightly scoped DAI settlement package", () => {
     const parsed = signingPackageSchema.parse(daiPackage());
 
-    expect(parsed.route).toBe("DAI_PERMIT_ATOMIC_BATCH");
-    expect(parsed.destinationSettlement.operations).toEqual([
-      "PERMIT_DAI_ALLOW",
-      "TRANSFER_FROM_ERC20",
-      "PERMIT_DAI_REVOKE",
-    ]);
+    expect(parsed.route).toBe("DAI_PERMIT_SETTLEMENT");
+    expect(parsed.destinationSettlement.operations).toEqual(["SETTLE_DAI_PERMIT"]);
   });
 
   it("rejects destination substitution", () => {

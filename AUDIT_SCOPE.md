@@ -12,12 +12,12 @@
   `MULTICHAIN_ADAPTER_VERIFICATION.md`
 - Production URL: `https://safeexit.xyz`
 
-SAFEEXIT does not currently deploy a production settlement contract. The
-security-critical implementation is a TypeScript EVM application that creates
-strict EIP-712 authorizations, keeps signatures in the user's browser or local
-buyer runtime, and asks a user-controlled destination wallet to submit calls.
-The appropriate engagement is therefore an application, protocol-integration,
-and EVM authorization review, not a Solidity-only audit.
+SAFEEXIT includes the unaudited `SafeExitPermitSettlement` Solidity contract at
+`contracts/src/SafeExitPermitSettlement.sol`. Its deterministic X Layer address
+is `0x964FDCfE0A0bCE568309f3f7D07ab08Fc8F93103`; production remains fail-closed
+until it is deployed and verified. The review must cover the contract, browser
+and buyer-runtime EIP-712 construction, capability detection, simulation,
+submission, and receipt verification as one system.
 
 ## In scope
 
@@ -25,9 +25,9 @@ and EVM authorization review, not a Solidity-only audit.
   permit, and ERC-4494.
 - Source, destination, chain, contract, amount, token ID, nonce, deadline, and
   plan-hash commitments.
-- Browser account handoff, local signature handling, EIP-5792 atomic batches,
-  receipt verification, and failure handling.
-- Buyer-local signing, full-batch simulation interface, submission, and
+- Browser account handoff, local signature handling, settlement-contract
+  calls, receipt verification, and failure handling.
+- Buyer-local signing, exact-call simulation interface, submission, and
   receipt-only reporting.
 - Deterministic scanning, rescue planning, simulation gating, and signing
   package schemas.
@@ -42,6 +42,9 @@ Primary implementation locations:
 - `apps/web/src/app/api/rescue/[id]/preflight/route.ts`
 - `apps/web/src/lib/live-signing-package-builder.ts`
 - `apps/web/src/lib/live-buyer-report-verifier.ts`
+- `contracts/src/SafeExitPermitSettlement.sol`
+- `contracts/test/SafeExitPermitSettlement.ts`
+- `packages/adapters/src/permit-settlement.ts`
 - `packages/agent-service/src/signing-package.ts`
 - `packages/buyer-runtime/src/`
 - `packages/planner/src/`
@@ -59,7 +62,8 @@ Primary implementation locations:
 3. AI output cannot create or modify executable calls.
 4. A refreshed preflight cannot silently substitute a different reviewed route.
 5. Only the committed destination may submit, and it pays settlement gas.
-6. Multi-call permit routes execute only with an EIP-5792 atomicity guarantee.
+6. Permit, transfer, and allowance revocation execute atomically inside one
+   fixed settlement-contract transaction.
 7. Failed simulation is fail-closed, and confirmed execution requires evidence
    of the exact committed transfer.
 8. Native currency and assets without a verified destination-paid adapter remain

@@ -38,22 +38,6 @@ function parseHash(value: unknown): Hex {
   return value as Hex;
 }
 
-function parseCallsId(value: unknown): string {
-  const id = typeof value === "string"
-    ? value
-    : value && typeof value === "object" && "id" in value
-      ? value.id
-      : undefined;
-  if (typeof id !== "string" || !/^0x[a-fA-F0-9]{2,8192}$/.test(id)) {
-    throw new Error("Wallet did not return a valid call-batch identifier");
-  }
-  return id;
-}
-
-function chainHex(chainId: number): Hex {
-  return `0x${chainId.toString(16)}`;
-}
-
 export class Eip1193LocalSourceSigner implements LocalSourceSignerPort {
   constructor(private readonly provider: Eip1193Provider) {}
 
@@ -115,42 +99,21 @@ export class Eip1193DestinationWallet implements DestinationSettlementWalletPort
     return chainId;
   }
 
-  async supportsAtomicBatch(chainId: number, address: `0x${string}`): Promise<boolean> {
-    const expectedChain = chainHex(chainId).toLowerCase();
-    const result = await this.provider.request({
-      method: "wallet_getCapabilities",
-      params: [address, [expectedChain]],
-    });
-    if (!result || typeof result !== "object") return false;
-    const entry = Object.entries(result).find(([key]) => key.toLowerCase() === expectedChain)?.[1];
-    if (!entry || typeof entry !== "object" || !("atomic" in entry)) return false;
-    const atomic = entry.atomic;
-    if (!atomic || typeof atomic !== "object" || !("status" in atomic)) return false;
-    return atomic.status === "supported" || atomic.status === "ready";
+  async supportsAtomicBatch(): Promise<boolean> {
+    return false;
   }
 
   async submit(batch: SettlementBatch): Promise<DestinationSubmission> {
-    if (!batch.atomicRequired && batch.calls.length === 1) {
-      const onlyCall = batch.calls[0];
-      if (!onlyCall) throw new Error("Settlement batch is empty");
-      const hash = parseHash(await this.provider.request({
-        method: "eth_sendTransaction",
-        params: [{ from: batch.from, ...onlyCall }],
-      }));
-      return destinationSubmissionSchema.parse({ submissionId: `tx:${hash}` });
+    if (batch.atomicRequired || batch.calls.length !== 1) {
+      throw new Error("SafeExit destination settlement requires one non-batched contract call");
     }
-    const result = await this.provider.request({
-      method: "wallet_sendCalls",
-      params: [{
-        version: "2.0.0",
-        id: batch.packageId,
-        from: batch.from,
-        chainId: chainHex(batch.chainId),
-        atomicRequired: batch.atomicRequired,
-        calls: batch.calls,
-      }],
-    });
-    return destinationSubmissionSchema.parse({ submissionId: parseCallsId(result) });
+    const onlyCall = batch.calls[0];
+    if (!onlyCall) throw new Error("Settlement batch is empty");
+    const hash = parseHash(await this.provider.request({
+      method: "eth_sendTransaction",
+      params: [{ from: batch.from, ...onlyCall }],
+    }));
+    return destinationSubmissionSchema.parse({ submissionId: `tx:${hash}` });
   }
 
   async waitForReceipt(submission: DestinationSubmission): Promise<DestinationReceipt> {
@@ -175,41 +138,7 @@ export class Eip1193DestinationWallet implements DestinationSettlementWalletPort
       throw new Error("Transaction did not confirm before the local timeout");
     }
 
-    for (let attempt = 0; attempt < this.maximumPolls; attempt += 1) {
-      const result = await this.provider.request({
-        method: "wallet_getCallsStatus",
-        params: [parsed.submissionId],
-      });
-      if (!result || typeof result !== "object" || !("status" in result)) {
-        throw new Error("Wallet returned an invalid call-batch status");
-      }
-      const status = Number(result.status);
-      const receipts = "receipts" in result && Array.isArray(result.receipts)
-        ? result.receipts
-        : [];
-      const transactionHashes = receipts.flatMap((receipt) => {
-        if (!receipt || typeof receipt !== "object" || !("transactionHash" in receipt)) return [];
-        try {
-          return [parseHash(receipt.transactionHash)];
-        } catch {
-          return [];
-        }
-      });
-      if (status === 200 || status === 400 || status === 500) {
-        if (transactionHashes.length === 0) {
-          throw new Error("Final call-batch status did not include a transaction hash");
-        }
-        return destinationReceiptSchema.parse({
-          status: status === 200 ? "CONFIRMED" : "FAILED",
-          transactionHashes,
-          observedAt: this.clock().toISOString(),
-          ...(status === 200 ? {} : { failureReason: "Atomic call batch failed" }),
-        });
-      }
-      if (status !== 100) throw new Error("Wallet returned an unknown call-batch status");
-      await this.sleep(this.pollIntervalMs);
-    }
-    throw new Error("Call batch did not confirm before the local timeout");
+    throw new Error("Unsupported destination submission identifier");
   }
 }
 

@@ -27,7 +27,7 @@
 4. The source wallet signs locally. Signatures never cross into SAFEEXIT APIs,
    logs, or persistence.
 5. The destination wallet must match the committed address and chain, reports
-   EIP-5792 atomic support when required, and pays gas.
+   the exact settlement-contract call, and pays gas.
 6. SAFEEXIT accepts only receipt metadata back from the buyer runtime and
    independently checks successful receipts for the committed transfer event.
 
@@ -39,7 +39,7 @@
 | Cross-chain replay | Chain ID and verifying contract are verified against the token domain and committed package. Production accepts only the eight code-owned rescue-chain IDs and rechecks the active wallet chain before submission. |
 | Signature replay | ERC-3009 random nonces, permit nonces, and short expiries; current nonce/state is read before signing. |
 | Arbitrary AI execution | AI is explanation-only and cannot author calldata or alter deterministic actions. |
-| Partial permit batch | Permit routes require EIP-5792 atomic execution; unsupported wallets fail closed. |
+| Partial permit execution | Permit, transfer, and revocation execute inside one settlement-contract transaction; any failure reverts the whole transaction. |
 | Route change after scan | Fresh preflight must still contain the exact reviewed action-and-standard key. |
 | False success | Browser and hosted verifier require the exact asset contract `Transfer` event from source to destination with the committed amount or token ID. |
 | Account switch race | Active account and chain are re-read after switching and again after simulation/before submission. |
@@ -50,11 +50,10 @@
 
 - Recovery cannot be guaranteed when the attacker has the same private key.
 - Public RPC simulation capabilities vary by chain; the official public X Layer
-  RPC does not currently expose `eth_simulateV1`. The browser therefore verifies
-  the signed permit call, relies on EIP-5792
-  atomicity for multi-call execution, and verifies the exact transfer receipt.
-  The buyer runtime requires a full sequential simulation provider and fails
-  closed when one is unavailable.
+  RPC does not currently expose `eth_simulateV1`. The browser uses `eth_call`
+  to preflight the exact signed settlement-contract transaction and verifies
+  the exact transfer receipt. The buyer runtime requires an exact-call
+  simulation provider and fails closed when one is unavailable.
 - A malicious token may violate ERC semantics or emit deceptive events. Support
   is best effort and restricted to capability-verified routes.
 - Source signatures exist briefly in browser memory and remain exposed to a

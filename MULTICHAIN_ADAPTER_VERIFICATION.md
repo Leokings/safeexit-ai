@@ -44,7 +44,7 @@ The current destination-paid routes are:
 - ERC-4494 permit plus atomic NFT transfer.
 
 Multi-call routes additionally require the destination wallet to report
-EIP-5792 atomic-call capability for the selected chain. Native currency,
+the verified SAFEEXIT permit settlement contract for the selected chain. Native currency,
 ERC-1155 assets, non-permit tokens, protocol claims, protocol withdrawals,
 EIP-7702, and private bundles remain non-executable.
 

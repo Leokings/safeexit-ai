@@ -32,7 +32,6 @@ import {
   connectOkxWallet,
   ensureRescueMainnet,
   getOkxConnectedAccount,
-  getOkxCallsStatus,
   getOkxProvider,
   receiptProvesCommittedTransfer,
   recoveryAuthorizationExpiresAt,
@@ -125,19 +124,19 @@ function routeLabel(standard: string): string {
   switch (standard) {
     case "ERC3009_RECEIVE_WITH_AUTHORIZATION":
       return "ERC-3009 direct authorization";
-    case "ERC2612_PERMIT_ATOMIC_BATCH":
-      return "ERC-2612 atomic permit";
-    case "DAI_PERMIT_ATOMIC_BATCH":
-      return "DAI-style atomic permit and revoke";
-    case "ERC4494_PERMIT_ATOMIC_BATCH":
-      return "ERC-4494 NFT atomic permit";
+    case "ERC2612_PERMIT_SETTLEMENT":
+      return "ERC-2612 permit settlement";
+    case "DAI_PERMIT_SETTLEMENT":
+      return "DAI-style permit settlement";
+    case "ERC4494_PERMIT_SETTLEMENT":
+      return "ERC-4494 NFT permit settlement";
     default:
       return "Unsupported recovery route";
   }
 }
 
 function routeContract(route: MainnetPreflightResponse["gaslessActions"][number]): EvmAddress {
-  return route.standard === "ERC4494_PERMIT_ATOMIC_BATCH"
+  return route.standard === "ERC4494_PERMIT_SETTLEMENT"
     ? route.collectionAddress
     : route.tokenAddress;
 }
@@ -306,26 +305,26 @@ export function MainnetRescueWorkspace({
         result = await signEip3009Authorization(provider, action, account);
       } else {
         const destinationAccount = getAddress(action.to);
-        if (action.standard === "ERC2612_PERMIT_ATOMIC_BATCH") {
+        if (action.standard === "ERC2612_PERMIT_SETTLEMENT") {
           result = await signErc2612Permit(provider, action, account);
           await publicClient.call({
             account: destinationAccount,
-            to: result.authorization.tokenAddress,
-            data: result.permitData,
+            to: result.authorization.settlementContract,
+            data: result.settlementData,
           });
-        } else if (action.standard === "DAI_PERMIT_ATOMIC_BATCH") {
+        } else if (action.standard === "DAI_PERMIT_SETTLEMENT") {
           result = await signDaiPermitPair(provider, action, account);
           await publicClient.call({
             account: destinationAccount,
-            to: result.authorization.tokenAddress,
-            data: result.allowPermitData,
+            to: result.authorization.settlementContract,
+            data: result.settlementData,
           });
         } else {
           result = await signErc4494Permit(provider, action, account);
           await publicClient.call({
             account: destinationAccount,
-            to: result.authorization.collectionAddress,
-            data: result.permitData,
+            to: result.authorization.settlementContract,
+            data: result.settlementData,
           });
         }
       }
@@ -374,75 +373,27 @@ export function MainnetRescueWorkspace({
           data: signed.settlementData,
         });
         hash = await submitEip3009Settlement(provider, signed, account);
-      } else if (signed.standard === "ERC2612_PERMIT_ATOMIC_BATCH") {
+      } else if (signed.standard === "ERC2612_PERMIT_SETTLEMENT") {
         await publicClient.call({
           account,
-          to: signed.authorization.tokenAddress,
-          data: signed.permitData,
+          to: signed.authorization.settlementContract,
+          data: signed.settlementData,
         });
-        const callsId = await submitErc2612AtomicBatch(provider, signed, account);
-        let confirmedHash: Hex | undefined;
-        for (let attempt = 0; attempt < 60; attempt += 1) {
-          const callsStatus = await getOkxCallsStatus(provider, callsId);
-          if (callsStatus.status === 200) {
-            confirmedHash = callsStatus.transactionHashes[0];
-            break;
-          }
-          if (callsStatus.status === 400 || callsStatus.status === 500) {
-            throw new Error("The OKX atomic permit batch failed before confirmation.");
-          }
-          await new Promise((resolve) => setTimeout(resolve, 2_000));
-        }
-        if (!confirmedHash) {
-          throw new Error("The OKX atomic permit batch did not confirm within two minutes.");
-        }
-        hash = confirmedHash;
-      } else if (signed.standard === "DAI_PERMIT_ATOMIC_BATCH") {
+        hash = await submitErc2612AtomicBatch(provider, signed, account);
+      } else if (signed.standard === "DAI_PERMIT_SETTLEMENT") {
         await publicClient.call({
           account,
-          to: signed.authorization.tokenAddress,
-          data: signed.allowPermitData,
+          to: signed.authorization.settlementContract,
+          data: signed.settlementData,
         });
-        const callsId = await submitDaiPermitAtomicBatch(provider, signed, account);
-        let confirmedHash: Hex | undefined;
-        for (let attempt = 0; attempt < 60; attempt += 1) {
-          const callsStatus = await getOkxCallsStatus(provider, callsId);
-          if (callsStatus.status === 200) {
-            confirmedHash = callsStatus.transactionHashes[0];
-            break;
-          }
-          if (callsStatus.status === 400 || callsStatus.status === 500) {
-            throw new Error("The OKX atomic DAI-style permit batch failed before confirmation.");
-          }
-          await new Promise((resolve) => setTimeout(resolve, 2_000));
-        }
-        if (!confirmedHash) {
-          throw new Error("The OKX atomic DAI-style permit batch did not confirm within two minutes.");
-        }
-        hash = confirmedHash;
+        hash = await submitDaiPermitAtomicBatch(provider, signed, account);
       } else {
         await publicClient.call({
           account,
-          to: signed.authorization.collectionAddress,
-          data: signed.permitData,
+          to: signed.authorization.settlementContract,
+          data: signed.settlementData,
         });
-        const callsId = await submitErc4494AtomicBatch(provider, signed, account);
-        let confirmedHash: Hex | undefined;
-        for (let attempt = 0; attempt < 60; attempt += 1) {
-          const callsStatus = await getOkxCallsStatus(provider, callsId);
-          if (callsStatus.status === 200) {
-            confirmedHash = callsStatus.transactionHashes[0];
-            break;
-          }
-          if (callsStatus.status === 400 || callsStatus.status === 500) {
-            throw new Error("The OKX atomic NFT permit batch failed before confirmation.");
-          }
-          await new Promise((resolve) => setTimeout(resolve, 2_000));
-        }
-        if (!confirmedHash) {
-          throw new Error("The OKX atomic NFT permit batch did not confirm within two minutes.");
-        }
-        hash = confirmedHash;
+        hash = await submitErc4494AtomicBatch(provider, signed, account);
       }
       setTransactions((current) => [
         ...current,
@@ -677,8 +628,9 @@ export function MainnetRescueWorkspace({
               <div className="space-y-2"><span className="block text-muted">Destination receives and pays gas</span><CopyAddress address={destination} compact /></div>
               <div className="flex justify-between gap-4"><span className="text-muted">Route</span><span className="text-right">{nextGaslessAction ? routeLabel(nextGaslessAction.standard) : "None verified"}</span></div>
               {nextGaslessAction && <div className="space-y-2"><span className="block text-muted">Asset contract</span><CopyAddress address={routeContract(nextGaslessAction)} compact /></div>}
-              {nextGaslessAction?.standard === "ERC4494_PERMIT_ATOMIC_BATCH" && <div className="flex justify-between gap-4"><span className="text-muted">Token ID</span><span className="font-mono">{nextGaslessAction.tokenId}</span></div>}
-              {nextGaslessAction?.standard === "DAI_PERMIT_ATOMIC_BATCH" && <div className="flex justify-between gap-4"><span className="text-muted">Source signatures</span><span className="font-mono">2 (allow + revoke)</span></div>}
+              {nextGaslessAction && nextGaslessAction.standard !== "ERC3009_RECEIVE_WITH_AUTHORIZATION" && <div className="space-y-2"><span className="block text-muted">Settlement contract</span><CopyAddress address={nextGaslessAction.settlementContract} compact /></div>}
+              {nextGaslessAction?.standard === "ERC4494_PERMIT_SETTLEMENT" && <div className="flex justify-between gap-4"><span className="text-muted">Token ID</span><span className="font-mono">{nextGaslessAction.tokenId}</span></div>}
+              {nextGaslessAction && nextGaslessAction.standard !== "ERC3009_RECEIVE_WITH_AUTHORIZATION" && <div className="flex justify-between gap-4"><span className="text-muted">Source signatures</span><span className="font-mono">{nextGaslessAction.requiredSignatures}</span></div>}
               <div className="flex justify-between gap-4"><span className="text-muted">Authorization</span><Badge variant={signed ? "success" : "neutral"}>{signed ? "SIGNED IN MEMORY" : "NOT SIGNED"}</Badge></div>
               {signedExpiresAt && <div className="flex justify-between gap-4"><span className="text-muted">Valid until</span><span className="font-mono">{signedExpiresAt} UTC</span></div>}
               <div className="flex justify-between gap-4"><span className="text-muted">Preflight block</span><span className="font-mono">{preflight?.scan.observedAtBlock ?? "--"}</span></div>

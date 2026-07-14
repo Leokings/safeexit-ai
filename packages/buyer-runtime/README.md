@@ -11,10 +11,9 @@ credentials back to the SAFEEXIT ASP.
    EIP-712 signatures, recovers every signer, and creates an opaque in-memory
    authorization handle.
 2. The buyer switches to the destination wallet.
-3. `BuyerRescueRuntime.execute` checks the destination and chain, requires
-   EIP-5792 atomic capability for permit batches, runs the complete signed call
-   sequence through a post-signature simulator, submits it, and waits for final
-   transaction receipts.
+3. `BuyerRescueRuntime.execute` checks the destination and chain, assembles one
+   fixed settlement-contract call, runs it through a post-signature simulator,
+   submits it with `eth_sendTransaction`, and waits for the final receipt.
 
 The opaque handle is stored in a process-local `WeakMap`. Serializing it drops
 the signatures and settlement calldata, and a serialized handle cannot be
@@ -23,13 +22,13 @@ executed. Handles are one-use after submission begins.
 ## Included adapters
 
 - `Eip1193LocalSourceSigner` requests `eth_signTypedData_v4` from a local wallet.
-- `EthSimulateV1AtomicSimulator` simulates all calls sequentially in one
+- `EthSimulateV1AtomicSimulator` simulates the exact destination call in an
   ephemeral block. Unsupported RPCs fail closed.
-- `Eip1193DestinationWallet` uses one `eth_sendTransaction` for ERC-3009 or
-  EIP-5792 `wallet_sendCalls` for atomic permit batches, then waits for receipts.
+- `Eip1193DestinationWallet` accepts only one non-batched call, submits it with
+  `eth_sendTransaction`, and waits for its receipt.
 
 These are provider-neutral local adapters. They are not an OKX Agentic Wallet
 server adapter and do not imply that an Agentic Wallet can sign for a separate
 compromised source EOA. An OKX-specific destination adapter remains
-official-docs-required until its typed contract-call and atomic-batch guarantees
-are verified end to end.
+official-docs-required until its typed contract-call guarantees are verified
+end to end.

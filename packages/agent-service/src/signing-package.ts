@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+import {
+  getConfiguredPermitSettlementAddress,
+  PERMIT_KIND_DAI,
+  PERMIT_KIND_ERC2612,
+  PERMIT_SETTLEMENT_NAME,
+  PERMIT_SETTLEMENT_VERSION,
+} from "@safeexit/adapters";
 import { chainIdSchema, evmAddressSchema } from "@safeexit/shared";
 
 const identifierSchema = z.string().min(1).max(256);
@@ -52,6 +59,25 @@ export const SIGNING_PACKAGE_EIP712_TYPES = {
     { name: "tokenId", type: "uint256" },
     { name: "nonce", type: "uint256" },
     { name: "deadline", type: "uint256" },
+  ],
+  ERC20Rescue: [
+    { name: "token", type: "address" },
+    { name: "owner", type: "address" },
+    { name: "destination", type: "address" },
+    { name: "amount", type: "uint256" },
+    { name: "permitNonce", type: "uint256" },
+    { name: "deadline", type: "uint256" },
+    { name: "rescueNonce", type: "bytes32" },
+    { name: "permitKind", type: "uint8" },
+  ],
+  ERC721Rescue: [
+    { name: "collection", type: "address" },
+    { name: "owner", type: "address" },
+    { name: "destination", type: "address" },
+    { name: "tokenId", type: "uint256" },
+    { name: "permitNonce", type: "uint256" },
+    { name: "deadline", type: "uint256" },
+    { name: "rescueNonce", type: "bytes32" },
   ],
 } as const;
 
@@ -213,6 +239,68 @@ const erc4494SigningRequestSchema = z.strictObject({
   }),
 });
 
+const erc20RescueSigningRequestSchema = z.strictObject({
+  ...signingRequestCommonShape,
+  id: z.literal("source-rescue-authorization"),
+  typedData: z.strictObject({
+    primaryType: z.literal("ERC20Rescue"),
+    types: z.strictObject({
+      EIP712Domain: domainTypeSchema,
+      ERC20Rescue: z.tuple([
+        typedDataField("token", "address"),
+        typedDataField("owner", "address"),
+        typedDataField("destination", "address"),
+        typedDataField("amount", "uint256"),
+        typedDataField("permitNonce", "uint256"),
+        typedDataField("deadline", "uint256"),
+        typedDataField("rescueNonce", "bytes32"),
+        typedDataField("permitKind", "uint8"),
+      ]),
+    }),
+    domain: signingDomainSchema,
+    message: z.strictObject({
+      token: evmAddressSchema,
+      owner: evmAddressSchema,
+      destination: evmAddressSchema,
+      amount: positiveBaseUnitAmountSchema,
+      permitNonce: baseUnitAmountSchema,
+      deadline: baseUnitAmountSchema,
+      rescueNonce: bytes32Schema.refine((value) => !/^0x0{64}$/i.test(value)),
+      permitKind: z.union([z.literal(1), z.literal(2)]),
+    }),
+  }),
+});
+
+const erc721RescueSigningRequestSchema = z.strictObject({
+  ...signingRequestCommonShape,
+  id: z.literal("source-rescue-authorization"),
+  typedData: z.strictObject({
+    primaryType: z.literal("ERC721Rescue"),
+    types: z.strictObject({
+      EIP712Domain: domainTypeSchema,
+      ERC721Rescue: z.tuple([
+        typedDataField("collection", "address"),
+        typedDataField("owner", "address"),
+        typedDataField("destination", "address"),
+        typedDataField("tokenId", "uint256"),
+        typedDataField("permitNonce", "uint256"),
+        typedDataField("deadline", "uint256"),
+        typedDataField("rescueNonce", "bytes32"),
+      ]),
+    }),
+    domain: signingDomainSchema,
+    message: z.strictObject({
+      collection: evmAddressSchema,
+      owner: evmAddressSchema,
+      destination: evmAddressSchema,
+      tokenId: baseUnitAmountSchema,
+      permitNonce: baseUnitAmountSchema,
+      deadline: baseUnitAmountSchema,
+      rescueNonce: bytes32Schema.refine((value) => !/^0x0{64}$/i.test(value)),
+    }),
+  }),
+});
+
 const settlementCommonShape = {
   executor: evmAddressSchema,
   payer: z.literal("DESTINATION"),
@@ -234,50 +322,53 @@ const eip3009PackageSchema = z.strictObject({
 
 const erc2612PackageSchema = z.strictObject({
   ...packageCommonShape,
-  route: z.literal("ERC2612_PERMIT_ATOMIC_BATCH"),
+  route: z.literal("ERC2612_PERMIT_SETTLEMENT"),
   tokenAddress: evmAddressSchema,
+  settlementContract: evmAddressSchema,
   amount: positiveBaseUnitAmountSchema,
-  sourceSigningRequests: z.tuple([erc2612SigningRequestSchema]),
+  sourceSigningRequests: z.tuple([
+    erc2612SigningRequestSchema,
+    erc20RescueSigningRequestSchema,
+  ]),
   destinationSettlement: z.strictObject({
     ...settlementCommonShape,
-    atomicRequired: z.literal(true),
-    operations: z.tuple([
-      z.literal("PERMIT_ERC2612"),
-      z.literal("TRANSFER_FROM_ERC20"),
-    ]),
+    atomicRequired: z.literal(false),
+    operations: z.tuple([z.literal("SETTLE_ERC2612")]),
   }),
 });
 
 const daiPermitPackageSchema = z.strictObject({
   ...packageCommonShape,
-  route: z.literal("DAI_PERMIT_ATOMIC_BATCH"),
+  route: z.literal("DAI_PERMIT_SETTLEMENT"),
   tokenAddress: evmAddressSchema,
+  settlementContract: evmAddressSchema,
   amount: positiveBaseUnitAmountSchema,
-  sourceSigningRequests: z.tuple([daiSigningRequestSchema, daiSigningRequestSchema]),
+  sourceSigningRequests: z.tuple([
+    daiSigningRequestSchema,
+    daiSigningRequestSchema,
+    erc20RescueSigningRequestSchema,
+  ]),
   destinationSettlement: z.strictObject({
     ...settlementCommonShape,
-    atomicRequired: z.literal(true),
-    operations: z.tuple([
-      z.literal("PERMIT_DAI_ALLOW"),
-      z.literal("TRANSFER_FROM_ERC20"),
-      z.literal("PERMIT_DAI_REVOKE"),
-    ]),
+    atomicRequired: z.literal(false),
+    operations: z.tuple([z.literal("SETTLE_DAI_PERMIT")]),
   }),
 });
 
 const erc4494PackageSchema = z.strictObject({
   ...packageCommonShape,
-  route: z.literal("ERC4494_PERMIT_ATOMIC_BATCH"),
+  route: z.literal("ERC4494_PERMIT_SETTLEMENT"),
   collectionAddress: evmAddressSchema,
+  settlementContract: evmAddressSchema,
   tokenId: baseUnitAmountSchema,
-  sourceSigningRequests: z.tuple([erc4494SigningRequestSchema]),
+  sourceSigningRequests: z.tuple([
+    erc4494SigningRequestSchema,
+    erc721RescueSigningRequestSchema,
+  ]),
   destinationSettlement: z.strictObject({
     ...settlementCommonShape,
-    atomicRequired: z.literal(true),
-    operations: z.tuple([
-      z.literal("PERMIT_ERC4494"),
-      z.literal("TRANSFER_FROM_ERC721"),
-    ]),
+    atomicRequired: z.literal(false),
+    operations: z.tuple([z.literal("SETTLE_ERC4494")]),
   }),
 });
 
@@ -329,19 +420,15 @@ export const signingPackageSchema = z
         });
       }
     });
-    const expectedContract = value.route === "ERC4494_PERMIT_ATOMIC_BATCH"
-      ? value.collectionAddress
-      : value.tokenAddress;
-    value.sourceSigningRequests.forEach((request, index) => {
-      if (!sameAddress(request.typedData.domain.verifyingContract, expectedContract)) {
+    if (value.route === "ERC3009_RECEIVE_WITH_AUTHORIZATION") {
+      const request = value.sourceSigningRequests[0];
+      if (!sameAddress(request.typedData.domain.verifyingContract, value.tokenAddress)) {
         context.addIssue({
           code: "custom",
           message: "Signing domain contract must match the committed asset contract",
-          path: ["sourceSigningRequests", index, "typedData", "domain", "verifyingContract"],
+          path: ["sourceSigningRequests", 0, "typedData", "domain", "verifyingContract"],
         });
       }
-    });
-    if (value.route === "ERC3009_RECEIVE_WITH_AUTHORIZATION") {
       const message = value.sourceSigningRequests[0].typedData.message;
       const validAfter = BigInt(message.validAfter);
       const validBefore = BigInt(message.validBefore);
@@ -360,12 +447,51 @@ export const signingPackageSchema = z
           path: ["sourceSigningRequests", 0, "typedData", "message"],
         });
       }
+      return;
     }
-    if (value.route === "ERC2612_PERMIT_ATOMIC_BATCH") {
+    const configuredSettlement = getConfiguredPermitSettlementAddress(value.chainId);
+    if (
+      !configuredSettlement ||
+      !sameAddress(configuredSettlement, value.settlementContract)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Permit settlement contract is not configured for this chain",
+        path: ["settlementContract"],
+      });
+    }
+    const rescueRequest = value.sourceSigningRequests.at(-1)!;
+    const assetContract = value.route === "ERC4494_PERMIT_SETTLEMENT"
+      ? value.collectionAddress
+      : value.tokenAddress;
+    value.sourceSigningRequests.forEach((request, index) => {
+      const expectedContract = request.id === "source-rescue-authorization"
+        ? value.settlementContract
+        : assetContract;
+      if (!sameAddress(request.typedData.domain.verifyingContract, expectedContract)) {
+        context.addIssue({
+          code: "custom",
+          message: "Signing domain contract does not match its committed contract",
+          path: ["sourceSigningRequests", index, "typedData", "domain", "verifyingContract"],
+        });
+      }
+    });
+    if (
+      rescueRequest.typedData.domain.name !== PERMIT_SETTLEMENT_NAME ||
+      rescueRequest.typedData.domain.version !== PERMIT_SETTLEMENT_VERSION
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Rescue authorization domain does not match SafeExit settlement",
+        path: ["sourceSigningRequests", value.sourceSigningRequests.length - 1, "typedData", "domain"],
+      });
+    }
+    if (value.route === "ERC2612_PERMIT_SETTLEMENT") {
       const message = value.sourceSigningRequests[0].typedData.message;
+      const rescue = value.sourceSigningRequests[1].typedData.message;
       if (
         !sameAddress(message.owner, value.sourceAddress) ||
-        !sameAddress(message.spender, value.destinationAddress) ||
+        !sameAddress(message.spender, value.settlementContract) ||
         message.value !== value.amount ||
         message.deadline !== expiry
       ) {
@@ -375,9 +501,24 @@ export const signingPackageSchema = z
           path: ["sourceSigningRequests", 0, "typedData", "message"],
         });
       }
+      if (
+        !sameAddress(rescue.token, value.tokenAddress) ||
+        !sameAddress(rescue.owner, value.sourceAddress) ||
+        !sameAddress(rescue.destination, value.destinationAddress) ||
+        rescue.amount !== value.amount ||
+        rescue.permitNonce !== message.nonce ||
+        rescue.deadline !== expiry ||
+        rescue.permitKind !== PERMIT_KIND_ERC2612
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "ERC-2612 rescue authorization must bind the complete settlement scope",
+          path: ["sourceSigningRequests", 1, "typedData", "message"],
+        });
+      }
     }
-    if (value.route === "DAI_PERMIT_ATOMIC_BATCH") {
-      const [allow, revoke] = value.sourceSigningRequests;
+    if (value.route === "DAI_PERMIT_SETTLEMENT") {
+      const [allow, revoke, rescueRequestValue] = value.sourceSigningRequests;
       if (!allow.typedData.message.allowed || revoke.typedData.message.allowed) {
         context.addIssue({
           code: "custom",
@@ -392,11 +533,11 @@ export const signingPackageSchema = z
           path: ["sourceSigningRequests", 1, "typedData", "message", "nonce"],
         });
       }
-      for (const [index, request] of value.sourceSigningRequests.entries()) {
+      for (const [index, request] of [allow, revoke].entries()) {
         const message = request.typedData.message;
         if (
           !sameAddress(message.holder, value.sourceAddress) ||
-          !sameAddress(message.spender, value.destinationAddress) ||
+          !sameAddress(message.spender, value.settlementContract) ||
           message.expiry !== expiry
         ) {
           context.addIssue({
@@ -406,11 +547,28 @@ export const signingPackageSchema = z
           });
         }
       }
-    }
-    if (value.route === "ERC4494_PERMIT_ATOMIC_BATCH") {
-      const message = value.sourceSigningRequests[0].typedData.message;
+      const rescue = rescueRequestValue.typedData.message;
       if (
-        !sameAddress(message.spender, value.destinationAddress) ||
+        !sameAddress(rescue.token, value.tokenAddress) ||
+        !sameAddress(rescue.owner, value.sourceAddress) ||
+        !sameAddress(rescue.destination, value.destinationAddress) ||
+        rescue.amount !== value.amount ||
+        rescue.permitNonce !== allow.typedData.message.nonce ||
+        rescue.deadline !== expiry ||
+        rescue.permitKind !== PERMIT_KIND_DAI
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "DAI-style rescue authorization must bind the complete settlement scope",
+          path: ["sourceSigningRequests", 2, "typedData", "message"],
+        });
+      }
+    }
+    if (value.route === "ERC4494_PERMIT_SETTLEMENT") {
+      const message = value.sourceSigningRequests[0].typedData.message;
+      const rescue = value.sourceSigningRequests[1].typedData.message;
+      if (
+        !sameAddress(message.spender, value.settlementContract) ||
         message.tokenId !== value.tokenId ||
         message.deadline !== expiry
       ) {
@@ -418,6 +576,20 @@ export const signingPackageSchema = z
           code: "custom",
           message: "ERC-4494 permit must match the committed NFT transfer scope",
           path: ["sourceSigningRequests", 0, "typedData", "message"],
+        });
+      }
+      if (
+        !sameAddress(rescue.collection, value.collectionAddress) ||
+        !sameAddress(rescue.owner, value.sourceAddress) ||
+        !sameAddress(rescue.destination, value.destinationAddress) ||
+        rescue.tokenId !== value.tokenId ||
+        rescue.permitNonce !== message.nonce ||
+        rescue.deadline !== expiry
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "ERC-4494 rescue authorization must bind the complete settlement scope",
+          path: ["sourceSigningRequests", 1, "typedData", "message"],
         });
       }
     }

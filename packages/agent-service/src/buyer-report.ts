@@ -17,9 +17,9 @@ export const buyerExecutionReportSchema = z
     actionId: identifierSchema,
     route: z.enum([
       "ERC3009_RECEIVE_WITH_AUTHORIZATION",
-      "ERC2612_PERMIT_ATOMIC_BATCH",
-      "DAI_PERMIT_ATOMIC_BATCH",
-      "ERC4494_PERMIT_ATOMIC_BATCH",
+      "ERC2612_PERMIT_SETTLEMENT",
+      "DAI_PERMIT_SETTLEMENT",
+      "ERC4494_PERMIT_SETTLEMENT",
     ]),
     chainId: chainIdSchema,
     sourceAddress: evmAddressSchema,

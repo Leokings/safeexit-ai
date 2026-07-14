@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@safeexit/adapters": "*",
     "@safeexit/agent-service": "*",
     "@safeexit/shared": "*",
     "viem": "2.55.0",

@@ -30,3 +30,4 @@ export interface PositionAdapter {
 
 export * from "./okx-wallet-api";
 export * from "./native-recovery";
+export * from "./permit-settlement";

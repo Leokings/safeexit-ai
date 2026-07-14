@@ -38,7 +38,7 @@ if (!fixture || fixture.status !== "VERIFIED") {
   throw new Error(`Fixture ${contractName} is absent or not verified`);
 }
 
-const isNft = fixture.route === "ERC4494_PERMIT_ATOMIC_BATCH";
+const isNft = fixture.route === "ERC4494_PERMIT_SETTLEMENT";
 const data = isNft
   ? encodeFunctionData({ abi: erc721FaucetAbi, functionName: "faucet", args: [recipient] })
   : encodeFunctionData({

@@ -57,7 +57,8 @@ required post-signature simulation, assemble only the declared operation
 sequence, and submit from the destination wallet. Signatures must not be sent
 back to SAFEEXIT. `@safeexit/buyer-runtime` implements this provider-neutral
 local flow for EIP-1193 wallets, including post-signature `eth_simulateV1` and
-EIP-5792 atomic batches. It is not an OKX Agentic Wallet server adapter.
+single-call destination settlement. It is not an OKX Agentic Wallet server
+adapter.
 
 ## Conceptual A2A boundary
 

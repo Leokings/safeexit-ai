@@ -6,6 +6,13 @@ import {
   signingPackageSchema,
   type SigningPackage,
 } from "@safeexit/agent-service";
+import {
+  getConfiguredPermitSettlementAddress,
+  PERMIT_KIND_DAI,
+  PERMIT_KIND_ERC2612,
+  PERMIT_SETTLEMENT_NAME,
+  PERMIT_SETTLEMENT_VERSION,
+} from "@safeexit/adapters";
 
 import {
   BuyerRescueRuntime,
@@ -23,6 +30,7 @@ const wrongAccount = privateKeyToAccount(`0x${"22".repeat(32)}`);
 const destination = "0x3333333333333333333333333333333333333333" as const;
 const token = "0x4444444444444444444444444444444444444444" as const;
 const collection = "0x5555555555555555555555555555555555555555" as const;
+const settlementContract = getConfiguredPermitSettlementAddress(196)!;
 const planHash = `0x${"66".repeat(32)}`;
 const txHash = `0x${"77".repeat(32)}`;
 const now = new Date("2026-07-13T10:00:00.000Z");
@@ -73,6 +81,65 @@ const requestCommon = {
   rpcMethod: "eth_signTypedData_v4",
 } as const;
 
+function erc20RescueRequest(permitNonce: string, permitKind: 1 | 2) {
+  return {
+    ...requestCommon,
+    id: "source-rescue-authorization" as const,
+    typedData: {
+      primaryType: "ERC20Rescue" as const,
+      types: {
+        EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+        ERC20Rescue: [...SIGNING_PACKAGE_EIP712_TYPES.ERC20Rescue],
+      },
+      domain: {
+        name: PERMIT_SETTLEMENT_NAME,
+        version: PERMIT_SETTLEMENT_VERSION,
+        chainId: 196,
+        verifyingContract: settlementContract,
+      },
+      message: {
+        token,
+        owner: sourceAccount.address,
+        destination,
+        amount: "100",
+        permitNonce,
+        deadline,
+        rescueNonce: `0x${"99".repeat(32)}`,
+        permitKind,
+      },
+    },
+  };
+}
+
+function erc721RescueRequest() {
+  return {
+    ...requestCommon,
+    id: "source-rescue-authorization" as const,
+    typedData: {
+      primaryType: "ERC721Rescue" as const,
+      types: {
+        EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+        ERC721Rescue: [...SIGNING_PACKAGE_EIP712_TYPES.ERC721Rescue],
+      },
+      domain: {
+        name: PERMIT_SETTLEMENT_NAME,
+        version: PERMIT_SETTLEMENT_VERSION,
+        chainId: 196,
+        verifyingContract: settlementContract,
+      },
+      message: {
+        collection,
+        owner: sourceAccount.address,
+        destination,
+        tokenId: "12",
+        permitNonce: "2",
+        deadline,
+        rescueNonce: `0x${"aa".repeat(32)}`,
+      },
+    },
+  };
+}
+
 function packageFor(route: SigningPackage["route"]): SigningPackage {
   if (route === "ERC3009_RECEIVE_WITH_AUTHORIZATION") {
     return signingPackageSchema.parse({
@@ -111,41 +178,45 @@ function packageFor(route: SigningPackage["route"]): SigningPackage {
       },
     });
   }
-  if (route === "ERC2612_PERMIT_ATOMIC_BATCH") {
+  if (route === "ERC2612_PERMIT_SETTLEMENT") {
     return signingPackageSchema.parse({
       ...common,
       route,
       tokenAddress: token,
+      settlementContract,
       amount: "100",
-      sourceSigningRequests: [{
-        ...requestCommon,
-        id: "source-permit",
-        typedData: {
-          primaryType: "Permit",
-          types: {
-            EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
-            Permit: [...SIGNING_PACKAGE_EIP712_TYPES.ERC2612Permit],
-          },
-          domain: domain(token),
-          message: {
-            owner: sourceAccount.address,
-            spender: destination,
-            value: "100",
-            nonce: "4",
-            deadline,
+      sourceSigningRequests: [
+        {
+          ...requestCommon,
+          id: "source-permit",
+          typedData: {
+            primaryType: "Permit",
+            types: {
+              EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+              Permit: [...SIGNING_PACKAGE_EIP712_TYPES.ERC2612Permit],
+            },
+            domain: domain(token),
+            message: {
+              owner: sourceAccount.address,
+              spender: settlementContract,
+              value: "100",
+              nonce: "4",
+              deadline,
+            },
           },
         },
-      }],
+        erc20RescueRequest("4", PERMIT_KIND_ERC2612),
+      ],
       destinationSettlement: {
         executor: destination,
         payer: "DESTINATION",
         assembly: "BUYER_LOCAL_RUNTIME",
-        atomicRequired: true,
-        operations: ["PERMIT_ERC2612", "TRANSFER_FROM_ERC20"],
+        atomicRequired: false,
+        operations: ["SETTLE_ERC2612"],
       },
     });
   }
-  if (route === "DAI_PERMIT_ATOMIC_BATCH") {
+  if (route === "DAI_PERMIT_SETTLEMENT") {
     const permit = (id: "source-allow-permit" | "source-revoke-permit", nonce: string, allowed: boolean) => ({
       ...requestCommon,
       id,
@@ -158,7 +229,7 @@ function packageFor(route: SigningPackage["route"]): SigningPackage {
         domain: domain(token),
         message: {
           holder: sourceAccount.address,
-          spender: destination,
+          spender: settlementContract,
           nonce,
           expiry: deadline,
           allowed,
@@ -169,17 +240,19 @@ function packageFor(route: SigningPackage["route"]): SigningPackage {
       ...common,
       route,
       tokenAddress: token,
+      settlementContract,
       amount: "100",
       sourceSigningRequests: [
         permit("source-allow-permit", "7", true),
         permit("source-revoke-permit", "8", false),
+        erc20RescueRequest("7", PERMIT_KIND_DAI),
       ],
       destinationSettlement: {
         executor: destination,
         payer: "DESTINATION",
         assembly: "BUYER_LOCAL_RUNTIME",
-        atomicRequired: true,
-        operations: ["PERMIT_DAI_ALLOW", "TRANSFER_FROM_ERC20", "PERMIT_DAI_REVOKE"],
+        atomicRequired: false,
+        operations: ["SETTLE_DAI_PERMIT"],
       },
     });
   }
@@ -187,31 +260,35 @@ function packageFor(route: SigningPackage["route"]): SigningPackage {
     ...common,
     route,
     collectionAddress: collection,
+    settlementContract,
     tokenId: "12",
-    sourceSigningRequests: [{
-      ...requestCommon,
-      id: "source-nft-permit",
-      typedData: {
-        primaryType: "Permit",
-        types: {
-          EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
-          Permit: [...SIGNING_PACKAGE_EIP712_TYPES.ERC4494Permit],
-        },
-        domain: domain(collection),
-        message: {
-          spender: destination,
-          tokenId: "12",
-          nonce: "2",
-          deadline,
+    sourceSigningRequests: [
+      {
+        ...requestCommon,
+        id: "source-nft-permit",
+        typedData: {
+          primaryType: "Permit",
+          types: {
+            EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+            Permit: [...SIGNING_PACKAGE_EIP712_TYPES.ERC4494Permit],
+          },
+          domain: domain(collection),
+          message: {
+            spender: settlementContract,
+            tokenId: "12",
+            nonce: "2",
+            deadline,
+          },
         },
       },
-    }],
+      erc721RescueRequest(),
+    ],
     destinationSettlement: {
       executor: destination,
       payer: "DESTINATION",
       assembly: "BUYER_LOCAL_RUNTIME",
-      atomicRequired: true,
-      operations: ["PERMIT_ERC4494", "TRANSFER_FROM_ERC721"],
+      atomicRequired: false,
+      operations: ["SETTLE_ERC4494"],
     },
   });
 }
@@ -287,9 +364,9 @@ function destinationWallet(
 describe("buyer-local rescue runtime", () => {
   const routes: Array<[SigningPackage["route"], number]> = [
     ["ERC3009_RECEIVE_WITH_AUTHORIZATION", 1],
-    ["ERC2612_PERMIT_ATOMIC_BATCH", 2],
-    ["DAI_PERMIT_ATOMIC_BATCH", 3],
-    ["ERC4494_PERMIT_ATOMIC_BATCH", 2],
+    ["ERC2612_PERMIT_SETTLEMENT", 1],
+    ["DAI_PERMIT_SETTLEMENT", 1],
+    ["ERC4494_PERMIT_SETTLEMENT", 1],
   ];
 
   it.each(routes)("authorizes and executes %s with %i exact calls", async (route, callCount) => {
@@ -308,13 +385,15 @@ describe("buyer-local rescue runtime", () => {
     expect(simulated[0]?.calls).toHaveLength(callCount);
     expect(submitted[0]?.calls).toEqual(simulated[0]?.calls);
     expect(submitted[0]?.calls.every((call) => call.to.toLowerCase() ===
-      (route === "ERC4494_PERMIT_ATOMIC_BATCH" ? collection : token).toLowerCase())).toBe(true);
+      (route === "ERC3009_RECEIVE_WITH_AUTHORIZATION"
+        ? token
+        : settlementContract).toLowerCase())).toBe(true);
     expect(JSON.stringify(report)).not.toMatch(/signature|calldata|private/i);
     expect(report.transactionHashes).toEqual([txHash]);
   });
 
   it("rejects a source signer mismatch before requesting a signature", async () => {
-    const signingPackage = packageFor("ERC2612_PERMIT_ATOMIC_BATCH");
+    const signingPackage = packageFor("ERC2612_PERMIT_SETTLEMENT");
     const runtime = new BuyerRescueRuntime(() => now);
 
     await expect(runtime.authorize(
@@ -325,7 +404,7 @@ describe("buyer-local rescue runtime", () => {
   });
 
   it("rejects a valid signature from the wrong source", async () => {
-    const signingPackage = packageFor("ERC2612_PERMIT_ATOMIC_BATCH");
+    const signingPackage = packageFor("ERC2612_PERMIT_SETTLEMENT");
     const wrongSignatureSigner: LocalSourceSignerPort = {
       getAddress: async () => sourceAccount.address,
       signTypedData: signer(wrongAccount).signTypedData,
@@ -339,7 +418,7 @@ describe("buyer-local rescue runtime", () => {
   });
 
   it("rejects destination substitution and wrong-chain execution", async () => {
-    const signingPackage = packageFor("ERC2612_PERMIT_ATOMIC_BATCH");
+    const signingPackage = packageFor("ERC2612_PERMIT_SETTLEMENT");
     const runtime = new BuyerRescueRuntime(() => now);
     const first = await runtime.authorize(signingPackage, confirmation(signingPackage), signer());
     await expect(runtime.execute(
@@ -356,15 +435,15 @@ describe("buyer-local rescue runtime", () => {
     )).rejects.toMatchObject({ code: "CHAIN_MISMATCH" });
   });
 
-  it("requires atomic support and successful post-signature simulation", async () => {
-    const signingPackage = packageFor("DAI_PERMIT_ATOMIC_BATCH");
+  it("does not require wallet batching and still requires post-signature simulation", async () => {
+    const signingPackage = packageFor("DAI_PERMIT_SETTLEMENT");
     const runtime = new BuyerRescueRuntime(() => now);
     const noAtomic = await runtime.authorize(signingPackage, confirmation(signingPackage), signer());
     await expect(runtime.execute(
       noAtomic,
       successfulSimulator([]),
       destinationWallet([], { atomic: false }),
-    )).rejects.toMatchObject({ code: "ATOMIC_BATCH_UNAVAILABLE" });
+    )).resolves.toMatchObject({ status: "COMPLETED" });
 
     const failedSimulation = await runtime.authorize(
       signingPackage,
@@ -389,7 +468,7 @@ describe("buyer-local rescue runtime", () => {
   });
 
   it("rechecks destination account and chain after simulation", async () => {
-    const signingPackage = packageFor("ERC2612_PERMIT_ATOMIC_BATCH");
+    const signingPackage = packageFor("ERC2612_PERMIT_SETTLEMENT");
     const runtime = new BuyerRescueRuntime(() => now);
     const handle = await runtime.authorize(
       signingPackage,

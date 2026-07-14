@@ -23,7 +23,7 @@
     },
     {
       "contractName": "SafeExitTestERC2612",
-      "route": "ERC2612_PERMIT_ATOMIC_BATCH",
+      "route": "ERC2612_PERMIT_SETTLEMENT",
       "address": "0x299D0c59ff5cAEA7b5480fEE3650Eba88B9fb1cd",
       "salt": "0x6bab18f01ac098eb8f889bd77eec76ed6e618d06bd2f6a2947673d426cf11c9f",
       "initCodeHash": "0x6fb49d0396b375edffdc48f7ae2d92a90ac472de18d808985d17dc5c40312fba",
@@ -38,7 +38,7 @@
     },
     {
       "contractName": "SafeExitTestDaiPermit",
-      "route": "DAI_PERMIT_ATOMIC_BATCH",
+      "route": "DAI_PERMIT_SETTLEMENT",
       "address": "0xFd808D7a826AfF84Fd3E9dE4a2CE8cC107B0fCb0",
       "salt": "0x8349b2a353b256b4ad0e5a42d9081d546a8f0a1d5056ca6c98cf97e1db18e345",
       "initCodeHash": "0xe4e650a6f7bb856c0a25d28b5a8b12849fab605ff9e08274247b291484ea902f",
@@ -53,7 +53,7 @@
     },
     {
       "contractName": "SafeExitTestERC4494",
-      "route": "ERC4494_PERMIT_ATOMIC_BATCH",
+      "route": "ERC4494_PERMIT_SETTLEMENT",
       "address": "0x47bb2103D8580F313Fbfd20DF9760Cd0723EEA5b",
       "salt": "0x71ec93ac382724d095cf9e5bc5e62ee994d92291f420434b354009d09e241813",
       "initCodeHash": "0x7bd46c4c7ef330324054fcdb3f966c109283c79fc1d9aa3cc9157a8c3b6d90e4",
@@ -71,12 +71,12 @@
     {
       "symbol": "xETH",
       "address": "0xE7B000003A45145decf8a28FC755aD5eC5EA025A",
-      "verifiedRoute": "ERC2612_PERMIT_ATOMIC_BATCH"
+      "verifiedRoute": "ERC2612_PERMIT_SETTLEMENT"
     },
     {
       "symbol": "xBTC",
       "address": "0xb7C00000bcDEeF966b20B3D884B98E64d2b06b4f",
-      "verifiedRoute": "ERC2612_PERMIT_ATOMIC_BATCH"
+      "verifiedRoute": "ERC2612_PERMIT_SETTLEMENT"
     }
   ]
 }

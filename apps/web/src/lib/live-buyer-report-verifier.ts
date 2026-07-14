@@ -73,7 +73,7 @@ export class LiveBuyerExecutionVerifier implements BuyerExecutionVerifierPort {
     }
 
     const matchedTransfer = receipts.some((receipt) => receipt.logs.some((log) => {
-      if (signingPackage.route === "ERC4494_PERMIT_ATOMIC_BATCH") {
+      if (signingPackage.route === "ERC4494_PERMIT_SETTLEMENT") {
         if (!sameAddress(log.address, signingPackage.collectionAddress)) return false;
         try {
           const decoded = decodeEventLog({

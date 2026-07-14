@@ -260,7 +260,7 @@ strict receipt report to `buyer-report`:
     "planId": "plan-id",
     "planHash": "0x...",
     "actionId": "action-id",
-    "route": "ERC2612_PERMIT_ATOMIC_BATCH",
+    "route": "ERC2612_PERMIT_SETTLEMENT",
     "chainId": 196,
     "sourceAddress": "0x...",
     "destinationAddress": "0x...",
@@ -307,7 +307,7 @@ process a buyer inquiry as an accepted work order.
 Never provide an OKX prompt or agent with a seed phrase, private key, or raw
 wallet credential. SAFEEXIT can prepare a signing package and remains at
 `WAITING_FOR_USER` until the buyer-local runtime completes settlement. The
-provider-neutral local signer, atomic settlement, post-signature simulation,
+provider-neutral local signer, contract settlement, post-signature simulation,
 and receipt-verification core are implemented. Mapping them to the official
 OKX A2A transport and an Agentic Wallet destination adapter remains
 official-docs-required and is not represented as connected.
@@ -318,22 +318,30 @@ For an incident created on chain ID `196`, the rescue dashboard scans an
 incident-committed batch of ERC-20, ERC-721, and ERC-1155 assets and ranks
 destination-paid routes. ERC-3009 requires
 verified type-hash, EIP-712 domain, domain separator, and authorization-state
-reads. ERC-2612 requires a verified EIP-712 domain and nonce read, then remains
-provisional until the exact signed permit succeeds and OKX Wallet reports
-atomic batch support. The destination submits either
-`receiveWithAuthorization` or an atomic `permit` plus `transferFrom` batch and
+reads. ERC-2612 requires a verified EIP-712 domain and nonce read plus the
+verified SAFEEXIT settlement contract. The source signs the token permit and a
+destination-bound rescue authorization. The destination submits either
+`receiveWithAuthorization` directly or one `settleERC2612` contract call and
 pays all mainnet gas.
 
 DAI-style routes require the exact legacy permit type hash, a version `1`
 domain separator reconstructed from verified token metadata, and the pinned
-holder nonce. Two consecutive source signatures let the destination atomically
-grant the boolean allowance, pull the exact scanned balance, and revoke the
-allowance in the same batch.
+holder nonce. Allow, revoke, and rescue-commitment signatures let the settlement
+contract grant the boolean allowance, pull the exact scanned balance, and
+revoke the allowance in the same EVM transaction.
 
 ERC-4494 NFT routes additionally require pinned ownership, EIP-165 interface
-support, a verifiable EIP-712 domain, and the token-specific nonce. The exact
-signed permit must recover to the source owner before OKX Wallet receives an
-atomic `permit` plus `transferFrom` request from the destination.
+support, a verifiable EIP-712 domain, and the token-specific nonce. The source
+signs both the NFT permit and the SAFEEXIT destination commitment before the
+destination submits one `settleERC4494` call.
+
+The deterministic X Layer settlement address is
+`0x964FDCfE0A0bCE568309f3f7D07ab08Fc8F93103`. Run
+`npm run contracts:prepare:settlement:xlayer` to reproduce it and
+`npm run contracts:verify:settlement:xlayer` after deployment. Production
+preflight fails closed until code and all domain/type-hash constants verify at
+that exact address. The contract is unaudited and must not be presented as
+independently reviewed.
 
 No server credential, relayer key, or private key is used. The short-lived
 signature remains only in the browser tab. Source-funded transactions are

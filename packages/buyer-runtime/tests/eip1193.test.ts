@@ -69,47 +69,19 @@ describe("EIP-1193 buyer adapters", () => {
     });
   });
 
-  it("submits and monitors an atomic EIP-5792 call batch", async () => {
-    let statusReads = 0;
-    const methods: string[] = [];
+  it("rejects wallet-level atomic batches", async () => {
     const provider: Eip1193Provider = {
       request: async ({ method }) => {
-        methods.push(method);
-        if (method === "eth_requestAccounts") return [destination];
-        if (method === "eth_chainId") return "0xc4";
-        if (method === "wallet_getCapabilities") {
-          return { "0xc4": { atomic: { status: "supported" } } };
-        }
-        if (method === "wallet_sendCalls") return { id: "0x1234" };
-        if (method === "wallet_getCallsStatus") {
-          statusReads += 1;
-          return statusReads === 1
-            ? { status: 100, receipts: [] }
-            : { status: 200, receipts: [{ transactionHash: txHash }] };
-        }
         throw new Error(`Unexpected method ${method}`);
       },
     };
-    const wallet = new Eip1193DestinationWallet(provider, {
-      pollIntervalMs: 0,
-      maximumPolls: 3,
-      clock: () => now,
-      sleep: async () => undefined,
-    });
+    const wallet = new Eip1193DestinationWallet(provider);
 
-    expect(await wallet.getAddress()).toBe(destination);
-    expect(await wallet.getChainId()).toBe(196);
-    expect(await wallet.supportsAtomicBatch(196, destination)).toBe(true);
-    const submission = await wallet.submit(batch(true, 2));
-    const receipt = await wallet.waitForReceipt(submission);
-
-    expect(receipt.status).toBe("CONFIRMED");
-    expect(receipt.transactionHashes).toEqual([txHash]);
-    expect(methods).toContain("wallet_sendCalls");
-    expect(methods).not.toContain("eth_sendTransaction");
+    await expect(wallet.supportsAtomicBatch(196, destination)).resolves.toBe(false);
+    await expect(wallet.submit(batch(true, 2))).rejects.toThrow("one non-batched contract call");
   });
 
-  it("uses one destination transaction for non-atomic ERC-3009 settlement", async () => {
+  it("uses one destination transaction for a non-batched settlement", async () => {
     const methods: string[] = [];
     const provider: Eip1193Provider = {
       request: async ({ method }) => {

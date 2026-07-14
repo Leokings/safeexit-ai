@@ -1,4 +1,14 @@
 import {
+  ERC20_RESCUE_TYPEHASH,
+  ERC721_RESCUE_TYPEHASH,
+  getConfiguredPermitSettlementAddress,
+  PERMIT_KIND_DAI,
+  PERMIT_KIND_ERC2612,
+  PERMIT_SETTLEMENT_NAME,
+  PERMIT_SETTLEMENT_VERSION,
+  permitSettlementAbi,
+} from "@safeexit/adapters";
+import {
   createDedicatedPublicClient,
   getRescueMainnetChainConfig,
 } from "@safeexit/chain";
@@ -12,6 +22,7 @@ import {
 import {
   rescuePlanSchema,
   walletScanSchema,
+  type EvmAddress,
   type RescueAssetManifest,
   type RescuePlan,
 } from "@safeexit/shared";
@@ -36,7 +47,6 @@ import { hasNonEmptyEvmRevertData } from "@/lib/evm-revert-data";
 import { rateLimitPublicRequest } from "@/lib/agent-http";
 import {
   eip712DomainSchema,
-  hasVerifiedWalletAtomicBatchAdapter,
   mainnetPreflightRequestSchema,
   mainnetPreflightResponseSchema,
   type Eip712Domain,
@@ -44,6 +54,69 @@ import {
 } from "@/lib/mainnet-rescue";
 
 export const runtime = "nodejs";
+
+async function verifiedPermitSettlement(
+  client: ReturnType<typeof createDedicatedPublicClient>,
+  chainId: number,
+  blockNumber: bigint,
+): Promise<EvmAddress | undefined> {
+  const configured = getConfiguredPermitSettlementAddress(chainId);
+  if (!configured) return undefined;
+  const address = configured as Address;
+  try {
+    const code = await client.getCode({ address, blockNumber });
+    if (!code || code === "0x") return undefined;
+    const [domain, erc2612Kind, daiKind, erc20Typehash, erc721Typehash] =
+      await Promise.all([
+        client.readContract({
+          address,
+          abi: permitSettlementAbi,
+          functionName: "eip712Domain",
+          blockNumber,
+        }),
+        client.readContract({
+          address,
+          abi: permitSettlementAbi,
+          functionName: "PERMIT_KIND_ERC2612",
+          blockNumber,
+        }),
+        client.readContract({
+          address,
+          abi: permitSettlementAbi,
+          functionName: "PERMIT_KIND_DAI",
+          blockNumber,
+        }),
+        client.readContract({
+          address,
+          abi: permitSettlementAbi,
+          functionName: "ERC20_RESCUE_TYPEHASH",
+          blockNumber,
+        }),
+        client.readContract({
+          address,
+          abi: permitSettlementAbi,
+          functionName: "ERC721_RESCUE_TYPEHASH",
+          blockNumber,
+        }),
+      ]);
+    const [fields, name, version, reportedChainId, verifyingContract, salt, extensions] = domain;
+    return fields === "0x0f" &&
+      name === PERMIT_SETTLEMENT_NAME &&
+      version === PERMIT_SETTLEMENT_VERSION &&
+      reportedChainId === BigInt(chainId) &&
+      verifyingContract.toLowerCase() === address.toLowerCase() &&
+      /^0x0{64}$/i.test(salt) &&
+      extensions.length === 0 &&
+      erc2612Kind === PERMIT_KIND_ERC2612 &&
+      daiKind === PERMIT_KIND_DAI &&
+      erc20Typehash.toLowerCase() === ERC20_RESCUE_TYPEHASH &&
+      erc721Typehash.toLowerCase() === ERC721_RESCUE_TYPEHASH
+      ? configured
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const metadataAbi = [
   {
@@ -652,6 +725,14 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       rpcUrl,
     );
     const observedAtBlock = await client.getBlockNumber();
+    const permitSettlement = await verifiedPermitSettlement(
+      client,
+      incident.chainId,
+      observedAtBlock,
+    );
+    const permitSpender = (
+      permitSettlement ?? incident.destinationAddress
+    ) as Address;
     const uniqueTokens = [
       ...new Map(input.tokenAddresses.map((address) => [address.toLowerCase(), address])).values(),
     ];
@@ -701,7 +782,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
               client,
               address,
               incident.sourceAddress as Address,
-              incident.destinationAddress as Address,
+              permitSpender,
               observedAtBlock,
               incident.chainId,
             ),
@@ -709,7 +790,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
               client,
               address,
               incident.sourceAddress as Address,
-              incident.destinationAddress as Address,
+              permitSpender,
               observedAtBlock,
               incident.chainId,
             ),
@@ -885,7 +966,6 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         .filter((result) => result.status === "SUCCEEDED")
         .map((result) => result.actionId),
     );
-    const walletAtomicBatchVerified = hasVerifiedWalletAtomicBatchAdapter(incident.chainId);
     const gaslessActions = plan.actions.flatMap<GaslessRescueAction>((action) => {
       if (!successfulActionIds.has(action.id)) {
         return [];
@@ -898,13 +978,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           !collectionMetadata ||
           !("erc4494Permit" in collectionMetadata) ||
           !collectionMetadata.erc4494Permit ||
-          !walletAtomicBatchVerified
+          !permitSettlement
         ) {
           return [];
         }
         return [{
           actionId: action.id,
-          standard: "ERC4494_PERMIT_ATOMIC_BATCH" as const,
+          standard: "ERC4494_PERMIT_SETTLEMENT" as const,
           capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED" as const,
           collectionAddress: action.parameters.collectionAddress,
           from: action.sourceAddress,
@@ -912,7 +992,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           tokenId: action.parameters.tokenId,
           nonce: collectionMetadata.erc4494Permit.nonce,
           domain: collectionMetadata.erc4494Permit.domain,
-          requiredWalletCapability: "ATOMIC_BATCH" as const,
+          settlementContract: permitSettlement,
+          requiredSignatures: 2 as const,
         }];
       }
       if (action.actionType !== "TRANSFER_ERC20") {
@@ -936,13 +1017,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         });
       }
       if (
-        walletAtomicBatchVerified &&
+        permitSettlement &&
         "erc2612Permit" in tokenMetadata &&
         tokenMetadata.erc2612Permit
       ) {
         routes.push({
           actionId: action.id,
-          standard: "ERC2612_PERMIT_ATOMIC_BATCH" as const,
+          standard: "ERC2612_PERMIT_SETTLEMENT" as const,
           capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED" as const,
           tokenAddress: action.parameters.tokenAddress,
           from: action.sourceAddress,
@@ -950,17 +1031,18 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           amount: action.parameters.amount,
           nonce: tokenMetadata.erc2612Permit.nonce,
           domain: tokenMetadata.erc2612Permit.domain,
-          requiredWalletCapability: "ATOMIC_BATCH" as const,
+          settlementContract: permitSettlement,
+          requiredSignatures: 2 as const,
         });
       }
       if (
-        walletAtomicBatchVerified &&
+        permitSettlement &&
         "daiPermit" in tokenMetadata &&
         tokenMetadata.daiPermit
       ) {
         routes.push({
           actionId: action.id,
-          standard: "DAI_PERMIT_ATOMIC_BATCH" as const,
+          standard: "DAI_PERMIT_SETTLEMENT" as const,
           capabilityStatus: "SIGNATURE_VERIFICATION_REQUIRED" as const,
           tokenAddress: action.parameters.tokenAddress,
           from: action.sourceAddress,
@@ -968,8 +1050,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           amount: action.parameters.amount,
           nonce: tokenMetadata.daiPermit.nonce,
           domain: tokenMetadata.daiPermit.domain,
-          requiredWalletCapability: "ATOMIC_BATCH" as const,
-          requiredSignatures: 2 as const,
+          settlementContract: permitSettlement,
+          requiredSignatures: 3 as const,
         });
       }
       return routes;
@@ -1005,14 +1087,14 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
             ? "Native rescue requires a verified sponsored EIP-7702 or private atomic bundle path."
             : action.actionType === "TRANSFER_ERC721" && nftMetadataEntry &&
                 "erc4494Permit" in nftMetadataEntry && nftMetadataEntry.erc4494Permit
-              ? walletAtomicBatchVerified
+              ? permitSettlement
                 ? "The NFT supports ERC-4494, but its current-state transfer preflight did not succeed."
-                : "The NFT supports ERC-4494, but this chain has no verified SafeExit atomic settlement adapter."
+                : "The NFT supports ERC-4494, but this chain has no verified SafeExit permit settlement contract."
               : action.actionType === "TRANSFER_ERC721"
                 ? "The NFT does not expose a verified ERC-4494 destination-paid permit route."
             : action.actionType === "TRANSFER_ERC20" && hasAtomicPermitCapability &&
-                !walletAtomicBatchVerified
-              ? "The token supports a permit route, but this chain has no verified SafeExit atomic settlement adapter."
+                !permitSettlement
+              ? "The token supports a permit route, but this chain has no verified SafeExit permit settlement contract."
             : action.actionType === "TRANSFER_ERC20" && verifiedDestinationPaidRoute
               ? "The token supports a destination-paid authorization, but its current-state transfer preflight did not succeed."
               : action.actionType === "TRANSFER_ERC20"

@@ -13,6 +13,7 @@ import {
   type BuyerExecutionReport,
   type SigningPackage,
 } from "@safeexit/agent-service";
+import { permitSettlementAbi } from "@safeexit/adapters";
 
 import type {
   AtomicSettlementSimulatorPort,
@@ -49,81 +50,6 @@ const receiveWithAuthorizationAbi = [{
   outputs: [],
 }] as const;
 
-const erc2612Abi = [
-  {
-    type: "function",
-    name: "permit",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "owner", type: "address" },
-      { name: "spender", type: "address" },
-      { name: "value", type: "uint256" },
-      { name: "deadline", type: "uint256" },
-      { name: "v", type: "uint8" },
-      { name: "r", type: "bytes32" },
-      { name: "s", type: "bytes32" },
-    ],
-    outputs: [],
-  },
-  {
-    type: "function",
-    name: "transferFrom",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "from", type: "address" },
-      { name: "to", type: "address" },
-      { name: "value", type: "uint256" },
-    ],
-    outputs: [{ name: "", type: "bool" }],
-  },
-] as const;
-
-const daiPermitAbi = [
-  {
-    type: "function",
-    name: "permit",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "holder", type: "address" },
-      { name: "spender", type: "address" },
-      { name: "nonce", type: "uint256" },
-      { name: "expiry", type: "uint256" },
-      { name: "allowed", type: "bool" },
-      { name: "v", type: "uint8" },
-      { name: "r", type: "bytes32" },
-      { name: "s", type: "bytes32" },
-    ],
-    outputs: [],
-  },
-  erc2612Abi[1],
-] as const;
-
-const erc4494Abi = [
-  {
-    type: "function",
-    name: "permit",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "spender", type: "address" },
-      { name: "tokenId", type: "uint256" },
-      { name: "deadline", type: "uint256" },
-      { name: "signature", type: "bytes" },
-    ],
-    outputs: [],
-  },
-  {
-    type: "function",
-    name: "transferFrom",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "from", type: "address" },
-      { name: "to", type: "address" },
-      { name: "tokenId", type: "uint256" },
-    ],
-    outputs: [],
-  },
-] as const;
-
 export type BuyerRuntimeErrorCode =
   | "INVALID_CONFIRMATION"
   | "PACKAGE_EXPIRED"
@@ -132,7 +58,6 @@ export type BuyerRuntimeErrorCode =
   | "INVALID_HANDLE"
   | "DESTINATION_MISMATCH"
   | "CHAIN_MISMATCH"
-  | "ATOMIC_BATCH_UNAVAILABLE"
   | "SIMULATION_FAILED"
   | "SUBMISSION_FAILED";
 
@@ -309,97 +234,76 @@ function assembleCalls(
       ],
     }))];
   }
-  if (signingPackage.route === "ERC2612_PERMIT_ATOMIC_BATCH") {
-    const signature = signatures[0];
-    if (!signature) throw new BuyerRuntimeError("INVALID_SIGNATURE", "Missing ERC-2612 signature");
-    const { v, r, s } = signatureParts(signature);
-    const message = signingPackage.sourceSigningRequests[0].typedData.message;
-    return [
-      call(signingPackage.tokenAddress, encodeFunctionData({
-        abi: erc2612Abi,
-        functionName: "permit",
-        args: [
-          address(message.owner),
-          address(message.spender),
-          BigInt(message.value),
-          BigInt(message.deadline),
-          v,
-          r,
-          s,
-        ],
-      })),
-      call(signingPackage.tokenAddress, encodeFunctionData({
-        abi: erc2612Abi,
-        functionName: "transferFrom",
-        args: [address(message.owner), address(message.spender), BigInt(message.value)],
-      })),
-    ];
+  if (signingPackage.route === "ERC2612_PERMIT_SETTLEMENT") {
+    const permitSignature = signatures[0];
+    const rescueSignature = signatures[1];
+    if (!permitSignature || !rescueSignature) {
+      throw new BuyerRuntimeError("INVALID_SIGNATURE", "Missing ERC-2612 settlement signatures");
+    }
+    const rescue = signingPackage.sourceSigningRequests[1].typedData.message;
+    return [call(signingPackage.settlementContract, encodeFunctionData({
+      abi: permitSettlementAbi,
+      functionName: "settleERC2612",
+      args: [
+        address(rescue.token),
+        address(rescue.owner),
+        address(rescue.destination),
+        BigInt(rescue.amount),
+        BigInt(rescue.permitNonce),
+        BigInt(rescue.deadline),
+        rescue.rescueNonce as Hex,
+        signatureParts(permitSignature),
+        signatureParts(rescueSignature),
+      ],
+    }))];
   }
-  if (signingPackage.route === "DAI_PERMIT_ATOMIC_BATCH") {
+  if (signingPackage.route === "DAI_PERMIT_SETTLEMENT") {
     const allowSignature = signatures[0];
     const revokeSignature = signatures[1];
-    if (!allowSignature || !revokeSignature) {
+    const rescueSignature = signatures[2];
+    if (!allowSignature || !revokeSignature || !rescueSignature) {
       throw new BuyerRuntimeError("INVALID_SIGNATURE", "Missing DAI-style signatures");
     }
-    const allowParts = signatureParts(allowSignature);
-    const revokeParts = signatureParts(revokeSignature);
     const allow = signingPackage.sourceSigningRequests[0].typedData.message;
-    const revoke = signingPackage.sourceSigningRequests[1].typedData.message;
-    return [
-      call(signingPackage.tokenAddress, encodeFunctionData({
-        abi: daiPermitAbi,
-        functionName: "permit",
-        args: [
-          address(allow.holder),
-          address(allow.spender),
-          BigInt(allow.nonce),
-          BigInt(allow.expiry),
-          true,
-          allowParts.v,
-          allowParts.r,
-          allowParts.s,
-        ],
-      })),
-      call(signingPackage.tokenAddress, encodeFunctionData({
-        abi: daiPermitAbi,
-        functionName: "transferFrom",
-        args: [address(allow.holder), address(allow.spender), BigInt(signingPackage.amount)],
-      })),
-      call(signingPackage.tokenAddress, encodeFunctionData({
-        abi: daiPermitAbi,
-        functionName: "permit",
-        args: [
-          address(revoke.holder),
-          address(revoke.spender),
-          BigInt(revoke.nonce),
-          BigInt(revoke.expiry),
-          false,
-          revokeParts.v,
-          revokeParts.r,
-          revokeParts.s,
-        ],
-      })),
-    ];
-  }
-  const signature = signatures[0];
-  if (!signature) throw new BuyerRuntimeError("INVALID_SIGNATURE", "Missing ERC-4494 signature");
-  const message = signingPackage.sourceSigningRequests[0].typedData.message;
-  return [
-    call(signingPackage.collectionAddress, encodeFunctionData({
-      abi: erc4494Abi,
-      functionName: "permit",
-      args: [address(message.spender), BigInt(message.tokenId), BigInt(message.deadline), signature],
-    })),
-    call(signingPackage.collectionAddress, encodeFunctionData({
-      abi: erc4494Abi,
-      functionName: "transferFrom",
+    const rescue = signingPackage.sourceSigningRequests[2].typedData.message;
+    return [call(signingPackage.settlementContract, encodeFunctionData({
+      abi: permitSettlementAbi,
+      functionName: "settleDaiPermit",
       args: [
-        address(signingPackage.sourceAddress),
-        address(signingPackage.destinationAddress),
-        BigInt(message.tokenId),
+        address(rescue.token),
+        address(rescue.owner),
+        address(rescue.destination),
+        BigInt(rescue.amount),
+        BigInt(allow.nonce),
+        BigInt(rescue.deadline),
+        rescue.rescueNonce as Hex,
+        signatureParts(allowSignature),
+        signatureParts(revokeSignature),
+        signatureParts(rescueSignature),
       ],
-    })),
-  ];
+    }))];
+  }
+  const permitSignature = signatures[0];
+  const rescueSignature = signatures[1];
+  if (!permitSignature || !rescueSignature) {
+    throw new BuyerRuntimeError("INVALID_SIGNATURE", "Missing ERC-4494 settlement signatures");
+  }
+  const rescue = signingPackage.sourceSigningRequests[1].typedData.message;
+  return [call(signingPackage.settlementContract, encodeFunctionData({
+    abi: permitSettlementAbi,
+    functionName: "settleERC4494",
+    args: [
+      address(rescue.collection),
+      address(rescue.owner),
+      address(rescue.destination),
+      BigInt(rescue.tokenId),
+      BigInt(rescue.permitNonce),
+      BigInt(rescue.deadline),
+      rescue.rescueNonce as Hex,
+      permitSignature,
+      signatureParts(rescueSignature),
+    ],
+  }))];
 }
 
 export class BuyerRescueRuntime {
@@ -456,15 +360,6 @@ export class BuyerRescueRuntime {
     }
     if (await wallet.getChainId() !== signingPackage.chainId) {
       throw new BuyerRuntimeError("CHAIN_MISMATCH", "Destination wallet is on the wrong chain");
-    }
-    if (
-      signingPackage.destinationSettlement.atomicRequired &&
-      !(await wallet.supportsAtomicBatch(signingPackage.chainId, destination))
-    ) {
-      throw new BuyerRuntimeError(
-        "ATOMIC_BATCH_UNAVAILABLE",
-        "Destination wallet does not guarantee atomic execution for this route",
-      );
     }
     const batch: SettlementBatch = Object.freeze({
       packageId: signingPackage.packageId,

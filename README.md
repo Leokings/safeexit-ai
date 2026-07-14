@@ -153,23 +153,32 @@ verified onchain. The reported source signs a short-lived
 `ReceiveWithAuthorization` message and the destination submits it with real
 mainnet gas.
 
-ERC-2612 is a fallback for permit-compatible tokens. The source signs a permit
-whose spender is the safe destination. SAFEEXIT verifies that exact permit
-with an RPC call, requires OKX Wallet to report atomic batch support, then asks
-the destination to atomically submit `permit` and `transferFrom` through the
-official EIP-5792 wallet methods. In both routes the source submits no
+ERC-2612 is a fallback for permit-compatible tokens. The source signs a token
+permit whose spender is the verified SAFEEXIT settlement contract and a second
+SAFEEXIT authorization that binds the exact destination, token, amount, permit
+nonce, deadline, and one-time rescue nonce. The destination simulates and sends
+one `settleERC2612` transaction. In both routes the source submits no
 transaction and pays no network fee.
 
 DAI-style permits are supported when the token exposes the exact legacy permit
 type hash and its `name`, version `1`, chain ID, contract address, and domain
-separator agree. The source signs consecutive allow and revoke permits. The
-destination atomically submits `permit(true)`, `transferFrom`, and
-`permit(false)`, leaving no DAI-style allowance after settlement.
+separator agree. The source signs consecutive allow and revoke permits plus a
+destination-bound SAFEEXIT rescue authorization. The destination sends one
+`settleDaiPermit` transaction; the contract grants, transfers, and revokes in
+one EVM transaction, leaving no DAI-style allowance after settlement.
 
 ERC-721 NFTs can use an ERC-4494 fallback when the explicit collection/token ID
 is owned by the source and the collection reports the ERC-4494 interface plus a
-verifiable EIP-712 domain and nonce. The source signs the NFT permit; the
-destination atomically submits `permit` and `transferFrom` and pays gas.
+verifiable EIP-712 domain and nonce. The source signs the NFT permit plus a
+destination-bound SAFEEXIT authorization; the destination sends one
+`settleERC4494` transaction and pays gas.
+
+Permit settlement is asset-agnostic: there is no token or NFT allowlist. Any
+submitted asset may use a route when its capability checks pass and the exact
+chain settlement contract passes onchain identity verification. X Layer's
+deterministic contract address is
+`0x964FDCfE0A0bCE568309f3f7D07ab08Fc8F93103`; the route remains disabled until
+that address is deployed and verified.
 
 Authorization signatures remain in browser memory and are never sent to or
 stored by SAFEEXIT. Assets without a verified permit route, native currency,

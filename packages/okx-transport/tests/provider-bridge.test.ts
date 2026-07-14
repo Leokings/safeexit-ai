@@ -7,6 +7,12 @@ import {
   type SigningPackage,
 } from "@safeexit/agent-service";
 import {
+  getConfiguredPermitSettlementAddress,
+  PERMIT_KIND_ERC2612,
+  PERMIT_SETTLEMENT_NAME,
+  PERMIT_SETTLEMENT_VERSION,
+} from "@safeexit/adapters";
+import {
   evmAddressSchema,
   type Incident,
   type RescuePlan,
@@ -26,6 +32,7 @@ import {
 const source = evmAddressSchema.parse("0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
 const destination = evmAddressSchema.parse("0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65");
 const token = evmAddressSchema.parse("0x5FbDB2315678afecb367f032d93F642f64180aa3");
+const settlementContract = getConfiguredPermitSettlementAddress(196)!;
 const now = "2026-07-13T06:00:00.000Z";
 const planHash = `0x${"3".repeat(64)}`;
 const txHash = `0x${"a".repeat(64)}`;
@@ -113,46 +120,78 @@ const signingPackage: SigningPackage = {
   planId: plan.id,
   planHash,
   actionId: "action:transfer",
-  route: "ERC2612_PERMIT_ATOMIC_BATCH",
+  route: "ERC2612_PERMIT_SETTLEMENT",
   chainId: incident.chainId,
   sourceAddress: source,
   destinationAddress: destination,
   observedAtBlock: plan.observedAtBlock,
   expiresAt: "2026-07-13T06:05:00.000Z",
   tokenAddress: token,
+  settlementContract,
   amount: "100",
-  sourceSigningRequests: [{
-    id: "source-permit",
-    signer: source,
-    method: "EIP712",
-    rpcMethod: "eth_signTypedData_v4",
-    typedData: {
-      primaryType: "Permit",
-      types: {
-        EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
-        Permit: [...SIGNING_PACKAGE_EIP712_TYPES.ERC2612Permit],
-      },
-      domain: {
-        name: "Test Token",
-        version: "1",
-        chainId: incident.chainId,
-        verifyingContract: token,
-      },
-      message: {
-        owner: source,
-        spender: destination,
-        value: "100",
-        nonce: "0",
-        deadline: "1783922700",
+  sourceSigningRequests: [
+    {
+      id: "source-permit",
+      signer: source,
+      method: "EIP712",
+      rpcMethod: "eth_signTypedData_v4",
+      typedData: {
+        primaryType: "Permit",
+        types: {
+          EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+          Permit: [...SIGNING_PACKAGE_EIP712_TYPES.ERC2612Permit],
+        },
+        domain: {
+          name: "Test Token",
+          version: "1",
+          chainId: incident.chainId,
+          verifyingContract: token,
+        },
+        message: {
+          owner: source,
+          spender: settlementContract,
+          value: "100",
+          nonce: "0",
+          deadline: "1783922700",
+        },
       },
     },
-  }],
+    {
+      id: "source-rescue-authorization",
+      signer: source,
+      method: "EIP712",
+      rpcMethod: "eth_signTypedData_v4",
+      typedData: {
+        primaryType: "ERC20Rescue",
+        types: {
+          EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+          ERC20Rescue: [...SIGNING_PACKAGE_EIP712_TYPES.ERC20Rescue],
+        },
+        domain: {
+          name: PERMIT_SETTLEMENT_NAME,
+          version: PERMIT_SETTLEMENT_VERSION,
+          chainId: incident.chainId,
+          verifyingContract: settlementContract,
+        },
+        message: {
+          token,
+          owner: source,
+          destination,
+          amount: "100",
+          permitNonce: "0",
+          deadline: "1783922700",
+          rescueNonce: `0x${"9".repeat(64)}`,
+          permitKind: PERMIT_KIND_ERC2612,
+        },
+      },
+    },
+  ],
   destinationSettlement: {
     executor: destination,
     payer: "DESTINATION",
     assembly: "BUYER_LOCAL_RUNTIME",
-    atomicRequired: true,
-    operations: ["PERMIT_ERC2612", "TRANSFER_FROM_ERC20"],
+    atomicRequired: false,
+    operations: ["SETTLE_ERC2612"],
   },
   simulation: {
     resultId: "simulation:test",
@@ -350,7 +389,7 @@ describe("OKX A2A provider bridge", () => {
     const result = await bridge.prepareSigningDeliverable(lifecycle(), request);
 
     expect(result.safeExitJobId).toBe("job:test");
-    expect(result.signingPackage.route).toBe("ERC2612_PERMIT_ATOMIC_BATCH");
+    expect(result.signingPackage.route).toBe("ERC2612_PERMIT_SETTLEMENT");
     expect(result.executionRequirements.sourceSignaturesMustNotBeReturned).toBe(true);
     expect(JSON.stringify(result)).not.toContain("signature\"");
   });

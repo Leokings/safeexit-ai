@@ -32,17 +32,17 @@ const fixtures = [
   },
   {
     contractName: "SafeExitTestERC2612",
-    route: "ERC2612_PERMIT_ATOMIC_BATCH",
+    route: "ERC2612_PERMIT_SETTLEMENT",
     name: "SafeExit ERC2612 TEST ONLY - NO VALUE",
   },
   {
     contractName: "SafeExitTestDaiPermit",
-    route: "DAI_PERMIT_ATOMIC_BATCH",
+    route: "DAI_PERMIT_SETTLEMENT",
     name: "SafeExit DAI Permit TEST ONLY - NO VALUE",
   },
   {
     contractName: "SafeExitTestERC4494",
-    route: "ERC4494_PERMIT_ATOMIC_BATCH",
+    route: "ERC4494_PERMIT_SETTLEMENT",
     name: "SafeExit ERC4494 TEST ONLY - NO VALUE",
   },
 ];
@@ -228,7 +228,7 @@ async function verifyBehavior(client, fixture, address) {
         : { verified: false, reason: "ERC-3009 capability mismatch" };
     }
 
-    if (fixture.route === "DAI_PERMIT_ATOMIC_BATCH") {
+    if (fixture.route === "DAI_PERMIT_SETTLEMENT") {
       const [typehash, nonce] = await Promise.all([
         client.readContract({ address, abi: capabilityAbi, functionName: "PERMIT_TYPEHASH" }),
         client.readContract({ address, abi: capabilityAbi, functionName: "nonces", args: [zeroAddress] }),
@@ -241,7 +241,7 @@ async function verifyBehavior(client, fixture, address) {
         : { verified: false, reason: "DAI-style permit capability mismatch" };
     }
 
-    if (fixture.route === "ERC4494_PERMIT_ATOMIC_BATCH") {
+    if (fixture.route === "ERC4494_PERMIT_SETTLEMENT") {
       const supported = await client.readContract({
         address,
         abi: capabilityAbi,
@@ -326,12 +326,12 @@ async function writeManifest(entries, blockNumber) {
       {
         symbol: "xETH",
         address: getAddress("0xe7b000003a45145decf8a28fc755ad5ec5ea025a"),
-        verifiedRoute: "ERC2612_PERMIT_ATOMIC_BATCH",
+        verifiedRoute: "ERC2612_PERMIT_SETTLEMENT",
       },
       {
         symbol: "xBTC",
         address: getAddress("0xb7c00000bcdeef966b20b3d884b98e64d2b06b4f"),
-        verifiedRoute: "ERC2612_PERMIT_ATOMIC_BATCH",
+        verifiedRoute: "ERC2612_PERMIT_SETTLEMENT",
       },
     ],
   };

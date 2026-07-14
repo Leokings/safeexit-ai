@@ -8,6 +8,16 @@ import type {
 } from "@safeexit/agent-service";
 import { SIGNING_PACKAGE_EIP712_TYPES } from "@safeexit/agent-service";
 import {
+  ERC20_RESCUE_TYPEHASH,
+  ERC721_RESCUE_TYPEHASH,
+  getConfiguredPermitSettlementAddress,
+  PERMIT_KIND_DAI,
+  PERMIT_KIND_ERC2612,
+  PERMIT_SETTLEMENT_NAME,
+  PERMIT_SETTLEMENT_VERSION,
+  permitSettlementAbi,
+} from "@safeexit/adapters";
+import {
   createDedicatedPublicClient,
   type ChainAdapterConfig,
 } from "@safeexit/chain";
@@ -166,8 +176,8 @@ const zeroBytes32 = `0x${"00".repeat(32)}` as const;
 
 type PermitCapability =
   | { route: "ERC3009_RECEIVE_WITH_AUTHORIZATION"; domain: SigningDomain }
-  | { route: "ERC2612_PERMIT_ATOMIC_BATCH"; domain: SigningDomain; nonce: bigint }
-  | { route: "DAI_PERMIT_ATOMIC_BATCH"; domain: SigningDomain; nonce: bigint };
+  | { route: "ERC2612_PERMIT_SETTLEMENT"; domain: SigningDomain; nonce: bigint }
+  | { route: "DAI_PERMIT_SETTLEMENT"; domain: SigningDomain; nonce: bigint };
 
 type ReadyAgentJob = AgentServiceJob & {
   incident: NonNullable<AgentServiceJob["incident"]>;
@@ -214,6 +224,7 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
     if (currentBlock < observedAtBlock) {
       throw new Error("RPC head is behind the committed rescue plan block");
     }
+    const permitSettlement = await this.verifiedPermitSettlement(currentBlock);
     for (const action of job.plan.actions) {
       if (
         action.actionType !== "TRANSFER_ERC20" ||
@@ -244,6 +255,7 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
         job.plan.sourceAddress as Address,
         job.plan.destinationAddress as Address,
         currentBlock,
+        permitSettlement,
       );
       if (!capability) {
         continue;
@@ -254,9 +266,71 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
         simulation,
         capability,
         expiresAt,
+        permitSettlement,
       );
     }
     throw new Error("No simulated ERC-20 action exposes a verified destination-paid permit route");
+  }
+
+  private async verifiedPermitSettlement(
+    blockNumber: bigint,
+  ): Promise<Address | undefined> {
+    const configured = getConfiguredPermitSettlementAddress(this.chain.chain.id);
+    if (!configured) return undefined;
+    const address = configured as Address;
+    try {
+      const code = await this.client.getCode({ address, blockNumber });
+      if (!code || code === "0x") return undefined;
+      const [domain, erc2612Kind, daiKind, erc20Typehash, erc721Typehash] =
+        await Promise.all([
+          this.client.readContract({
+            address,
+            abi: permitSettlementAbi,
+            functionName: "eip712Domain",
+            blockNumber,
+          }),
+          this.client.readContract({
+            address,
+            abi: permitSettlementAbi,
+            functionName: "PERMIT_KIND_ERC2612",
+            blockNumber,
+          }),
+          this.client.readContract({
+            address,
+            abi: permitSettlementAbi,
+            functionName: "PERMIT_KIND_DAI",
+            blockNumber,
+          }),
+          this.client.readContract({
+            address,
+            abi: permitSettlementAbi,
+            functionName: "ERC20_RESCUE_TYPEHASH",
+            blockNumber,
+          }),
+          this.client.readContract({
+            address,
+            abi: permitSettlementAbi,
+            functionName: "ERC721_RESCUE_TYPEHASH",
+            blockNumber,
+          }),
+        ]);
+      const [fields, name, version, chainId, verifyingContract, salt, extensions] = domain;
+      return fields === "0x0f" &&
+        name === PERMIT_SETTLEMENT_NAME &&
+        version === PERMIT_SETTLEMENT_VERSION &&
+        chainId === BigInt(this.chain.chain.id) &&
+        verifyingContract.toLowerCase() === address.toLowerCase() &&
+        /^0x0{64}$/i.test(salt) &&
+        extensions.length === 0 &&
+        erc2612Kind === PERMIT_KIND_ERC2612 &&
+        daiKind === PERMIT_KIND_DAI &&
+        erc20Typehash.toLowerCase() === ERC20_RESCUE_TYPEHASH &&
+        erc721Typehash.toLowerCase() === ERC721_RESCUE_TYPEHASH
+        ? address
+        : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private async readDomain(
@@ -313,6 +387,7 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
     source: Address,
     destination: Address,
     blockNumber: bigint,
+    permitSettlement: Address | undefined,
   ): Promise<PermitCapability | undefined> {
     const domain = await this.readDomain(tokenAddress, blockNumber);
     if (domain) {
@@ -338,6 +413,7 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
       } catch {
         // Continue to permit-based routes.
       }
+      if (!permitSettlement) return undefined;
       try {
         const nonce = await this.client.readContract({
           address: tokenAddress,
@@ -349,7 +425,7 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
         const probe = encodeFunctionData({
           abi: erc2612Abi,
           functionName: "permit",
-          args: [source, destination, 1n, 9_999_999_999n, 27, zeroBytes32, zeroBytes32],
+          args: [source, permitSettlement, 1n, 9_999_999_999n, 27, zeroBytes32, zeroBytes32],
         });
         try {
           await this.client.call({
@@ -360,20 +436,29 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
           });
         } catch (error) {
           if (hasNonEmptyEvmRevertData(error)) {
-            return { route: "ERC2612_PERMIT_ATOMIC_BATCH", domain, nonce };
+            return { route: "ERC2612_PERMIT_SETTLEMENT", domain, nonce };
           }
         }
       } catch {
         // Continue to strict DAI-style detection.
       }
     }
-    return this.detectDaiCapability(tokenAddress, source, destination, blockNumber);
+    return permitSettlement
+      ? this.detectDaiCapability(
+          tokenAddress,
+          source,
+          destination,
+          permitSettlement,
+          blockNumber,
+        )
+      : undefined;
   }
 
   private async detectDaiCapability(
     tokenAddress: Address,
     source: Address,
     destination: Address,
+    permitSettlement: Address,
     blockNumber: bigint,
   ): Promise<PermitCapability | undefined> {
     try {
@@ -430,7 +515,7 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
       const probe = encodeFunctionData({
         abi: daiPermitAbi,
         functionName: "permit",
-        args: [source, destination, nonce, 9_999_999_999n, true, 27, zeroBytes32, zeroBytes32],
+        args: [source, permitSettlement, nonce, 9_999_999_999n, true, 27, zeroBytes32, zeroBytes32],
       });
       try {
         await this.client.call({
@@ -441,7 +526,7 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
         });
         return undefined;
       } catch {
-        return { route: "DAI_PERMIT_ATOMIC_BATCH", domain, nonce };
+        return { route: "DAI_PERMIT_SETTLEMENT", domain, nonce };
       }
     } catch {
       return undefined;
@@ -454,6 +539,7 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
     simulation: SimulationResult,
     capability: PermitCapability,
     expiresAt: Date,
+    permitSettlement: Address | undefined,
   ): Promise<SigningPackage> {
     const tokenAction = action;
     const common = {
@@ -522,43 +608,82 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
         },
       };
     }
-    if (capability.route === "ERC2612_PERMIT_ATOMIC_BATCH") {
+    if (!permitSettlement) {
+      throw new Error("Permit settlement contract is not verified on this chain");
+    }
+    const settlementContract = evmAddressSchema.parse(permitSettlement);
+    const rescueNonce = `0x${randomBytes(32).toString("hex")}` as Hex;
+    const settlementDomain = {
+      name: PERMIT_SETTLEMENT_NAME,
+      version: PERMIT_SETTLEMENT_VERSION,
+      chainId: job.plan.chainId,
+      verifyingContract: settlementContract,
+    };
+    if (capability.route === "ERC2612_PERMIT_SETTLEMENT") {
       return {
         ...common,
         route: capability.route,
-        sourceSigningRequests: [{
-          id: "source-permit",
-          signer: job.plan.sourceAddress,
-          method: "EIP712",
-          rpcMethod: "eth_signTypedData_v4",
-          typedData: {
-            primaryType: "Permit",
-            types: {
-              EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
-              Permit: [...SIGNING_PACKAGE_EIP712_TYPES.ERC2612Permit],
-            },
-            domain: capability.domain,
-            message: {
-              owner: job.plan.sourceAddress,
-              spender: job.plan.destinationAddress,
-              value: tokenAction.parameters.amount,
-              nonce: capability.nonce.toString(),
-              deadline: expiry,
+        settlementContract,
+        sourceSigningRequests: [
+          {
+            id: "source-permit",
+            signer: job.plan.sourceAddress,
+            method: "EIP712",
+            rpcMethod: "eth_signTypedData_v4",
+            typedData: {
+              primaryType: "Permit",
+              types: {
+                EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+                Permit: [...SIGNING_PACKAGE_EIP712_TYPES.ERC2612Permit],
+              },
+              domain: capability.domain,
+              message: {
+                owner: job.plan.sourceAddress,
+                spender: settlementContract,
+                value: tokenAction.parameters.amount,
+                nonce: capability.nonce.toString(),
+                deadline: expiry,
+              },
             },
           },
-        }],
+          {
+            id: "source-rescue-authorization",
+            signer: job.plan.sourceAddress,
+            method: "EIP712",
+            rpcMethod: "eth_signTypedData_v4",
+            typedData: {
+              primaryType: "ERC20Rescue",
+              types: {
+                EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+                ERC20Rescue: [...SIGNING_PACKAGE_EIP712_TYPES.ERC20Rescue],
+              },
+              domain: settlementDomain,
+              message: {
+                token: tokenAction.parameters.tokenAddress,
+                owner: job.plan.sourceAddress,
+                destination: job.plan.destinationAddress,
+                amount: tokenAction.parameters.amount,
+                permitNonce: capability.nonce.toString(),
+                deadline: expiry,
+                rescueNonce,
+                permitKind: PERMIT_KIND_ERC2612,
+              },
+            },
+          },
+        ],
         destinationSettlement: {
           executor: job.plan.destinationAddress,
           payer: "DESTINATION",
           assembly: "BUYER_LOCAL_RUNTIME",
-          atomicRequired: true,
-          operations: ["PERMIT_ERC2612", "TRANSFER_FROM_ERC20"],
+          atomicRequired: false,
+          operations: ["SETTLE_ERC2612"],
         },
       };
     }
     return {
       ...common,
       route: capability.route,
+      settlementContract,
       sourceSigningRequests: [
         {
           id: "source-allow-permit",
@@ -574,7 +699,7 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
             domain: capability.domain,
             message: {
               holder: job.plan.sourceAddress,
-              spender: job.plan.destinationAddress,
+              spender: settlementContract,
               nonce: capability.nonce.toString(),
               expiry,
               allowed: true,
@@ -595,10 +720,34 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
             domain: capability.domain,
             message: {
               holder: job.plan.sourceAddress,
-              spender: job.plan.destinationAddress,
+              spender: settlementContract,
               nonce: (capability.nonce + 1n).toString(),
               expiry,
               allowed: false,
+            },
+          },
+        },
+        {
+          id: "source-rescue-authorization",
+          signer: job.plan.sourceAddress,
+          method: "EIP712",
+          rpcMethod: "eth_signTypedData_v4",
+          typedData: {
+            primaryType: "ERC20Rescue",
+            types: {
+              EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+              ERC20Rescue: [...SIGNING_PACKAGE_EIP712_TYPES.ERC20Rescue],
+            },
+            domain: settlementDomain,
+            message: {
+              token: tokenAction.parameters.tokenAddress,
+              owner: job.plan.sourceAddress,
+              destination: job.plan.destinationAddress,
+              amount: tokenAction.parameters.amount,
+              permitNonce: capability.nonce.toString(),
+              deadline: expiry,
+              rescueNonce,
+              permitKind: PERMIT_KIND_DAI,
             },
           },
         },
@@ -607,12 +756,8 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
         executor: job.plan.destinationAddress,
         payer: "DESTINATION",
         assembly: "BUYER_LOCAL_RUNTIME",
-        atomicRequired: true,
-        operations: [
-          "PERMIT_DAI_ALLOW",
-          "TRANSFER_FROM_ERC20",
-          "PERMIT_DAI_REVOKE",
-        ],
+        atomicRequired: false,
+        operations: ["SETTLE_DAI_PERMIT"],
       },
     };
   }

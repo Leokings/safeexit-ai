@@ -7,6 +7,12 @@ import {
   signingPackageSchema,
   type AgentServiceJob,
 } from "@safeexit/agent-service";
+import {
+  getConfiguredPermitSettlementAddress,
+  PERMIT_KIND_ERC2612,
+  PERMIT_SETTLEMENT_NAME,
+  PERMIT_SETTLEMENT_VERSION,
+} from "@safeexit/adapters";
 import { xLayerMainnetConfig } from "@safeexit/chain";
 
 import {
@@ -18,6 +24,7 @@ const source = "0x1111111111111111111111111111111111111111" as const;
 const destination = "0x2222222222222222222222222222222222222222" as const;
 const wrongDestination = "0x3333333333333333333333333333333333333333" as const;
 const token = "0x4444444444444444444444444444444444444444" as const;
+const settlementContract = getConfiguredPermitSettlementAddress(196)!;
 const txHash = `0x${"55".repeat(32)}` as Hex;
 const planHash = `0x${"66".repeat(32)}`;
 const expiresAt = "2026-07-13T10:04:00.000Z";
@@ -41,46 +48,78 @@ const signingPackage = signingPackageSchema.parse({
   planId: "plan:test",
   planHash,
   actionId: "action:test",
-  route: "ERC2612_PERMIT_ATOMIC_BATCH",
+  route: "ERC2612_PERMIT_SETTLEMENT",
   chainId: 196,
   sourceAddress: source,
   destinationAddress: destination,
   observedAtBlock: "100",
   expiresAt,
   tokenAddress: token,
+  settlementContract,
   amount: "100",
-  sourceSigningRequests: [{
-    id: "source-permit",
-    signer: source,
-    method: "EIP712",
-    rpcMethod: "eth_signTypedData_v4",
-    typedData: {
-      primaryType: "Permit",
-      types: {
-        EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
-        Permit: [...SIGNING_PACKAGE_EIP712_TYPES.ERC2612Permit],
-      },
-      domain: {
-        name: "Token",
-        version: "1",
-        chainId: 196,
-        verifyingContract: token,
-      },
-      message: {
-        owner: source,
-        spender: destination,
-        value: "100",
-        nonce: "0",
-        deadline,
+  sourceSigningRequests: [
+    {
+      id: "source-permit",
+      signer: source,
+      method: "EIP712",
+      rpcMethod: "eth_signTypedData_v4",
+      typedData: {
+        primaryType: "Permit",
+        types: {
+          EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+          Permit: [...SIGNING_PACKAGE_EIP712_TYPES.ERC2612Permit],
+        },
+        domain: {
+          name: "Token",
+          version: "1",
+          chainId: 196,
+          verifyingContract: token,
+        },
+        message: {
+          owner: source,
+          spender: settlementContract,
+          value: "100",
+          nonce: "0",
+          deadline,
+        },
       },
     },
-  }],
+    {
+      id: "source-rescue-authorization",
+      signer: source,
+      method: "EIP712",
+      rpcMethod: "eth_signTypedData_v4",
+      typedData: {
+        primaryType: "ERC20Rescue",
+        types: {
+          EIP712Domain: [...SIGNING_PACKAGE_EIP712_TYPES.EIP712Domain],
+          ERC20Rescue: [...SIGNING_PACKAGE_EIP712_TYPES.ERC20Rescue],
+        },
+        domain: {
+          name: PERMIT_SETTLEMENT_NAME,
+          version: PERMIT_SETTLEMENT_VERSION,
+          chainId: 196,
+          verifyingContract: settlementContract,
+        },
+        message: {
+          token,
+          owner: source,
+          destination,
+          amount: "100",
+          permitNonce: "0",
+          deadline,
+          rescueNonce: `0x${"9".repeat(64)}`,
+          permitKind: PERMIT_KIND_ERC2612,
+        },
+      },
+    },
+  ],
   destinationSettlement: {
     executor: destination,
     payer: "DESTINATION",
     assembly: "BUYER_LOCAL_RUNTIME",
-    atomicRequired: true,
-    operations: ["PERMIT_ERC2612", "TRANSFER_FROM_ERC20"],
+    atomicRequired: false,
+    operations: ["SETTLE_ERC2612"],
   },
   simulation: {
     resultId: "simulation:test",
