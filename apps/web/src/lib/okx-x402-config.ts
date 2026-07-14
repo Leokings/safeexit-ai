@@ -68,7 +68,7 @@ export function createSafeExitX402RouteConfig(
       contentType: "application/json",
       body: {
         code: "PAYMENT_REQUIRED",
-        message: "A 0.1 USDT payment is required to prepare this rescue package",
+        message: "A 0.1 USDT payment is required to prepare this rescue plan and signing package set",
       },
     }),
   };
