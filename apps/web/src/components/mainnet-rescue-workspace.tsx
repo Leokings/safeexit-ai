@@ -201,7 +201,7 @@ export function MainnetRescueWorkspace({
     setBusy("CONNECT");
     setError(undefined);
     try {
-      const provider = getOkxProvider();
+      const provider = await getOkxProvider();
       await connectOkxWallet(provider);
       await ensureRescueMainnet(provider, chainId);
       const account = await getOkxConnectedAccount(provider);
@@ -273,7 +273,7 @@ export function MainnetRescueWorkspace({
     setBusy("SIGN");
     setError(undefined);
     try {
-      const provider = getOkxProvider();
+      const provider = await getOkxProvider();
       await connectOkxWallet(provider);
       await ensureRescueMainnet(provider, chainId);
       const account = await getOkxConnectedAccount(provider);
@@ -338,7 +338,7 @@ export function MainnetRescueWorkspace({
     setBusy("SETTLE");
     setError(undefined);
     try {
-      const provider = getOkxProvider();
+      const provider = await getOkxProvider();
       await connectOkxWallet(provider);
       await ensureRescueMainnet(provider, chainId);
       const account = await getOkxConnectedAccount(provider);

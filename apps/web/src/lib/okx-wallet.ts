@@ -29,6 +29,28 @@ export type OkxInjectedProvider = {
   ): void;
 };
 
+type Eip6963ProviderInfo = {
+  uuid: string;
+  name: string;
+  icon: string;
+  rdns: string;
+};
+
+type Eip6963ProviderDetail = {
+  info: Eip6963ProviderInfo;
+  provider: OkxInjectedProvider & {
+    isOkxWallet?: boolean;
+    isOKExWallet?: boolean;
+  };
+};
+
+export type Eip6963ProviderHost = {
+  okxwallet?: OkxInjectedProvider | undefined;
+  addEventListener(type: string, listener: EventListener): void;
+  removeEventListener(type: string, listener: EventListener): void;
+  dispatchEvent(event: Event): boolean;
+};
+
 export type Eip3009Authorization = {
   actionId: string;
   tokenAddress: `0x${string}`;
@@ -396,11 +418,61 @@ function typedDataRpcPayload(authorization: Eip3009Authorization): string {
   });
 }
 
-export function getOkxProvider(): OkxInjectedProvider {
-  if (typeof window === "undefined" || !window.okxwallet) {
-    throw new Error("OKX Wallet extension was not detected in this browser");
+function isOkxAnnouncement(value: unknown): value is Eip6963ProviderDetail {
+  if (!value || typeof value !== "object") {
+    return false;
   }
-  return window.okxwallet;
+  const detail = value as Partial<Eip6963ProviderDetail>;
+  if (
+    !detail.info ||
+    typeof detail.info.name !== "string" ||
+    typeof detail.info.rdns !== "string" ||
+    !detail.provider ||
+    typeof detail.provider.request !== "function"
+  ) {
+    return false;
+  }
+  const name = detail.info.name.trim().toLowerCase();
+  const rdnsLabels = detail.info.rdns.toLowerCase().split(".");
+  return detail.provider.isOkxWallet === true ||
+    detail.provider.isOKExWallet === true ||
+    name === "okx wallet" ||
+    rdnsLabels.includes("okx") ||
+    rdnsLabels.includes("okex");
+}
+
+export async function getOkxProvider(
+  host: Eip6963ProviderHost | undefined =
+    typeof window === "undefined" ? undefined : window,
+  timeoutMs = 500,
+): Promise<OkxInjectedProvider> {
+  if (!host) {
+    throw new Error("OKX Wallet requires a browser signing environment");
+  }
+  if (host.okxwallet) {
+    return host.okxwallet;
+  }
+
+  return new Promise<OkxInjectedProvider>((resolve, reject) => {
+    const onAnnouncement: EventListener = (event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (!isOkxAnnouncement(detail)) {
+        return;
+      }
+      host.removeEventListener("eip6963:announceProvider", onAnnouncement);
+      globalThis.clearTimeout(timeout);
+      resolve(detail.provider);
+    };
+
+    host.addEventListener("eip6963:announceProvider", onAnnouncement);
+    const timeout = globalThis.setTimeout(() => {
+      host.removeEventListener("eip6963:announceProvider", onAnnouncement);
+      reject(new Error(
+        "OKX Wallet was not detected. Enable its site access for this origin and refresh the page.",
+      ));
+    }, timeoutMs);
+    host.dispatchEvent(new Event("eip6963:requestProvider"));
+  });
 }
 
 export async function connectOkxWallet(

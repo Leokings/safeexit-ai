@@ -12,6 +12,7 @@ import {
   ensureXLayerMainnet,
   getOkxConnectedAccount,
   getOkxCallsStatus,
+  getOkxProvider,
   receiptProvesCommittedTransfer,
   signDaiPermitPair,
   signEip3009Authorization,
@@ -22,6 +23,7 @@ import {
   submitErc4494AtomicBatch,
   submitEip3009Settlement,
   type OkxInjectedProvider,
+  type Eip6963ProviderHost,
 } from "./okx-wallet";
 import {
   gaslessRouteKey,
@@ -287,6 +289,87 @@ class FakeProvider implements OkxInjectedProvider {
     throw new Error(`Unexpected method: ${request.method}`);
   }
 }
+
+class FakeProviderHost implements Eip6963ProviderHost {
+  readonly listeners = new Map<string, Set<EventListener>>();
+
+  constructor(
+    readonly okxwallet?: OkxInjectedProvider,
+    readonly announcements: unknown[] = [],
+  ) {}
+
+  addEventListener(type: string, listener: EventListener) {
+    const listeners = this.listeners.get(type) ?? new Set<EventListener>();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  removeEventListener(type: string, listener: EventListener) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  dispatchEvent(event: Event): boolean {
+    if (event.type === "eip6963:requestProvider") {
+      for (const detail of this.announcements) {
+        const announcement = new Event("eip6963:announceProvider");
+        Object.defineProperty(announcement, "detail", { value: detail });
+        for (const listener of this.listeners.get(announcement.type) ?? []) {
+          listener(announcement);
+        }
+      }
+    }
+    return true;
+  }
+}
+
+describe("OKX provider discovery", () => {
+  it("prefers the legacy OKX provider when it is available", async () => {
+    const provider = new FakeProvider();
+
+    await expect(getOkxProvider(new FakeProviderHost(provider), 5)).resolves.toBe(provider);
+  });
+
+  it("discovers OKX Wallet through EIP-6963 among competing wallets", async () => {
+    const competingProvider = new FakeProvider();
+    const okxProvider = Object.assign(new FakeProvider(), { isOkxWallet: true });
+    const host = new FakeProviderHost(undefined, [
+      {
+        info: {
+          uuid: "other",
+          name: "Other Wallet",
+          icon: "data:image/svg+xml,",
+          rdns: "com.other.wallet",
+        },
+        provider: competingProvider,
+      },
+      {
+        info: {
+          uuid: "okx",
+          name: "OKX Wallet",
+          icon: "data:image/svg+xml,",
+          rdns: "com.okx.wallet",
+        },
+        provider: okxProvider,
+      },
+    ]);
+
+    await expect(getOkxProvider(host, 5)).resolves.toBe(okxProvider);
+  });
+
+  it("rejects when no OKX provider is announced", async () => {
+    const host = new FakeProviderHost(undefined, [{
+      info: {
+        uuid: "other",
+        name: "Other Wallet",
+        icon: "data:image/svg+xml,",
+        rdns: "com.other.wallet",
+      },
+      provider: new FakeProvider(),
+    }]);
+
+    await expect(getOkxProvider(host, 5)).rejects.toThrow("OKX Wallet was not detected");
+  });
+});
 
 describe("OKX injected wallet guardrails", () => {
   it("connects through eth_requestAccounts", async () => {
