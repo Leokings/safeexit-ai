@@ -146,6 +146,12 @@ export type Erc2612RescueAction = z.infer<typeof erc2612RescueActionSchema>;
 export type DaiPermitRescueAction = z.infer<typeof daiPermitRescueActionSchema>;
 export type Erc4494RescueAction = z.infer<typeof erc4494RescueActionSchema>;
 
+const verifiedWalletAtomicBatchChainIds = new Set<number>();
+
+export function hasVerifiedWalletAtomicBatchAdapter(chainId: number): boolean {
+  return verifiedWalletAtomicBatchChainIds.has(chainId);
+}
+
 function routeDomainCommitment(route: GaslessRescueAction) {
   return {
     name: route.domain.name,

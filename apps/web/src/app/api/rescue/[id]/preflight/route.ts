@@ -36,6 +36,7 @@ import { hasNonEmptyEvmRevertData } from "@/lib/evm-revert-data";
 import { rateLimitPublicRequest } from "@/lib/agent-http";
 import {
   eip712DomainSchema,
+  hasVerifiedWalletAtomicBatchAdapter,
   mainnetPreflightRequestSchema,
   mainnetPreflightResponseSchema,
   type Eip712Domain,
@@ -884,6 +885,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         .filter((result) => result.status === "SUCCEEDED")
         .map((result) => result.actionId),
     );
+    const walletAtomicBatchVerified = hasVerifiedWalletAtomicBatchAdapter(incident.chainId);
     const gaslessActions = plan.actions.flatMap<GaslessRescueAction>((action) => {
       if (!successfulActionIds.has(action.id)) {
         return [];
@@ -895,7 +897,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         if (
           !collectionMetadata ||
           !("erc4494Permit" in collectionMetadata) ||
-          !collectionMetadata.erc4494Permit
+          !collectionMetadata.erc4494Permit ||
+          !walletAtomicBatchVerified
         ) {
           return [];
         }
@@ -932,7 +935,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           domain: tokenMetadata.eip3009Domain,
         });
       }
-      if ("erc2612Permit" in tokenMetadata && tokenMetadata.erc2612Permit) {
+      if (
+        walletAtomicBatchVerified &&
+        "erc2612Permit" in tokenMetadata &&
+        tokenMetadata.erc2612Permit
+      ) {
         routes.push({
           actionId: action.id,
           standard: "ERC2612_PERMIT_ATOMIC_BATCH" as const,
@@ -946,7 +953,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           requiredWalletCapability: "ATOMIC_BATCH" as const,
         });
       }
-      if ("daiPermit" in tokenMetadata && tokenMetadata.daiPermit) {
+      if (
+        walletAtomicBatchVerified &&
+        "daiPermit" in tokenMetadata &&
+        tokenMetadata.daiPermit
+      ) {
         routes.push({
           actionId: action.id,
           standard: "DAI_PERMIT_ATOMIC_BATCH" as const,
@@ -983,6 +994,10 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         (("eip3009Domain" in tokenMetadata && Boolean(tokenMetadata.eip3009Domain)) ||
           ("erc2612Permit" in tokenMetadata && Boolean(tokenMetadata.erc2612Permit)) ||
           ("daiPermit" in tokenMetadata && Boolean(tokenMetadata.daiPermit)));
+      const hasAtomicPermitCapability =
+        tokenMetadata &&
+        (("erc2612Permit" in tokenMetadata && Boolean(tokenMetadata.erc2612Permit)) ||
+          ("daiPermit" in tokenMetadata && Boolean(tokenMetadata.daiPermit)));
       return [{
         actionId: action.id,
         reason:
@@ -990,9 +1005,14 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
             ? "Native rescue requires a verified sponsored EIP-7702 or private atomic bundle path."
             : action.actionType === "TRANSFER_ERC721" && nftMetadataEntry &&
                 "erc4494Permit" in nftMetadataEntry && nftMetadataEntry.erc4494Permit
-              ? "The NFT supports ERC-4494, but its current-state transfer preflight did not succeed."
+              ? walletAtomicBatchVerified
+                ? "The NFT supports ERC-4494, but its current-state transfer preflight did not succeed."
+                : "The NFT supports ERC-4494, but this chain has no verified SafeExit atomic settlement adapter."
               : action.actionType === "TRANSFER_ERC721"
                 ? "The NFT does not expose a verified ERC-4494 destination-paid permit route."
+            : action.actionType === "TRANSFER_ERC20" && hasAtomicPermitCapability &&
+                !walletAtomicBatchVerified
+              ? "The token supports a permit route, but this chain has no verified SafeExit atomic settlement adapter."
             : action.actionType === "TRANSFER_ERC20" && verifiedDestinationPaidRoute
               ? "The token supports a destination-paid authorization, but its current-state transfer preflight did not succeed."
               : action.actionType === "TRANSFER_ERC20"
