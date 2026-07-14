@@ -25,6 +25,8 @@ import {
   type Hex,
 } from "viem";
 
+import { hasNonEmptyEvmRevertData } from "./evm-revert-data";
+
 const metadataAbi = [
   {
     type: "function",
@@ -356,8 +358,10 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
             data: probe,
             blockNumber,
           });
-        } catch {
-          return { route: "ERC2612_PERMIT_ATOMIC_BATCH", domain, nonce };
+        } catch (error) {
+          if (hasNonEmptyEvmRevertData(error)) {
+            return { route: "ERC2612_PERMIT_ATOMIC_BATCH", domain, nonce };
+          }
         }
       } catch {
         // Continue to strict DAI-style detection.

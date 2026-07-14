@@ -32,6 +32,7 @@ import {
   getDeploymentRpcUrl,
   parseDeploymentEnvironment,
 } from "@/lib/deployment-env";
+import { hasNonEmptyEvmRevertData } from "@/lib/evm-revert-data";
 import { rateLimitPublicRequest } from "@/lib/agent-http";
 import {
   eip712DomainSchema,
@@ -398,7 +399,10 @@ async function detectErc2612Permit(
         blockNumber,
       });
       return undefined;
-    } catch {
+    } catch (error) {
+      if (!hasNonEmptyEvmRevertData(error)) {
+        return undefined;
+      }
       // A signed exact permit call remains the final capability gate in the browser.
     }
     return { domain, nonce: nonce.toString() };

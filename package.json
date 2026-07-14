@@ -2,6 +2,7 @@
   "name": "safeexit",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "packageManager": "npm@11.6.2",
   "workspaces": [
     "apps/*",
@@ -10,21 +11,30 @@
   "scripts": {
     "build": "npm run db:generate && npm run build --workspace @safeexit/web",
     "ci": "npm run db:validate && npm run db:generate && npm run lint && npm run typecheck && npm test && npm run build",
+    "contracts:build": "hardhat build --build-profile production",
+    "contracts:faucet-data:xlayer": "node scripts/contracts/xlayer-mainnet-faucet.mjs",
+    "contracts:prepare:xlayer": "npm run contracts:build && node scripts/contracts/xlayer-mainnet-fixtures.mjs prepare",
+    "contracts:test": "npm run contracts:build && node --import tsx --test contracts/test/SafeExitMainnetFixtures.ts",
+    "contracts:verify:xlayer": "node scripts/contracts/xlayer-mainnet-fixtures.mjs verify",
     "dev": "npm run dev --workspace @safeexit/web",
     "lint": "eslint . --max-warnings=0",
     "db:generate": "prisma generate",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:validate": "prisma validate",
-    "test": "vitest run",
+    "test": "vitest run && npm run contracts:test",
     "test:watch": "vitest",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
+    "@nomicfoundation/hardhat-viem": "^3.0.9",
+    "@openzeppelin/contracts": "^5.4.0",
     "@types/node": "^20.19.0",
     "dotenv": "17.4.2",
     "eslint": "^9.39.2",
     "eslint-config-next": "16.2.10",
+    "hardhat": "^3.9.1",
     "prisma": "7.8.0",
+    "tsx": "^4.20.6",
     "typescript": "5.9.3",
     "vitest": "4.1.10"
   },
@@ -33,6 +43,6 @@
   },
   "overrides": {
     "@hono/node-server": "1.19.13",
-    "postcss": "8.5.17"
+    "postcss": "8.5.19"
   }
 }

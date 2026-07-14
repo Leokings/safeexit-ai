@@ -8,6 +8,7 @@ export default defineConfig([
   globalIgnores([
     "**/.next/**",
     "**/coverage/**",
+    "**/contracts/artifacts/**",
     "**/contracts/cache/**",
     "**/contracts/out/**",
     "**/packages/persistence/src/generated/**",

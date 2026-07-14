@@ -9,4 +9,6 @@ next-env.d.ts
 *.log
 .vercel/
 .tools/
+contracts/artifacts/
+contracts/cache/
 packages/persistence/src/generated/

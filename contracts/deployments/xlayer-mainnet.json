@@ -1,0 +1,82 @@
+{
+  "warning": "TEST ONLY - OPENLY MINTABLE ASSETS WITH NO MONETARY VALUE",
+  "chainId": 196,
+  "chainName": "X Layer",
+  "factoryAddress": "0x4e59b44847b379578588920cA78FbF26c0B4956C",
+  "observedAtBlock": "65275696",
+  "generatedAt": "2026-07-14T15:58:54.609Z",
+  "fixtures": [
+    {
+      "contractName": "SafeExitTestERC3009",
+      "route": "ERC3009_RECEIVE_WITH_AUTHORIZATION",
+      "address": "0x25aD6b3E15A2FDB3761335Bb4056D3d1751B94cd",
+      "salt": "0x09808d628613b409d28fe0e30044a65d6e36df308b6addd94679f9879c6afa36",
+      "initCodeHash": "0x26d4ac8e49703024c37b1ff76ebc9cc755c9a9a7e7e705d326467682c2697389",
+      "expectedRuntimeHash": "0xeb8047b322dd7bcbbc2369cfbd6dc4e704876411343ebd54ee06cec3f320eeab",
+      "actualRuntimeHash": "0xdf0996df559a057e58d42c2619eaa39d4e220b170118ab7752bb17f4b82b7723",
+      "actualTemplateHash": "0xeb8047b322dd7bcbbc2369cfbd6dc4e704876411343ebd54ee06cec3f320eeab",
+      "behavior": {
+        "verified": true,
+        "reason": null
+      },
+      "status": "VERIFIED"
+    },
+    {
+      "contractName": "SafeExitTestERC2612",
+      "route": "ERC2612_PERMIT_ATOMIC_BATCH",
+      "address": "0x299D0c59ff5cAEA7b5480fEE3650Eba88B9fb1cd",
+      "salt": "0x6bab18f01ac098eb8f889bd77eec76ed6e618d06bd2f6a2947673d426cf11c9f",
+      "initCodeHash": "0x6fb49d0396b375edffdc48f7ae2d92a90ac472de18d808985d17dc5c40312fba",
+      "expectedRuntimeHash": "0x86d3a35120f4e2ddbce191dc6a31be66bac3841056b9a5e89cb829ab2708cafa",
+      "actualRuntimeHash": "0x2ebf3d0c3c7f78cc22b041deef866c1a96077c03b7133b40b6b04fdaf585501b",
+      "actualTemplateHash": "0x86d3a35120f4e2ddbce191dc6a31be66bac3841056b9a5e89cb829ab2708cafa",
+      "behavior": {
+        "verified": true,
+        "reason": null
+      },
+      "status": "VERIFIED"
+    },
+    {
+      "contractName": "SafeExitTestDaiPermit",
+      "route": "DAI_PERMIT_ATOMIC_BATCH",
+      "address": "0xFd808D7a826AfF84Fd3E9dE4a2CE8cC107B0fCb0",
+      "salt": "0x8349b2a353b256b4ad0e5a42d9081d546a8f0a1d5056ca6c98cf97e1db18e345",
+      "initCodeHash": "0xe4e650a6f7bb856c0a25d28b5a8b12849fab605ff9e08274247b291484ea902f",
+      "expectedRuntimeHash": "0x0b179d3e2527f214ebb6d02a918e2e6d381f3de9c89643be73dc92ac7e454824",
+      "actualRuntimeHash": "0x8c24a1c366445d5959f11387ed25638e97ea065d588364293a41c63c8b839fac",
+      "actualTemplateHash": "0x0b179d3e2527f214ebb6d02a918e2e6d381f3de9c89643be73dc92ac7e454824",
+      "behavior": {
+        "verified": true,
+        "reason": null
+      },
+      "status": "VERIFIED"
+    },
+    {
+      "contractName": "SafeExitTestERC4494",
+      "route": "ERC4494_PERMIT_ATOMIC_BATCH",
+      "address": "0x47bb2103D8580F313Fbfd20DF9760Cd0723EEA5b",
+      "salt": "0x71ec93ac382724d095cf9e5bc5e62ee994d92291f420434b354009d09e241813",
+      "initCodeHash": "0x7bd46c4c7ef330324054fcdb3f966c109283c79fc1d9aa3cc9157a8c3b6d90e4",
+      "expectedRuntimeHash": "0xe1bf15cf01069e139c226a3b4f85de4ea8840385ea9d3bc7c5ac32569b884e04",
+      "actualRuntimeHash": "0xd21b992c9f5a690b5c2f3a863f51a1bca2b29afc14aeb2dc6d1de429916bde94",
+      "actualTemplateHash": "0xe1bf15cf01069e139c226a3b4f85de4ea8840385ea9d3bc7c5ac32569b884e04",
+      "behavior": {
+        "verified": true,
+        "reason": null
+      },
+      "status": "VERIFIED"
+    }
+  ],
+  "realAssets": [
+    {
+      "symbol": "xETH",
+      "address": "0xE7B000003A45145decf8a28FC755aD5eC5EA025A",
+      "verifiedRoute": "ERC2612_PERMIT_ATOMIC_BATCH"
+    },
+    {
+      "symbol": "xBTC",
+      "address": "0xb7C00000bcDEeF966b20B3D884B98E64d2b06b4f",
+      "verifiedRoute": "ERC2612_PERMIT_ATOMIC_BATCH"
+    }
+  ]
+}
