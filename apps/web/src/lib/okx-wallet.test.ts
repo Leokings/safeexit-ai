@@ -714,12 +714,34 @@ describe("OKX injected wallet guardrails", () => {
 });
 
 describe("mainnet preflight request", () => {
-  it("fails closed when the reviewed route disappears after fresh preflight", () => {
+  it("keeps a reviewed route when only block-scoped evidence IDs change", () => {
     const reviewed = gaslessRouteKey(permitAction);
-    expect(requireReviewedGaslessRoute([permitAction], reviewed)).toBe(permitAction);
+    const refreshed = {
+      ...permitAction,
+      actionId: "action:transfer:evidence:fresh-block",
+    };
+
+    expect(requireReviewedGaslessRoute([refreshed], reviewed)).toBe(refreshed);
+  });
+
+  it("fails closed when a reviewed route commitment changes", () => {
+    if (permitAction.standard !== "ERC2612_PERMIT_ATOMIC_BATCH") {
+      throw new Error("Expected an ERC-2612 action fixture");
+    }
+    const reviewed = gaslessRouteKey(permitAction);
     expect(() => requireReviewedGaslessRoute([action], reviewed)).toThrow(
       "selected recovery route changed",
     );
+    expect(() => requireReviewedGaslessRoute([{
+      ...permitAction,
+      actionId: "action:transfer:evidence:fresh-block",
+      amount: "1250001",
+    }], reviewed)).toThrow("selected recovery route changed");
+    expect(() => requireReviewedGaslessRoute([{
+      ...permitAction,
+      actionId: "action:transfer:evidence:fresh-block",
+      nonce: "8",
+    }], reviewed)).toThrow("selected recovery route changed");
   });
 
   it("accepts at most eight validated EVM token addresses", () => {

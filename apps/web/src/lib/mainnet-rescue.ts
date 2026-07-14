@@ -146,10 +146,38 @@ export type Erc2612RescueAction = z.infer<typeof erc2612RescueActionSchema>;
 export type DaiPermitRescueAction = z.infer<typeof daiPermitRescueActionSchema>;
 export type Erc4494RescueAction = z.infer<typeof erc4494RescueActionSchema>;
 
-export function gaslessRouteKey(
-  route: Pick<GaslessRescueAction, "actionId" | "standard">,
-): string {
-  return `${route.actionId}:${route.standard}`;
+function routeDomainCommitment(route: GaslessRescueAction) {
+  return {
+    name: route.domain.name,
+    version: route.domain.version,
+    chainId: route.domain.chainId,
+    verifyingContract: route.domain.verifyingContract.toLowerCase(),
+  };
+}
+
+export function gaslessRouteKey(route: GaslessRescueAction): string {
+  const common = {
+    standard: route.standard,
+    from: route.from.toLowerCase(),
+    to: route.to.toLowerCase(),
+    domain: routeDomainCommitment(route),
+  };
+
+  if (route.standard === "ERC4494_PERMIT_ATOMIC_BATCH") {
+    return JSON.stringify({
+      ...common,
+      collectionAddress: route.collectionAddress.toLowerCase(),
+      tokenId: route.tokenId,
+      nonce: route.nonce,
+    });
+  }
+
+  return JSON.stringify({
+    ...common,
+    tokenAddress: route.tokenAddress.toLowerCase(),
+    amount: route.amount,
+    ...("nonce" in route ? { nonce: route.nonce } : {}),
+  });
 }
 
 export function requireReviewedGaslessRoute(
