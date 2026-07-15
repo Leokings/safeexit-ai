@@ -41,12 +41,26 @@ export const destinationSubmissionSchema = z.strictObject({
   submissionId: z.string().min(1).max(8_194),
 });
 
-export const destinationReceiptSchema = z.strictObject({
-  status: z.enum(["CONFIRMED", "FAILED"]),
+const destinationReceiptFinalityShape = {
   transactionHashes: z.array(hashSchema).min(1),
+  blockNumber: z.string().regex(/^(0|[1-9]\d*)$/),
+  blockHash: hashSchema,
+  confirmations: z.number().int().positive(),
+  canonical: z.literal(true),
   observedAt: timestampSchema,
-  failureReason: z.string().min(1).max(1_000).optional(),
-});
+} satisfies z.ZodRawShape;
+
+export const destinationReceiptSchema = z.discriminatedUnion("status", [
+  z.strictObject({
+    status: z.literal("CONFIRMED"),
+    ...destinationReceiptFinalityShape,
+  }),
+  z.strictObject({
+    status: z.literal("FAILED"),
+    ...destinationReceiptFinalityShape,
+    failureReason: z.string().min(1).max(1_000),
+  }),
+]);
 
 export type BuyerConfirmation = z.infer<typeof buyerConfirmationSchema>;
 export type SettlementCall = z.infer<typeof settlementCallSchema>;

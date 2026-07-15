@@ -29,7 +29,8 @@
 5. The destination wallet must match the committed address and chain, reports
    the exact settlement-contract call, and pays gas.
 6. SAFEEXIT accepts only receipt metadata back from the buyer runtime and
-   independently checks successful receipts for the committed transfer event.
+   independently checks successful receipts for the committed transfer event,
+   chain-specific confirmation depth, canonical block hash, and final asset state.
 
 ## Principal threats and controls
 
@@ -41,7 +42,9 @@
 | Arbitrary AI execution | AI is explanation-only and cannot author calldata or alter deterministic actions. |
 | Partial permit execution | Permit, transfer, and revocation execute inside one settlement-contract transaction; any failure reverts the whole transaction. |
 | Route change after scan | Fresh preflight must still contain the exact reviewed action-and-standard key. |
-| False success | Browser and hosted verifier require the exact asset contract `Transfer` event from source to destination with the committed amount or token ID. |
+| False success or receipt reorg | Browser and hosted verifier require the exact asset contract `Transfer` event from source to destination with the committed amount or token ID. Completion also requires a chain-specific confirmation hold, a canonical receipt block, and a second canonicality check after final asset-state reads. |
+| Preflight response substitution | Plan integrity, scan/block identity, simulations, route source/destination/asset/value, EIP-712 domain, and configured settlement deployment are independently cross-checked before signing. |
+| Missing chain infrastructure | Production readiness requires a dedicated HTTPS RPC with the expected chain ID and deterministic read support for all eight advertised mainnets. |
 | Account switch race | Active account and chain are re-read after switching and again after simulation/before submission. |
 | Secret leakage | Credentials are server-only; schemas reject line breaks; logs redact secret fields, bearer material, and URLs. |
 | API abuse | Strict payload limits, shared fail-closed rate limits, bearer authentication, no-store responses, and x402 throttling before payment handling. |

@@ -14,7 +14,10 @@ import {
 import { useState } from "react";
 import { createPublicClient, getAddress, http, isAddress, type Hex } from "viem";
 
-import { getRescueMainnetChainConfig } from "@safeexit/chain";
+import {
+  getRescueFinalityPolicy,
+  getRescueMainnetChainConfig,
+} from "@safeexit/chain";
 import type {
   EvmAddress,
   RescueAction,
@@ -493,10 +496,11 @@ export function MainnetRescueWorkspace({
         hash,
         await reportTransactionReceipt(signed.authorization.actionId, hash),
       );
+      const finalityPolicy = getRescueFinalityPolicy(chainId);
       const receipt = await publicClient.waitForTransactionReceipt({
         hash,
-        confirmations: 1,
-        timeout: 120_000,
+        confirmations: finalityPolicy.minimumConfirmations,
+        timeout: 900_000,
       });
       const transferProved = receipt.status === "success" &&
         receiptProvesCommittedTransfer(signed, receipt.logs);

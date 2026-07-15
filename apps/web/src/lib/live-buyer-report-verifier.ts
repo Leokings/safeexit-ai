@@ -18,6 +18,7 @@ import {
 } from "@safeexit/agent-service";
 import {
   createDedicatedPublicClient,
+  getRescueFinalityPolicy,
   type ChainAdapterConfig,
 } from "@safeexit/chain";
 import { assertReceiptSubmissionTransaction } from "./buyer-receipt-registration";
@@ -50,6 +51,7 @@ export interface BuyerReceiptClient {
   getTransactionReceipt(input: { hash: Hex }): Promise<{
     status: "success" | "reverted";
     blockNumber: bigint;
+    blockHash: Hex;
     logs: Array<{
       address: `0x${string}`;
       data: Hex;
@@ -62,6 +64,8 @@ export interface BuyerReceiptClient {
     value: bigint;
     input: Hex;
   }>;
+  getBlockNumber(): Promise<bigint>;
+  getBlock(input: { blockNumber: bigint }): Promise<{ hash: Hex | null }>;
   getErc20Balance(input: {
     token: Address;
     owner: Address;
@@ -107,6 +111,8 @@ export class LiveBuyerExecutionVerifier implements BuyerExecutionVerifierPort {
     this.client = {
       getTransactionReceipt: (input) => publicClient.getTransactionReceipt(input),
       getTransaction: (input) => publicClient.getTransaction(input),
+      getBlockNumber: () => publicClient.getBlockNumber(),
+      getBlock: (input) => publicClient.getBlock(input),
       getErc20Balance: (input) => publicClient.readContract({
         address: input.token,
         abi: erc20BalanceAbi,
@@ -154,7 +160,9 @@ export class LiveBuyerExecutionVerifier implements BuyerExecutionVerifierPort {
       }
       throw error;
     }
-    if (receipts.some((receipt) => receipt.status !== "success")) {
+    const receipt = receipts[0]!;
+    await this.assertCanonicalFinality(receipt.blockNumber, receipt.blockHash);
+    if (receipt.status !== "success") {
       throw new BuyerReceiptRevertedError();
     }
 
@@ -199,7 +207,7 @@ export class LiveBuyerExecutionVerifier implements BuyerExecutionVerifierPort {
     if (!matchedTransfer) {
       throw new BuyerReceiptRejectedError();
     }
-    const receiptBlock = receipts[0]!.blockNumber;
+    const receiptBlock = receipt.blockNumber;
     if (signingPackage.route === "ERC4494_PERMIT_SETTLEMENT") {
       const owner = await this.client.getErc721Owner({
         collection: signingPackage.collectionAddress as Address,
@@ -219,13 +227,47 @@ export class LiveBuyerExecutionVerifier implements BuyerExecutionVerifierPort {
         throw new BuyerReceiptRejectedError();
       }
     }
+    await this.assertCanonicalFinality(receipt.blockNumber, receipt.blockHash);
+    const finalityPolicy = getRescueFinalityPolicy(this.chain.chain.id);
     return {
       phase: "COMPLETED",
       completedActionIds: [signingPackage.actionId],
       failedActionIds: [],
       transactionHashes: [...report.transactionHashes],
       observedAt: this.clock().toISOString(),
-      detail: `Receipt calldata, source authorization, Transfer event, and final asset state verified by ${this.chain.chain.name} RPC.`,
+      detail: `Receipt calldata, source authorization, Transfer event, final asset state, and ${finalityPolicy.minimumConfirmations} canonical confirmations verified by ${this.chain.chain.name} RPC.`,
     };
+  }
+
+  private async assertCanonicalFinality(
+    blockNumber: bigint,
+    blockHash: Hex,
+  ): Promise<void> {
+    try {
+      const [latestBlockNumber, canonicalBlock] = await Promise.all([
+        this.client.getBlockNumber(),
+        this.client.getBlock({ blockNumber }),
+      ]);
+      const policy = getRescueFinalityPolicy(this.chain.chain.id);
+      const confirmations = latestBlockNumber >= blockNumber
+        ? latestBlockNumber - blockNumber + 1n
+        : 0n;
+      if (
+        confirmations < BigInt(policy.minimumConfirmations) ||
+        !canonicalBlock.hash ||
+        canonicalBlock.hash.toLowerCase() !== blockHash.toLowerCase()
+      ) {
+        throw new BuyerReceiptPendingError();
+      }
+    } catch (error) {
+      if (error instanceof BuyerReceiptPendingError) throw error;
+      if (
+        error instanceof Error &&
+        (error.name === "BlockNotFoundError" || error.name === "TransactionReceiptNotFoundError")
+      ) {
+        throw new BuyerReceiptPendingError();
+      }
+      throw error;
+    }
   }
 }

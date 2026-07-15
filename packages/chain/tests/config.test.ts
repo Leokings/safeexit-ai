@@ -7,6 +7,7 @@ import {
   createDedicatedPublicClient,
   defaultDevelopmentChainConfig,
   getChainAdapterConfig,
+  getRescueFinalityPolicy,
   getRescueMainnetChainConfig,
   isRescueMainnetChainId,
   primaryChainConfig,
@@ -49,6 +50,19 @@ describe("chain adapter configuration", () => {
       "Unsupported rescue mainnet chain ID: 31337",
     );
     expect(configuredChains).toHaveLength(9);
+  });
+
+  it("defines an explicit canonical confirmation policy for every rescue mainnet", () => {
+    for (const chainId of RESCUE_MAINNET_CHAIN_IDS) {
+      const policy = getRescueFinalityPolicy(chainId);
+      expect(policy.chainId).toBe(chainId);
+      expect(policy.minimumConfirmations).toBeGreaterThan(1);
+    }
+    expect(getRescueFinalityPolicy(1).minimumConfirmations).toBe(12);
+    expect(getRescueFinalityPolicy(196).minimumConfirmations).toBe(64);
+    expect(() => getRescueFinalityPolicy(31_337)).toThrow(
+      "Unsupported rescue finality policy chain ID: 31337",
+    );
   });
 
   it("refuses an RPC URL that is not in the chain configuration", () => {

@@ -7,7 +7,9 @@ import {
   simulationResultSchema,
   walletScanSchema,
 } from "@safeexit/shared";
+import { getConfiguredPermitSettlementAddress } from "@safeexit/adapters";
 import { isRescueMainnetChainId } from "@safeexit/chain";
+import { verifyPlanIntegrity } from "@safeexit/planner";
 
 export const rescueMainnetChainIdSchema = chainIdSchema.refine(
   isRescueMainnetChainId,
@@ -135,15 +137,148 @@ export const mainnetPreflightResponseSchema = z.strictObject({
   gaslessActions: z.array(gaslessRescueActionSchema),
   blockedActions: z.array(blockedGaslessActionSchema),
 }).superRefine((response, context) => {
-  if (
-    response.scan.chainId !== response.chainId ||
-    response.plan.chainId !== response.chainId
-  ) {
+  const sameAddress = (left: string, right: string) =>
+    left.toLowerCase() === right.toLowerCase();
+  const addIssue = (message: string, path: PropertyKey[]) => {
     context.addIssue({
       code: "custom",
-      message: "Preflight chain commitments do not match",
-      path: ["chainId"],
+      message,
+      path,
     });
+  };
+
+  if (response.scan.chainId !== response.chainId || response.plan.chainId !== response.chainId) {
+    addIssue("Preflight chain commitments do not match", ["chainId"]);
+  }
+  if (
+    response.scan.incidentId !== response.plan.incidentId ||
+    response.scan.observedAtBlock !== response.plan.observedAtBlock ||
+    !sameAddress(response.scan.address, response.plan.sourceAddress)
+  ) {
+    addIssue("Scan commitments do not match the rescue plan", ["scan"]);
+  }
+  if (!verifyPlanIntegrity(response.plan)) {
+    addIssue("Rescue plan integrity verification failed", ["plan", "integrityHash"]);
+  }
+  if (
+    response.scan.status === "FAILED" ||
+    (response.plan.status !== "READY" && response.plan.status !== "PARTIAL")
+  ) {
+    addIssue("Preflight is not in an executable planning state", ["plan", "status"]);
+  }
+
+  const planActions = new Map(response.plan.actions.map((action) => [action.id, action]));
+  response.plan.actions.forEach((action, actionIndex) => {
+    if (
+      action.chainId !== response.chainId ||
+      !sameAddress(action.sourceAddress, response.plan.sourceAddress)
+    ) {
+      addIssue("Rescue action commitments do not match the plan", ["plan", "actions", actionIndex]);
+    }
+  });
+
+  const successfulSimulationActionIds = new Set<string>();
+  const simulationActionIds = new Set<string>();
+  response.simulations.forEach((simulation, simulationIndex) => {
+    if (
+      simulation.planId !== response.plan.id ||
+      simulation.planHash.toLowerCase() !== response.plan.integrityHash.toLowerCase() ||
+      simulation.observedAtBlock !== response.plan.observedAtBlock ||
+      !planActions.has(simulation.actionId) ||
+      simulationActionIds.has(simulation.actionId)
+    ) {
+      addIssue(
+        "Simulation commitments do not match exactly one rescue-plan action",
+        ["simulations", simulationIndex],
+      );
+    }
+    simulationActionIds.add(simulation.actionId);
+    if (simulation.status === "SUCCEEDED") {
+      successfulSimulationActionIds.add(simulation.actionId);
+    }
+  });
+
+  const routedActionIds = new Set<string>();
+  response.gaslessActions.forEach((route, routeIndex) => {
+    const path = ["gaslessActions", routeIndex] as PropertyKey[];
+    const action = planActions.get(route.actionId);
+    if (!action) {
+      addIssue("Recovery route references an unknown rescue action", path);
+      return;
+    }
+    routedActionIds.add(route.actionId);
+
+    if (
+      route.domain.chainId !== response.chainId ||
+      !sameAddress(route.from, response.plan.sourceAddress) ||
+      !sameAddress(route.to, response.plan.destinationAddress) ||
+      action.supportStatus !== "SUPPORTED" ||
+      !successfulSimulationActionIds.has(route.actionId)
+    ) {
+      addIssue("Recovery route does not match the reviewed plan and simulation", path);
+    }
+
+    if (route.standard === "ERC4494_PERMIT_SETTLEMENT") {
+      if (
+        action.actionType !== "TRANSFER_ERC721" ||
+        !sameAddress(route.collectionAddress, action.parameters.collectionAddress) ||
+        !sameAddress(route.to, action.parameters.recipient) ||
+        route.tokenId !== action.parameters.tokenId ||
+        !sameAddress(route.domain.verifyingContract, route.collectionAddress)
+      ) {
+        addIssue("NFT permit route does not match its rescue action", path);
+      }
+    } else if (
+      action.actionType !== "TRANSFER_ERC20" ||
+      !sameAddress(route.tokenAddress, action.parameters.tokenAddress) ||
+      !sameAddress(route.to, action.parameters.recipient) ||
+      route.amount !== action.parameters.amount ||
+      !sameAddress(route.domain.verifyingContract, route.tokenAddress)
+    ) {
+      addIssue("ERC-20 authorization route does not match its rescue action", path);
+    }
+
+    if (route.standard !== "ERC3009_RECEIVE_WITH_AUTHORIZATION") {
+      const configuredSettlement = getConfiguredPermitSettlementAddress(response.chainId);
+      if (
+        !configuredSettlement ||
+        !sameAddress(route.settlementContract, configuredSettlement)
+      ) {
+        addIssue("Recovery route does not use the configured SafeExit settlement deployment", path);
+      }
+    }
+  });
+
+  const blockedActionIds = new Set<string>();
+  response.blockedActions.forEach((blocked, blockedIndex) => {
+    if (
+      !planActions.has(blocked.actionId) ||
+      blockedActionIds.has(blocked.actionId) ||
+      routedActionIds.has(blocked.actionId)
+    ) {
+      addIssue(
+        "Blocked action must reference one unrouted rescue-plan action",
+        ["blockedActions", blockedIndex],
+      );
+    }
+    blockedActionIds.add(blocked.actionId);
+  });
+
+  response.plan.actions.forEach((action, actionIndex) => {
+    if (!simulationActionIds.has(action.id)) {
+      addIssue("Every rescue action requires a matching simulation", ["plan", "actions", actionIndex]);
+    }
+    if (!routedActionIds.has(action.id) && !blockedActionIds.has(action.id)) {
+      addIssue(
+        "Every rescue action must be represented as recoverable or blocked",
+        ["plan", "actions", actionIndex],
+      );
+    }
+  });
+  for (const actionId of successfulSimulationActionIds) {
+    if (!routedActionIds.has(actionId) && !blockedActionIds.has(actionId)) {
+      addIssue("Successful simulated action has no recovery disposition", ["simulations"]);
+    }
   }
 });
 

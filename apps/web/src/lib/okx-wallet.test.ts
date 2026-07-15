@@ -7,6 +7,7 @@ import {
   erc721RescueTypes,
   getConfiguredPermitSettlementAddress,
 } from "@safeexit/adapters";
+import { evmAddressSchema } from "@safeexit/shared";
 
 import {
   assertRecoveryAuthorizationCurrent,
@@ -576,6 +577,32 @@ describe("OKX injected wallet guardrails", () => {
       "eth_signTypedData_v4",
     ]);
     expect(signed.settlementData).toMatch(/^0x[a-fA-F0-9]+$/);
+  });
+
+  it("rejects unconfigured settlement contracts before any permit signing", () => {
+    if (
+      permitAction.standard !== "ERC2612_PERMIT_SETTLEMENT" ||
+      daiPermitAction.standard !== "DAI_PERMIT_SETTLEMENT" ||
+      nftPermitAction.standard !== "ERC4494_PERMIT_SETTLEMENT"
+    ) {
+      throw new Error("Expected permit action fixtures");
+    }
+    const untrusted = evmAddressSchema.parse(
+      "0x4444444444444444444444444444444444444444",
+    );
+
+    expect(() => createErc2612PermitAuthorization({
+      ...permitAction,
+      settlementContract: untrusted,
+    })).toThrow("configured SafeExit settlement contract");
+    expect(() => createDaiPermitPairAuthorization({
+      ...daiPermitAction,
+      settlementContract: untrusted,
+    })).toThrow("configured SafeExit settlement contract");
+    expect(() => createErc4494PermitAuthorization({
+      ...nftPermitAction,
+      settlementContract: untrusted,
+    })).toThrow("configured SafeExit settlement contract");
   });
 
   it("submits ERC-2612 settlement as one ordinary destination transaction", async () => {

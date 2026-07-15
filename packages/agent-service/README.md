@@ -41,7 +41,8 @@ Any non-terminal operational state can fail only where declared in
 - `recordBuyerExecutionReport`: accepts one receipt-only report scoped exactly
   to an issued signing package, then delegates chain proof to the injected
   execution verifier. Mixed rescues remain `EXECUTING` until every issued
-  package has a verified report. It accepts no signature or calldata.
+  package has a verified report. Under-confirmed or non-canonical receipts stay
+  pending. It accepts no signature or calldata.
 - `monitorRescue`: reads signature, execution, and receipt observations through
   a monitor port. It has no signing or broadcasting capability.
 

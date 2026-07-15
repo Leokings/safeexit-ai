@@ -1,5 +1,7 @@
 import { getAddress, isAddress, type Hex } from "viem";
 
+import { getRescueFinalityPolicy } from "@safeexit/chain";
+
 import type {
   AtomicSettlementSimulatorPort,
   DestinationSettlementWalletPort,
@@ -36,6 +38,48 @@ function parseHash(value: unknown): Hex {
     throw new Error("Wallet did not return a valid transaction hash");
   }
   return value as Hex;
+}
+
+function parseHexQuantity(value: unknown, label: string): bigint {
+  if (typeof value !== "string" || !/^0x(?:0|[1-9a-fA-F][a-fA-F0-9]*)$/.test(value)) {
+    throw new Error(`Wallet did not return a valid ${label}`);
+  }
+  return BigInt(value);
+}
+
+type ProviderReceipt = {
+  status: "0x0" | "0x1";
+  blockNumber: bigint;
+  blockNumberHex: string;
+  blockHash: Hex;
+};
+
+function parseProviderReceipt(value: unknown): ProviderReceipt | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (!value || typeof value !== "object") {
+    throw new Error("Wallet returned a malformed transaction receipt");
+  }
+  const receipt = value as Record<string, unknown>;
+  if (receipt.status !== "0x0" && receipt.status !== "0x1") {
+    throw new Error("Wallet returned a transaction receipt with an invalid status");
+  }
+  if (typeof receipt.blockNumber !== "string") {
+    throw new Error("Wallet returned a transaction receipt without a block number");
+  }
+  return {
+    status: receipt.status,
+    blockNumber: parseHexQuantity(receipt.blockNumber, "receipt block number"),
+    blockNumberHex: receipt.blockNumber,
+    blockHash: parseHash(receipt.blockHash),
+  };
+}
+
+function parseCanonicalBlockHash(value: unknown): Hex | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (!value || typeof value !== "object" || !("hash" in value)) {
+    throw new Error("Wallet returned a malformed canonical block");
+  }
+  return parseHash(value.hash);
 }
 
 export class Eip1193LocalSourceSigner implements LocalSourceSignerPort {
@@ -76,7 +120,7 @@ export class Eip1193DestinationWallet implements DestinationSettlementWalletPort
     options: Eip1193DestinationWalletOptions = {},
   ) {
     this.pollIntervalMs = options.pollIntervalMs ?? 2_000;
-    this.maximumPolls = options.maximumPolls ?? 60;
+    this.maximumPolls = options.maximumPolls ?? 600;
     this.clock = options.clock ?? (() => new Date());
     this.sleep = options.sleep ?? ((milliseconds) => new Promise((resolve) => {
       setTimeout(resolve, milliseconds);
@@ -120,17 +164,56 @@ export class Eip1193DestinationWallet implements DestinationSettlementWalletPort
     const parsed = destinationSubmissionSchema.parse(submission);
     if (parsed.submissionId.startsWith("tx:")) {
       const hash = parseHash(parsed.submissionId.slice(3));
+      const policy = getRescueFinalityPolicy(await this.getChainId());
       for (let attempt = 0; attempt < this.maximumPolls; attempt += 1) {
-        const result = await this.provider.request({
+        const receipt = parseProviderReceipt(await this.provider.request({
           method: "eth_getTransactionReceipt",
           params: [hash],
-        });
-        if (result && typeof result === "object" && "status" in result) {
+        }));
+        if (receipt) {
+          const latestBlock = parseHexQuantity(
+            await this.provider.request({ method: "eth_blockNumber" }),
+            "latest block number",
+          );
+          const confirmations = latestBlock >= receipt.blockNumber
+            ? latestBlock - receipt.blockNumber + 1n
+            : 0n;
+          if (confirmations < BigInt(policy.minimumConfirmations)) {
+            await this.sleep(this.pollIntervalMs);
+            continue;
+          }
+
+          const canonicalHash = parseCanonicalBlockHash(await this.provider.request({
+            method: "eth_getBlockByNumber",
+            params: [receipt.blockNumberHex, false],
+          }));
+          const refreshedReceipt = parseProviderReceipt(await this.provider.request({
+            method: "eth_getTransactionReceipt",
+            params: [hash],
+          }));
+          if (
+            !canonicalHash ||
+            canonicalHash.toLowerCase() !== receipt.blockHash.toLowerCase() ||
+            !refreshedReceipt ||
+            refreshedReceipt.blockHash.toLowerCase() !== receipt.blockHash.toLowerCase() ||
+            refreshedReceipt.blockNumber !== receipt.blockNumber
+          ) {
+            await this.sleep(this.pollIntervalMs);
+            continue;
+          }
+
+          const confirmationCount = confirmations > BigInt(Number.MAX_SAFE_INTEGER)
+            ? Number.MAX_SAFE_INTEGER
+            : Number(confirmations);
           return destinationReceiptSchema.parse({
-            status: result.status === "0x1" ? "CONFIRMED" : "FAILED",
+            status: receipt.status === "0x1" ? "CONFIRMED" : "FAILED",
             transactionHashes: [hash],
+            blockNumber: receipt.blockNumber.toString(),
+            blockHash: receipt.blockHash,
+            confirmations: confirmationCount,
+            canonical: true,
             observedAt: this.clock().toISOString(),
-            ...(result.status === "0x1" ? {} : { failureReason: "Transaction reverted" }),
+            ...(receipt.status === "0x1" ? {} : { failureReason: "Transaction reverted" }),
           });
         }
         await this.sleep(this.pollIntervalMs);

@@ -2,7 +2,7 @@
 
 ## Status
 
-- Review date: 2026-07-14
+- Review date: 2026-07-15
 - Baseline: `cea127495a692dab372186a3b6239e00bfa9787f`
 - Reviewer: OpenAI Codex, also involved in implementation
 - Classification: internal engineering review, not an independent audit or a
@@ -37,6 +37,9 @@ does not widen this review into an independent audit.
 | SE-07 | Low | Security-critical x402 dependencies used semver ranges. | Installed OKX x402 versions are now exactly pinned in `package.json` and the lockfile. |
 | SE-08 | Low | Environment schemas allowed malformed RPC/credential strings to reach runtime checks. | RPCs must be exact HTTPS URLs; server credentials reject line breaks. |
 | SE-09 | Medium | V1 rejected an otherwise valid rescue when an observer submitted the ERC-2612 or DAI allow permit before settlement. | V2 accepts only the narrowly proven pre-consumed state: the nonce advanced exactly once and the settlement allowance still supports the signed rescue. Unrelated nonce or allowance changes fail closed. |
+| SE-10 | Medium | The browser preflight parser accepted signing-domain and settlement fields without independently tying every route to the plan, successful simulation, and chain-pinned settlement deployment. | The response boundary now verifies plan integrity and exact scan, action, simulation, source, destination, asset, amount/token ID, domain, and configured deployment commitments. Permit builders independently reject unconfigured settlement contracts before signing. |
+| SE-11 | Medium | A first successful receipt could complete a rescue without a chain-specific confirmation hold or proof that its block remained canonical. | Browser and buyer-runtime settlement now wait for explicit per-chain confirmation thresholds. The hosted verifier checks confirmation depth and canonical block hash before evidence checks and rechecks the same canonical anchor after final asset-state reads. Reorged or under-confirmed receipts remain pending. |
+| SE-12 | Low | Production readiness silently skipped missing mainnet RPC variables even though all eight chains were advertised as enabled. | Production readiness now requires and probes dedicated HTTPS RPCs for every advertised rescue mainnet, including chain identity and deterministic EVM reads. |
 
 ## Verification performed
 
@@ -44,7 +47,8 @@ does not widen this review into an independent audit.
   authorization requirements.
 - Targeted adversarial unit tests for route substitution, account switching,
   destination substitution, false transfer evidence, simulation failure,
-  and log leakage.
+  unpinned deployments, cross-chain signing domains, stale plan/simulation
+  commitments, receipt reorgs, insufficient confirmations, and log leakage.
 - Seventeen Solidity tests covering v1 reproducibility plus v2 replay,
   destination binding, expiry, amount substitution, pre-consumed permits,
   stale nonces, fee-on-transfer rejection, allowance revocation, and atomic
@@ -66,15 +70,12 @@ does not widen this review into an independent audit.
    `eth_call` against the exact signed, single-call transaction instead.
    Settlement-contract identity, exact signed-call preflight, and receipt
    evidence mitigate provider and token risk but cannot eliminate it.
-3. `npm audit` reports the documented moderate PostCSS advisory through Next.js
-   16.2.10. SAFEEXIT does not process untrusted CSS; upgrade when stable Next.js
-   removes the vulnerable nested dependency.
-4. The production CSP includes `'unsafe-inline'` for Next.js compatibility.
+3. The production CSP includes `'unsafe-inline'` for Next.js compatibility.
    There is no unsafe HTML rendering in the reviewed tree, but browser-side
    signature memory makes future XSS regressions high impact.
-5. Native OKB, ERC-1155 settlement, protocol claims, withdrawals, EIP-7702, and
+4. Native OKB, ERC-1155 settlement, protocol claims, withdrawals, EIP-7702, and
    private bundles remain blocked and were not approved by this review.
-6. A malicious or severely non-standard asset contract can violate expected
+5. A malicious or severely non-standard asset contract can violate expected
    token semantics. SAFEEXIT is best effort, not universal recovery.
 
 ## Release recommendation

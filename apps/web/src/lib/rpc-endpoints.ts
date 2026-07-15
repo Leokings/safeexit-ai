@@ -14,10 +14,10 @@ type RpcEndpointCandidate = Omit<ConfiguredRpcEndpoint, "url"> & {
   url: string | undefined;
 };
 
-export function getConfiguredRpcEndpoints(
+function rpcEndpointCandidates(
   config: DeploymentEnvironment,
-): ConfiguredRpcEndpoint[] {
-  const candidates: RpcEndpointCandidate[] = [
+): RpcEndpointCandidate[] {
+  return [
     {
       key: "ethereum",
       name: "Ethereum",
@@ -75,6 +75,12 @@ export function getConfiguredRpcEndpoints(
       rescueSupport: "ENABLED",
     },
   ];
+}
+
+export function getConfiguredRpcEndpoints(
+  config: DeploymentEnvironment,
+): ConfiguredRpcEndpoint[] {
+  const candidates = rpcEndpointCandidates(config);
   return candidates.flatMap<ConfiguredRpcEndpoint>((endpoint) =>
     endpoint.url ? [{ ...endpoint, url: endpoint.url }] : [],
   );
@@ -83,6 +89,14 @@ export function getConfiguredRpcEndpoints(
 export async function probeConfiguredRpcEndpoints(
   config: DeploymentEnvironment,
 ): Promise<Record<string, string>> {
+  if (config.nodeEnv === "production") {
+    const missing = rpcEndpointCandidates(config).filter((endpoint) => !endpoint.url);
+    if (missing.length > 0) {
+      throw new Error(
+        `Missing dedicated production RPC configuration: ${missing.map((endpoint) => endpoint.name).join(", ")}`,
+      );
+    }
+  }
   const endpoints = getConfiguredRpcEndpoints(config);
   const probes = await Promise.all(endpoints.map(async (endpoint) => {
     const parsed = new URL(endpoint.url);

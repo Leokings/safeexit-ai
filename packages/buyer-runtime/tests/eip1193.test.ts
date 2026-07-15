@@ -10,6 +10,7 @@ import {
 const destination = "0x3333333333333333333333333333333333333333" as const;
 const token = "0x4444444444444444444444444444444444444444" as const;
 const txHash = `0x${"77".repeat(32)}`;
+const blockHash = `0x${"88".repeat(32)}`;
 const now = new Date("2026-07-13T10:00:00.000Z");
 
 function batch(atomicRequired: boolean, callCount = 1): SettlementBatch {
@@ -87,9 +88,17 @@ describe("EIP-1193 buyer adapters", () => {
       request: async ({ method }) => {
         methods.push(method);
         if (method === "eth_sendTransaction") return txHash;
+        if (method === "eth_chainId") return "0xc4";
         if (method === "eth_getTransactionReceipt") {
-          return { status: "0x1", transactionHash: txHash };
+          return {
+            status: "0x1",
+            transactionHash: txHash,
+            blockNumber: "0x65",
+            blockHash,
+          };
         }
+        if (method === "eth_blockNumber") return "0xa4";
+        if (method === "eth_getBlockByNumber") return { hash: blockHash };
         throw new Error(`Unexpected method ${method}`);
       },
     };
@@ -102,6 +111,71 @@ describe("EIP-1193 buyer adapters", () => {
     const receipt = await wallet.waitForReceipt(await wallet.submit(batch(false)));
 
     expect(receipt.status).toBe("CONFIRMED");
-    expect(methods).toEqual(["eth_sendTransaction", "eth_getTransactionReceipt"]);
+    expect(receipt.confirmations).toBe(64);
+    expect(receipt.canonical).toBe(true);
+    expect(methods).toEqual([
+      "eth_sendTransaction",
+      "eth_chainId",
+      "eth_getTransactionReceipt",
+      "eth_blockNumber",
+      "eth_getBlockByNumber",
+      "eth_getTransactionReceipt",
+    ]);
+  });
+
+  it("does not confirm an included transaction before the chain threshold", async () => {
+    const methods: string[] = [];
+    const provider: Eip1193Provider = {
+      request: async ({ method }) => {
+        methods.push(method);
+        if (method === "eth_chainId") return "0xc4";
+        if (method === "eth_getTransactionReceipt") {
+          return { status: "0x1", blockNumber: "0x65", blockHash };
+        }
+        if (method === "eth_blockNumber") return "0x65";
+        throw new Error(`Unexpected method ${method}`);
+      },
+    };
+    const wallet = new Eip1193DestinationWallet(provider, {
+      pollIntervalMs: 0,
+      maximumPolls: 1,
+      sleep: async () => undefined,
+    });
+
+    await expect(wallet.waitForReceipt({ submissionId: `tx:${txHash}` })).rejects.toThrow(
+      "did not confirm before the local timeout",
+    );
+    expect(methods).not.toContain("eth_getBlockByNumber");
+  });
+
+  it("rejects a reorged receipt block and accepts only a canonical retry", async () => {
+    let blockChecks = 0;
+    const provider: Eip1193Provider = {
+      request: async ({ method }) => {
+        if (method === "eth_chainId") return "0xc4";
+        if (method === "eth_getTransactionReceipt") {
+          return { status: "0x1", blockNumber: "0x65", blockHash };
+        }
+        if (method === "eth_blockNumber") return "0xa4";
+        if (method === "eth_getBlockByNumber") {
+          blockChecks += 1;
+          return { hash: blockChecks === 1 ? `0x${"99".repeat(32)}` : blockHash };
+        }
+        throw new Error(`Unexpected method ${method}`);
+      },
+    };
+    const wallet = new Eip1193DestinationWallet(provider, {
+      pollIntervalMs: 0,
+      maximumPolls: 2,
+      clock: () => now,
+      sleep: async () => undefined,
+    });
+
+    await expect(wallet.waitForReceipt({ submissionId: `tx:${txHash}` })).resolves.toMatchObject({
+      status: "CONFIRMED",
+      blockHash,
+      canonical: true,
+    });
+    expect(blockChecks).toBe(2);
   });
 });

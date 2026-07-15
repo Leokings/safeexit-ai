@@ -12,6 +12,7 @@
   "dependencies": {
     "@safeexit/adapters": "*",
     "@safeexit/agent-service": "*",
+    "@safeexit/chain": "*",
     "@safeexit/shared": "*",
     "viem": "2.55.0",
     "zod": "4.4.3"

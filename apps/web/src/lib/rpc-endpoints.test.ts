@@ -25,7 +25,7 @@ describe("server-only multichain RPC endpoints", () => {
       }),
     );
     const config = parseDeploymentEnvironment({
-      NODE_ENV: "production",
+      NODE_ENV: "development",
       ETHEREUM_MAINNET_RPC_URL: "https://ethereum.example/key",
     });
 
@@ -33,5 +33,17 @@ describe("server-only multichain RPC endpoints", () => {
       "Ethereum RPC reported chain 56; expected 1",
     );
     fetchMock.mockRestore();
+  });
+
+  it("fails production readiness when any advertised mainnet RPC is missing", async () => {
+    const config = parseDeploymentEnvironment({
+      NODE_ENV: "production",
+      ETHEREUM_MAINNET_RPC_URL: "https://ethereum.example/key",
+      XLAYER_MAINNET_RPC_URL: "https://xlayer.example/key",
+    });
+
+    await expect(probeConfiguredRpcEndpoints(config)).rejects.toThrow(
+      "Missing dedicated production RPC configuration: BNB Smart Chain, Polygon, Arbitrum One, Optimism, Base, Avalanche C-Chain",
+    );
   });
 });

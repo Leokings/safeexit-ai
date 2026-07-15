@@ -14,6 +14,7 @@ import {
   type SigningPackage,
 } from "@safeexit/agent-service";
 import { permitSettlementAbi } from "@safeexit/adapters";
+import { getRescueFinalityPolicy } from "@safeexit/chain";
 
 import type {
   AtomicSettlementSimulatorPort,
@@ -59,6 +60,7 @@ export type BuyerRuntimeErrorCode =
   | "DESTINATION_MISMATCH"
   | "CHAIN_MISMATCH"
   | "SIMULATION_FAILED"
+  | "RECEIPT_NOT_FINAL"
   | "SUBMISSION_FAILED";
 
 export class BuyerRuntimeError extends Error {
@@ -392,6 +394,17 @@ export class BuyerRescueRuntime {
     authorizedStates.delete(handle);
     const submission = destinationSubmissionSchema.parse(await wallet.submit(batch));
     const receipt = destinationReceiptSchema.parse(await wallet.waitForReceipt(submission));
+    const finalityPolicy = getRescueFinalityPolicy(signingPackage.chainId);
+    if (
+      receipt.canonical !== true ||
+      receipt.confirmations < finalityPolicy.minimumConfirmations
+    ) {
+      throw new BuyerRuntimeError(
+        "RECEIPT_NOT_FINAL",
+        `Settlement requires ${finalityPolicy.minimumConfirmations} canonical confirmations`,
+        receipt.transactionHashes,
+      );
+    }
     if (receipt.status !== "CONFIRMED") {
       throw new BuyerRuntimeError(
         "SUBMISSION_FAILED",

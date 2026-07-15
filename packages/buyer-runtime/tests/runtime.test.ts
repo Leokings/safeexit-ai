@@ -33,6 +33,7 @@ const collection = "0x5555555555555555555555555555555555555555" as const;
 const settlementContract = getConfiguredPermitSettlementAddress(196)!;
 const planHash = `0x${"66".repeat(32)}`;
 const txHash = `0x${"77".repeat(32)}`;
+const receiptBlockHash = `0x${"88".repeat(32)}`;
 const now = new Date("2026-07-13T10:00:00.000Z");
 const expiresAt = "2026-07-13T10:04:00.000Z";
 const deadline = String(Math.floor(Date.parse(expiresAt) / 1_000));
@@ -356,6 +357,10 @@ function destinationWallet(
     waitForReceipt: async () => ({
       status: "CONFIRMED",
       transactionHashes: [txHash],
+      blockNumber: "101",
+      blockHash: receiptBlockHash,
+      confirmations: 64,
+      canonical: true,
       observedAt: "2026-07-13T10:01:00.000Z",
     }),
   };
@@ -488,6 +493,10 @@ describe("buyer-local rescue runtime", () => {
       waitForReceipt: async () => ({
         status: "CONFIRMED",
         transactionHashes: [txHash],
+        blockNumber: "101",
+        blockHash: receiptBlockHash,
+        confirmations: 64,
+        canonical: true,
         observedAt: now.toISOString(),
       }),
     };
@@ -507,6 +516,32 @@ describe("buyer-local rescue runtime", () => {
       code: "DESTINATION_MISMATCH",
     });
     expect(submitted).toBe(false);
+  });
+
+  it("refuses to complete from an under-confirmed destination receipt", async () => {
+    const signingPackage = packageFor("ERC2612_PERMIT_SETTLEMENT");
+    const runtime = new BuyerRescueRuntime(() => now);
+    const handle = await runtime.authorize(
+      signingPackage,
+      confirmation(signingPackage),
+      signer(),
+    );
+    const wallet = destinationWallet([]);
+    wallet.waitForReceipt = async () => ({
+      status: "CONFIRMED",
+      transactionHashes: [txHash],
+      blockNumber: "101",
+      blockHash: receiptBlockHash,
+      confirmations: 1,
+      canonical: true,
+      observedAt: now.toISOString(),
+    });
+
+    await expect(runtime.execute(
+      handle,
+      successfulSimulator([]),
+      wallet,
+    )).rejects.toMatchObject({ code: "RECEIPT_NOT_FINAL" });
   });
 
   it("keeps authorizations process-local and one-use", async () => {

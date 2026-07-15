@@ -142,6 +142,24 @@ export const RESCUE_MAINNET_CHAIN_IDS = [
 
 export type RescueMainnetChainId = (typeof RESCUE_MAINNET_CHAIN_IDS)[number];
 
+export type RescueFinalityPolicy = {
+  chainId: RescueMainnetChainId;
+  minimumConfirmations: number;
+};
+
+// SafeExit completion thresholds; these do not claim irreversible protocol finality.
+// Receipt blocks must also remain canonical before and after final state verification.
+const rescueFinalityPolicies: Record<RescueMainnetChainId, RescueFinalityPolicy> = {
+  1: { chainId: 1, minimumConfirmations: 12 },
+  56: { chainId: 56, minimumConfirmations: 20 },
+  137: { chainId: 137, minimumConfirmations: 128 },
+  42_161: { chainId: 42_161, minimumConfirmations: 64 },
+  10: { chainId: 10, minimumConfirmations: 64 },
+  8_453: { chainId: 8_453, minimumConfirmations: 64 },
+  43_114: { chainId: 43_114, minimumConfirmations: 20 },
+  196: { chainId: 196, minimumConfirmations: 64 },
+};
+
 export const rescueMainnetChainConfigs = [
   ethereumMainnetConfig,
   bnbMainnetConfig,
@@ -180,6 +198,13 @@ export function getRescueMainnetChainConfig(
     throw new Error(`Missing rescue mainnet configuration for chain ${chainId}`);
   }
   return config;
+}
+
+export function getRescueFinalityPolicy(chainId: number): RescueFinalityPolicy {
+  if (!isRescueMainnetChainId(chainId)) {
+    throw new Error(`Unsupported rescue finality policy chain ID: ${chainId}`);
+  }
+  return rescueFinalityPolicies[chainId];
 }
 
 export function getChainAdapterConfig(chainId: number): ChainAdapterConfig {

@@ -39,6 +39,7 @@ const wrongDestination = "0x3333333333333333333333333333333333333333" as const;
 const token = "0x4444444444444444444444444444444444444444" as const;
 const settlementContract = getConfiguredPermitSettlementAddress(196)!;
 const txHash = `0x${"55".repeat(32)}` as Hex;
+const blockHash = `0x${"44".repeat(32)}` as Hex;
 const planHash = `0x${"66".repeat(32)}`;
 const expiresAt = "2026-07-13T10:04:00.000Z";
 const deadline = String(Math.floor(Date.parse(expiresAt) / 1_000));
@@ -228,12 +229,15 @@ async function transactionInput(): Promise<Hex> {
 async function clientFor(
   recipient: `0x${string}`,
   destinationBalance = 100n,
+  latestBlockNumber = 164n,
+  canonicalBlockHash: Hex = blockHash,
 ): Promise<BuyerReceiptClient> {
   const input = await transactionInput();
   return {
     getTransactionReceipt: async () => ({
       status: "success",
       blockNumber: 101n,
+      blockHash,
       logs: [{
         address: token,
         topics: encodeEventTopics({
@@ -250,6 +254,8 @@ async function clientFor(
       value: 0n,
       input,
     }),
+    getBlockNumber: async () => latestBlockNumber,
+    getBlock: async () => ({ hash: canonicalBlockHash }),
     getErc20Balance: async () => destinationBalance,
     getErc721Owner: async () => destination,
   };
@@ -314,6 +320,7 @@ describe("live buyer receipt verification", () => {
         getTransactionReceipt: async () => ({
           status: "reverted",
           blockNumber: 101n,
+          blockHash,
           logs: [],
         }),
       },
@@ -337,5 +344,54 @@ describe("live buyer receipt verification", () => {
       { signingPackage } as AgentServiceJob,
       report,
     )).rejects.toBeInstanceOf(BuyerReceiptRejectedError);
+  });
+
+  it("keeps a successful receipt pending until the chain confirmation policy is met", async () => {
+    const verifier = new LiveBuyerExecutionVerifier(
+      xLayerMainnetConfig,
+      "https://unused.invalid",
+      () => new Date("2026-07-13T10:01:00.000Z"),
+      await clientFor(destination, 100n, 163n),
+    );
+
+    await expect(verifier.verify(
+      { signingPackage } as AgentServiceJob,
+      report,
+    )).rejects.toBeInstanceOf(BuyerReceiptPendingError);
+  });
+
+  it("keeps a receipt pending when its block is no longer canonical", async () => {
+    const verifier = new LiveBuyerExecutionVerifier(
+      xLayerMainnetConfig,
+      "https://unused.invalid",
+      () => new Date("2026-07-13T10:01:00.000Z"),
+      await clientFor(destination, 100n, 164n, `0x${"33".repeat(32)}`),
+    );
+
+    await expect(verifier.verify(
+      { signingPackage } as AgentServiceJob,
+      report,
+    )).rejects.toBeInstanceOf(BuyerReceiptPendingError);
+  });
+
+  it("rechecks canonicality after final state reads", async () => {
+    const client = await clientFor(destination);
+    let blockChecks = 0;
+    const verifier = new LiveBuyerExecutionVerifier(
+      xLayerMainnetConfig,
+      "https://unused.invalid",
+      () => new Date("2026-07-13T10:01:00.000Z"),
+      {
+        ...client,
+        getBlock: async () => ({
+          hash: ++blockChecks === 1 ? blockHash : `0x${"22".repeat(32)}`,
+        }),
+      },
+    );
+
+    await expect(verifier.verify(
+      { signingPackage } as AgentServiceJob,
+      report,
+    )).rejects.toBeInstanceOf(BuyerReceiptPendingError);
   });
 });

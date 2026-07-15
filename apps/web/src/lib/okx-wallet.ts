@@ -15,6 +15,7 @@ import {
   PERMIT_KIND_ERC2612,
   PERMIT_SETTLEMENT_NAME,
   PERMIT_SETTLEMENT_VERSION,
+  getConfiguredPermitSettlementAddress,
   permitSettlementAbi,
 } from "@safeexit/adapters";
 import {
@@ -271,6 +272,16 @@ function rescueChainHex(chainId: number): `0x${string}` {
     throw new Error(`Chain ${chainId} does not have a verified rescue adapter`);
   }
   return `0x${chainId.toString(16)}`;
+}
+
+function assertConfiguredSettlementContract(
+  chainId: number,
+  settlementContract: string,
+): void {
+  const configured = getConfiguredPermitSettlementAddress(chainId);
+  if (!configured || !sameAddress(configured, settlementContract)) {
+    throw new Error("The recovery route does not use the configured SafeExit settlement contract");
+  }
 }
 
 function randomNonce(): Hex {
@@ -648,6 +659,7 @@ export function createErc2612PermitAuthorization(
   if (action.from.toLowerCase() === action.to.toLowerCase()) {
     throw new Error("Source and destination must be different");
   }
+  assertConfiguredSettlementContract(action.domain.chainId, action.settlementContract);
   const now = BigInt(Math.floor((options.now ?? new Date()).getTime() / 1_000));
   return {
     actionId: action.actionId,
@@ -791,6 +803,7 @@ export function createDaiPermitPairAuthorization(
   if (action.from.toLowerCase() === action.to.toLowerCase()) {
     throw new Error("Source and destination must be different");
   }
+  assertConfiguredSettlementContract(action.domain.chainId, action.settlementContract);
   const allowNonce = BigInt(action.nonce);
   const now = BigInt(Math.floor((options.now ?? new Date()).getTime() / 1_000));
   return {
@@ -996,6 +1009,7 @@ export function createErc4494PermitAuthorization(
   if (action.from.toLowerCase() === action.to.toLowerCase()) {
     throw new Error("Source and destination must be different");
   }
+  assertConfiguredSettlementContract(action.domain.chainId, action.settlementContract);
   const now = BigInt(Math.floor((options.now ?? new Date()).getTime() / 1_000));
   return {
     actionId: action.actionId,
@@ -1120,6 +1134,10 @@ export async function submitErc2612AtomicBatch(
   if (connectedAccount.toLowerCase() !== signed.authorization.destination.toLowerCase()) {
     throw new Error("Only the designated safe destination can submit this settlement");
   }
+  assertConfiguredSettlementContract(
+    signed.authorization.domain.chainId,
+    signed.authorization.settlementContract,
+  );
   assertRecoveryAuthorizationCurrent(signed);
   const chainId = await provider.request({ method: "eth_chainId" });
   const expectedChainHex = rescueChainHex(signed.authorization.domain.chainId);
@@ -1150,6 +1168,10 @@ export async function submitDaiPermitAtomicBatch(
   if (connectedAccount.toLowerCase() !== signed.authorization.destination.toLowerCase()) {
     throw new Error("Only the designated safe destination can submit this DAI-style settlement");
   }
+  assertConfiguredSettlementContract(
+    signed.authorization.domain.chainId,
+    signed.authorization.settlementContract,
+  );
   if (signed.authorization.revokeNonce !== signed.authorization.allowNonce + 1n) {
     throw new Error("The DAI-style revoke nonce must immediately follow the allow nonce");
   }
@@ -1183,6 +1205,10 @@ export async function submitErc4494AtomicBatch(
   if (connectedAccount.toLowerCase() !== signed.authorization.destination.toLowerCase()) {
     throw new Error("Only the designated safe destination can submit this NFT settlement");
   }
+  assertConfiguredSettlementContract(
+    signed.authorization.domain.chainId,
+    signed.authorization.settlementContract,
+  );
   assertRecoveryAuthorizationCurrent(signed);
   const chainId = await provider.request({ method: "eth_chainId" });
   const expectedChainHex = rescueChainHex(signed.authorization.domain.chainId);

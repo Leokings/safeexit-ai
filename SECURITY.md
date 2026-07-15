@@ -6,19 +6,10 @@ wallet signatures.
 
 ## Dependency advisory record
 
-As of 2026-07-14, `npm audit` reports GHSA-qx2v-qp2m-jg93 through Next.js's
-exact nested dependency on PostCSS 8.4.31. The current stable Next.js release is
-16.2.10 and still pins that version; npm's automated fix incorrectly proposes a
-breaking downgrade to Next.js 9.3.3.
-
-The advisory concerns stringifying attacker-controlled CSS containing a closing
-style tag. SAFEEXIT does not accept, generate, or stringify user-provided CSS;
-PostCSS is used during the trusted application build and is not an API input.
-The deployment also applies a restrictive content security policy.
-
-Do not run `npm audit fix --force` for this finding. Upgrade Next.js as soon as a
-stable release depends on PostCSS 8.5.10 or newer, then remove this temporary
-risk acceptance after CI and browser verification.
+As of 2026-07-15, the committed dependency graph reports zero known
+vulnerabilities through `npm audit`. Dependency scanning remains part of release
+verification; a clean scan is evidence about the current advisory database, not
+a guarantee that dependencies contain no vulnerabilities.
 
 ## Mainnet ERC-3009 review boundary
 
@@ -38,6 +29,11 @@ Execution remains limited by deterministic capability verification, exact
 destination-bound authorization, fresh simulation, and receipt evidence. A
 controlled operator-owned canary is recommended when enabling a new route or
 asset implementation, but an external audit is not a runtime prerequisite.
+
+Receipt evidence is accepted as complete only after the configured per-chain
+confirmation threshold and canonical-block checks before and after final asset
+state verification. These application thresholds reduce reorg risk but are not
+represented as irreversible protocol finality.
 
 ## Distributed abuse controls
 

@@ -98,6 +98,8 @@ The browser handoff automatically registers the public transaction hash as
 soon as the destination broadcasts. SAFEEXIT accepts no signature or calldata:
 it verifies that the destination submitted the transaction to the issued route,
 then independently proves the exact committed transfer from the chain receipt.
+The job remains pending until the chain-specific confirmation threshold is met
+and the receipt block remains canonical before and after final asset-state reads.
 An after-response worker and authenticated scheduled reconciliation retry
 registered hashes if the buyer closes the browser before confirmation.
 
@@ -279,7 +281,8 @@ Public receipt registration is package-bound and accepts only a transaction
 hash. Before persistence, the transaction must already be visible on the
 incident chain, originate from the committed destination, target the issued
 token or settlement contract, and carry no native value. Receipt logs remain
-the final authority. `CRON_SECRET` protects the reconciliation backstop.
+the final authority. Under-confirmed or reorged receipts remain pending rather
+than completing a job. `CRON_SECRET` protects the reconciliation backstop.
 
 The package also contains versioned conceptual A2A request/response schemas.
 They are SAFEEXIT contracts, not claimed OKX wire formats. ASP registration,

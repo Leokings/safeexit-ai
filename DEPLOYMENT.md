@@ -74,21 +74,22 @@ SAFEEXIT_AGENT_MODE=LIVE_READONLY
 OKX_WEB3_API_KEY=<OKX developer API key>
 OKX_WEB3_SECRET_KEY=<OKX developer secret key>
 OKX_WEB3_PASSPHRASE=<OKX developer passphrase>
-XLAYER_MAINNET_RPC_URL=<dedicated HTTPS X Layer RPC URL>
-ETHEREUM_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
-BNB_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
-POLYGON_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
-ARBITRUM_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
-OPTIMISM_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
-BASE_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
-AVALANCHE_MAINNET_RPC_URL=<optional encrypted QuickNode endpoint>
+XLAYER_MAINNET_RPC_URL=<required dedicated HTTPS X Layer RPC URL>
+ETHEREUM_MAINNET_RPC_URL=<required encrypted HTTPS endpoint>
+BNB_MAINNET_RPC_URL=<required encrypted HTTPS endpoint>
+POLYGON_MAINNET_RPC_URL=<required encrypted HTTPS endpoint>
+ARBITRUM_MAINNET_RPC_URL=<required encrypted HTTPS endpoint>
+OPTIMISM_MAINNET_RPC_URL=<required encrypted HTTPS endpoint>
+BASE_MAINNET_RPC_URL=<required encrypted HTTPS endpoint>
+AVALANCHE_MAINNET_RPC_URL=<required encrypted HTTPS endpoint>
 ```
 
 Create the OKX credentials in the official Onchain OS developer portal. Never
 commit them, paste them into an agent conversation, add a `NEXT_PUBLIC_` prefix,
-or expose them to browser code. `/api/ready` fails closed in `LIVE_READONLY`
-mode when the OKX credentials or dedicated mainnet RPC are missing, and it
-verifies an RPC block read before reporting ready.
+or expose them to browser code. In production, `/api/ready` fails closed when
+any advertised mainnet RPC is missing. In `LIVE_READONLY` mode it additionally
+requires the OKX credentials. Every endpoint must pass chain identity and
+deterministic EVM read probes before the deployment reports ready.
 
 Every configured multichain endpoint is checked for HTTPS, expected chain ID,
 and a current block number. These URLs may contain provider credentials and
