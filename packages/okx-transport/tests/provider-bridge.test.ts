@@ -27,6 +27,7 @@ import {
   okxA2ASigningDeliverableSchema,
   okxA2ATaskRequestSchema,
   okxX402PrepareRequestSchema,
+  okxX402RefreshRequestSchema,
   type OkxA2ATaskRequest,
   type SafeExitAgentLifecyclePort,
 } from "../src";
@@ -456,6 +457,38 @@ describe("OKX A2A provider bridge", () => {
     expect(vi.mocked(service.createIncident).mock.calls[0]?.[0].requestId).toBe(
       "okx:5196:x402:paid-request-1",
     );
+  });
+
+  it("refreshes only the exact persisted paid job scope", async () => {
+    const bridge = new OkxA2AProviderBridge("5196", () => new Date(now));
+    const paidJob: AgentServiceJob = {
+      ...waitingJob,
+      requestId: "okx:5196:x402:paid-request-1",
+      incident: { ...incident, assetManifest: request.assetManifest },
+    };
+    const service = lifecycle([signingPackage], paidJob);
+    const refreshRequest = okxX402RefreshRequestSchema.parse({
+      schemaVersion: "safeexit-okx-x402-refresh-v1",
+      transportMode: "OKX_X402",
+      requestId: "paid-request-1",
+      safeExitJobId: paidJob.id,
+      continuationToken: "a".repeat(64),
+    });
+
+    const refreshed = await bridge.refreshPaidSigningDeliverable(
+      service,
+      refreshRequest,
+    );
+
+    expect(refreshed.requestId).toBe("paid-request-1");
+    expect(refreshed.signingPackages[0]?.signingPackage.packageId).toBe(
+      signingPackage.packageId,
+    );
+    expect(vi.mocked(service.getSigningPackages)).toHaveBeenCalledWith(paidJob.id);
+    await expect(bridge.refreshPaidSigningDeliverable(service, {
+      ...refreshRequest,
+      requestId: "another-paid-request",
+    })).rejects.toMatchObject({ code: "HANDOFF_SCOPE_MISMATCH" });
   });
 
   it("returns one deliverable containing every package in a mixed rescue plan", async () => {

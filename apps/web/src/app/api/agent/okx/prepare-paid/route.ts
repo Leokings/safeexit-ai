@@ -29,6 +29,7 @@ import {
   hasX402PaymentHeader,
   inspectX402Payment,
 } from "@/lib/okx-x402-request";
+import { issuePaidContinuation } from "@/lib/paid-continuation";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -61,6 +62,12 @@ async function preparePaidRescue(request: NextRequest): Promise<NextResponse> {
     );
     const response = okxX402SigningDeliverableSchema.parse({
       ...deliverable,
+      continuation: issuePaidContinuation(environment, {
+        requestId: input.requestId,
+        safeExitJobId: deliverable.safeExitJobId,
+        providerAgentId: deliverable.providerAgentId,
+        chainId: deliverable.walletContext.chainId,
+      }),
       incidentAnalysis: {
         authority: "EXPLANATION_ONLY",
         executablePlanSource: "DETERMINISTIC",
@@ -99,7 +106,7 @@ async function describePaidRescue(): Promise<NextResponse> {
       method: "POST",
       execution: "PREPARE_ONLY",
       message:
-        "Submit the validated SAFEEXIT request body with POST to prepare a deterministic signing package and grounded incident explanation.",
+        "Submit the validated SAFEEXIT request body with POST to prepare deterministic signing packages, a grounded incident explanation, and a payment-bound refresh continuation.",
     },
     { status: 200, headers: { "Cache-Control": "no-store", Allow: "POST" } },
   );

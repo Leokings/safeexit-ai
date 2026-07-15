@@ -16,12 +16,14 @@ import {
   okxA2ASigningDeliverableSchema,
   okxA2ATaskRequestSchema,
   okxX402PrepareRequestSchema,
+  okxX402RefreshRequestSchema,
   okxX402SigningDeliverableSchema,
   type OkxA2ABuyerReportRequest,
   type OkxA2ACompletionDeliverable,
   type OkxA2ASigningDeliverable,
   type OkxA2ATaskRequest,
   type OkxX402PrepareRequest,
+  type OkxX402RefreshRequest,
   type OkxX402SigningDeliverable,
 } from "./contracts";
 import type { SafeExitAgentLifecyclePort } from "./ports";
@@ -101,6 +103,39 @@ function assertSigningScope(
     throw new OkxProviderBridgeError(
       "HANDOFF_SCOPE_MISMATCH",
       "SAFEEXIT returned a signing package outside the normalized task scope",
+    );
+  }
+}
+
+function assertPersistedSigningScope(
+  job: AgentServiceJob,
+  signingPackage: SigningPackage,
+): void {
+  const manifest = job.incident?.assetManifest;
+  const isRequestedAsset = signingPackage.route === "ERC4494_PERMIT_SETTLEMENT"
+    ? manifest?.erc721Assets.some(
+      (asset) =>
+        sameAddress(asset.collectionAddress, signingPackage.collectionAddress) &&
+        asset.tokenId === signingPackage.tokenId,
+    ) === true
+    : manifest?.erc20TokenAddresses.some((address) =>
+      sameAddress(address, signingPackage.tokenAddress),
+    ) === true;
+  if (
+    !job.incident ||
+    !job.plan ||
+    !job.simulation ||
+    signingPackage.jobId !== job.id ||
+    !job.plan.actions.some((action) => action.id === signingPackage.actionId) ||
+    !job.simulation.executableActionIds.includes(signingPackage.actionId) ||
+    signingPackage.chainId !== job.incident.chainId ||
+    !sameAddress(signingPackage.sourceAddress, job.incident.sourceAddress) ||
+    !sameAddress(signingPackage.destinationAddress, job.incident.destinationAddress) ||
+    !isRequestedAsset
+  ) {
+    throw new OkxProviderBridgeError(
+      "HANDOFF_SCOPE_MISMATCH",
+      "Refreshed SAFEEXIT signing package does not match the paid incident scope",
     );
   }
 }
@@ -248,6 +283,71 @@ export class OkxA2AProviderBridge {
       signingPackages: deliverable.signingPackages,
       coverage: deliverable.coverage,
       executionRequirements: deliverable.executionRequirements,
+    });
+  }
+
+  async refreshPaidSigningDeliverable(
+    lifecycle: SafeExitAgentLifecyclePort,
+    value: OkxX402RefreshRequest,
+  ): Promise<OkxX402SigningDeliverable> {
+    const request = okxX402RefreshRequestSchema.parse(value);
+    const job = agentServiceJobSchema.parse(await lifecycle.getJob(request.safeExitJobId));
+    if (
+      job.requestId !== requestIdFor(this.providerAgentId, `x402:${request.requestId}`) ||
+      job.status !== "WAITING_FOR_USER" ||
+      !job.incident ||
+      !job.plan ||
+      !job.simulation
+    ) {
+      throw new OkxProviderBridgeError(
+        "HANDOFF_SCOPE_MISMATCH",
+        "The continuation does not match a refreshable paid SAFEEXIT job",
+      );
+    }
+    const signingPackages = signingPackageListSchema.parse(
+      await lifecycle.getSigningPackages(job.id),
+    );
+    signingPackages.forEach((signingPackage) => {
+      assertPersistedSigningScope(job, signingPackage);
+      if (Date.parse(signingPackage.expiresAt) <= this.clock().getTime()) {
+        throw new OkxProviderBridgeError(
+          "JOB_NOT_READY",
+          "SAFEEXIT did not issue a fresh signing package",
+        );
+      }
+    });
+    const issuedActionIds = signingPackages.map((signingPackage) => signingPackage.actionId);
+    const issuedActionIdSet = new Set(issuedActionIds);
+    return okxX402SigningDeliverableSchema.parse({
+      schemaVersion: "safeexit-okx-x402-deliverable-v2",
+      transportMode: "OKX_X402",
+      requestId: request.requestId,
+      providerAgentId: this.providerAgentId,
+      safeExitJobId: job.id,
+      status: "SIGNING_PACKAGES_READY",
+      createdAt: this.clock().toISOString(),
+      walletContext: {
+        chainId: job.incident.chainId,
+        sourceAddress: job.incident.sourceAddress,
+        destinationAddress: job.incident.destinationAddress,
+      },
+      signingPackages: signingPackages.map((signingPackage) => ({
+        ...signingPackageExecutionMetadata(signingPackage),
+        signingPackage,
+      })),
+      coverage: {
+        issuedActionIds,
+        unavailableActionIds: job.plan.actions
+          .map((action) => action.id)
+          .filter((actionId) => !issuedActionIdSet.has(actionId)),
+      },
+      executionRequirements: {
+        sourceSignerMustRemainLocal: true,
+        destinationPaysSettlementGas: true,
+        postSignatureSimulationRequired: true,
+        sourceSignaturesMustNotBeReturned: true,
+        receiptOnlyReportSchema: "safeexit-buyer-report-v1",
+      },
     });
   }
 

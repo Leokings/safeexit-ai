@@ -133,6 +133,13 @@ code still writes the response and remains the sole source of executable plan
 data. No negotiation loop, polling worker, or encrypted report file is
 involved.
 
+The paid response includes a 24-hour, payment-bound continuation token for
+`POST /api/agent/okx/refresh-paid`. If its short-lived signing packages expire,
+the buyer can refresh the same immutable plan without another x402 charge.
+SAFEEXIT reruns deterministic simulation against current chain state before
+issuing replacement packages. The continuation cannot change the chain,
+source, destination, asset manifest, plan, or execution policy.
+
 Buyer agents should call this A2MCP endpoint directly. They should not publish
 an A2A task and wait for marketplace events for deterministic preparation.
 The payment wallet and `SAFEEXIT_X402_PAY_TO_ADDRESS` must be different
@@ -236,7 +243,7 @@ the executable plan.
 
 `@safeexit/agent-service` adds the provider-neutral incident job lifecycle and
 the methods `createIncident`, `analyseIncident`, `generatePlan`, `simulatePlan`,
-`getSigningPackage`, `recordBuyerExecutionReport`, `getDashboardUrl`, and
+`getSigningPackage`, `getSigningPackages`, `recordBuyerExecutionReport`, `getDashboardUrl`, and
 `monitorRescue`. Scanner, planner, simulator, signing-package, receipt
 verification, dashboard, and monitor behavior are injected ports. The hosted
 service has no signing or wallet-execution port.

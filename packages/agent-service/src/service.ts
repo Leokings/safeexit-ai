@@ -259,7 +259,7 @@ export class AgentIncidentService {
   }
 
   async getSigningPackages(jobId: string): Promise<SigningPackage[]> {
-    const job = await this.requireJob(jobId);
+    let job = await this.requireJob(jobId);
     const persisted = job.signingPackages ?? (job.signingPackage ? [job.signingPackage] : []);
     if (
       persisted.length > 0 &&
@@ -275,13 +275,31 @@ export class AgentIncidentService {
     ) {
       throw new Error("A successfully simulated rescue plan is required before signing-package generation");
     }
+    const committedPlan = job.plan;
     try {
+      const minimumSigningWindow = this.clock().getTime() + 30_000;
+      const executableActionIds = new Set(job.simulation.executableActionIds);
+      const executableResults = job.simulation.results
+        .filter((result) => executableActionIds.has(result.actionId));
+      const simulationIsFresh =
+        executableResults.length === executableActionIds.size &&
+        executableResults.every((result) => Date.parse(result.expiresAt) > minimumSigningWindow);
+      if (persisted.length > 0 || !simulationIsFresh) {
+        const simulation = agentSimulationReportSchema.parse(
+          await this.simulator.simulate(committedPlan),
+        );
+        this.validateSimulation(committedPlan, simulation);
+        if (simulation.status === "FAILED") {
+          throw new Error("The committed rescue plan no longer simulates successfully");
+        }
+        job = await this.updateJob(job, { simulation });
+      }
       const signingPackages = signingPackageListSchema.parse(
         this.signingPackages.buildAll
           ? await this.signingPackages.buildAll(job)
           : [await this.signingPackages.build(job)],
       );
-      const actionOrder = new Map(job.plan.actions.map((action, index) => [action.id, index]));
+      const actionOrder = new Map(committedPlan.actions.map((action, index) => [action.id, index]));
       let previousIndex = -1;
       for (const signingPackage of signingPackages) {
         this.validateSigningPackage(job, signingPackage);
@@ -600,7 +618,7 @@ export class AgentIncidentService {
 
   private async updateJob(
     job: AgentServiceJob,
-    patch: Partial<Pick<AgentServiceJob, "incident" | "scan" | "signingPackage" | "signingPackages" | "monitor" | "dashboardUrl">>,
+    patch: Partial<Pick<AgentServiceJob, "incident" | "scan" | "simulation" | "signingPackage" | "signingPackages" | "monitor" | "dashboardUrl">>,
   ): Promise<AgentServiceJob> {
     const at = this.now();
     return this.store.save(

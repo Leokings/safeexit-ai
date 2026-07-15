@@ -90,6 +90,14 @@ export const okxX402PrepareRequestSchema = z
     }
   });
 
+export const okxX402RefreshRequestSchema = z.strictObject({
+  schemaVersion: z.literal("safeexit-okx-x402-refresh-v1"),
+  transportMode: z.literal("OKX_X402"),
+  requestId: identifierSchema,
+  safeExitJobId: z.string().min(1).max(256),
+  continuationToken: z.string().min(64).max(2_048),
+});
+
 export const okxSigningPackageEnvelopeSchema = z.strictObject({
   executionPath: recoveryExecutionPathSchema,
   authorizationStandard: authorizationStandardSchema,
@@ -115,6 +123,13 @@ export const okxSigningPackageEnvelopeSchema = z.strictObject({
 const signingPackageCoverageSchema = z.strictObject({
   issuedActionIds: z.array(identifierSchema).min(1),
   unavailableActionIds: z.array(identifierSchema),
+});
+
+export const okxX402ContinuationSchema = z.strictObject({
+  schemaVersion: z.literal("safeexit-paid-continuation-v1"),
+  refreshUrl: z.string().url(),
+  token: z.string().min(64).max(2_048),
+  expiresAt: timestampSchema,
 });
 
 export const okxA2ASigningDeliverableSchema = z.strictObject({
@@ -148,6 +163,7 @@ export const okxX402SigningDeliverableSchema = z.strictObject({
   walletContext: walletContextSchema,
   signingPackages: z.array(okxSigningPackageEnvelopeSchema).min(1),
   coverage: signingPackageCoverageSchema,
+  continuation: okxX402ContinuationSchema.optional(),
   incidentAnalysis: z.strictObject({
     authority: z.literal("EXPLANATION_ONLY"),
     executablePlanSource: z.literal("DETERMINISTIC"),
@@ -196,6 +212,8 @@ export type OkxA2ATaskRequest = z.infer<typeof okxA2ATaskRequestSchema>;
 export type OkxA2AAssetManifest = z.infer<typeof okxA2AAssetManifestSchema>;
 export type OkxA2ASigningDeliverable = z.infer<typeof okxA2ASigningDeliverableSchema>;
 export type OkxX402PrepareRequest = z.infer<typeof okxX402PrepareRequestSchema>;
+export type OkxX402RefreshRequest = z.infer<typeof okxX402RefreshRequestSchema>;
+export type OkxX402Continuation = z.infer<typeof okxX402ContinuationSchema>;
 export type OkxX402SigningDeliverable = z.infer<typeof okxX402SigningDeliverableSchema>;
 export type OkxA2ABuyerReportRequest = z.infer<typeof okxA2ABuyerReportRequestSchema>;
 export type OkxA2ACompletionDeliverable = z.infer<typeof okxA2ACompletionDeliverableSchema>;

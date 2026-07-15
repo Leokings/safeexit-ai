@@ -384,6 +384,9 @@ type ServiceOptions = {
   signingPackages?: SigningPackage[];
   plan?: RescuePlan;
   simulation?: AgentSimulationReport;
+  simulationFactory?: () => AgentSimulationReport;
+  signingPackagesFactory?: () => SigningPackage[];
+  clock?: () => Date;
 };
 
 function createService(options: ServiceOptions = {}) {
@@ -401,12 +404,14 @@ function createService(options: ServiceOptions = {}) {
     },
     planner: { generate: async () => options.plan ?? plan },
     simulator: {
-      simulate: async () => options.simulation ?? simulationReport(options.simulationStatus ?? "SUCCEEDED"),
+      simulate: async () => options.simulationFactory?.() ??
+        options.simulation ?? simulationReport(options.simulationStatus ?? "SUCCEEDED"),
     },
     dashboard: new SafeExitDashboardLocator("http://localhost:3001"),
     signingPackages: {
       build: async () => options.signingPackage ?? signingPackage(),
-      buildAll: async () => options.signingPackages ?? [options.signingPackage ?? signingPackage()],
+      buildAll: async () => options.signingPackagesFactory?.() ??
+        options.signingPackages ?? [options.signingPackage ?? signingPackage()],
     },
     executionVerifier: {
       verify: async (_job, report) => ({
@@ -420,7 +425,7 @@ function createService(options: ServiceOptions = {}) {
     monitor: {
       observe: async () => pendingObservations.shift() ?? observation("WAITING_FOR_USER"),
     },
-    clock: () => new Date(now),
+    clock: options.clock ?? (() => new Date(now)),
     idFactory: () => "job:test",
   });
   return { service, store };
@@ -554,6 +559,80 @@ describe("agent service lifecycle", () => {
         },
       }).success,
     ).toBe(false);
+  });
+
+  it("re-simulates the immutable plan before refreshing expired signing packages", async () => {
+    let currentTime = new Date(now);
+    let simulationCalls = 0;
+    let packageBuilds = 0;
+    const refreshedSimulationExpiry = "2026-07-12T10:09:30.000Z";
+    const refreshedPackageExpiry = "2026-07-12T10:08:30.000Z";
+    const refreshedDeadline = String(Math.floor(Date.parse(refreshedPackageExpiry) / 1_000));
+    const refreshedSimulation: AgentSimulationReport = {
+      ...simulationReport("SUCCEEDED"),
+      results: simulationReport("SUCCEEDED").results.map((result) => ({
+        ...result,
+        id: "simulation:refreshed",
+        simulatedAt: "2026-07-12T10:04:30.000Z",
+        expiresAt: refreshedSimulationExpiry,
+      })),
+    };
+    const baseRefreshedPackage = signingPackage();
+    if (baseRefreshedPackage.route !== "ERC2612_PERMIT_SETTLEMENT") {
+      throw new Error("Expected the ERC-2612 test fixture");
+    }
+    const refreshedPackage = signingPackage({
+      packageId: "signing-package:refreshed",
+      expiresAt: refreshedPackageExpiry,
+      simulation: {
+        ...baseRefreshedPackage.simulation,
+        resultId: "simulation:refreshed",
+        expiresAt: refreshedSimulationExpiry,
+      },
+      sourceSigningRequests: [
+        {
+          ...baseRefreshedPackage.sourceSigningRequests[0],
+          typedData: {
+            ...baseRefreshedPackage.sourceSigningRequests[0].typedData,
+            message: {
+              ...baseRefreshedPackage.sourceSigningRequests[0].typedData.message,
+              deadline: refreshedDeadline,
+            },
+          },
+        },
+        {
+          ...baseRefreshedPackage.sourceSigningRequests[1],
+          typedData: {
+            ...baseRefreshedPackage.sourceSigningRequests[1].typedData,
+            message: {
+              ...baseRefreshedPackage.sourceSigningRequests[1].typedData.message,
+              deadline: refreshedDeadline,
+            },
+          },
+        },
+      ],
+    });
+    const { service } = createService({
+      clock: () => currentTime,
+      simulationFactory: () =>
+        simulationCalls++ === 0 ? simulationReport("SUCCEEDED") : refreshedSimulation,
+      signingPackagesFactory: () =>
+        packageBuilds++ === 0 ? [signingPackage()] : [refreshedPackage],
+    });
+    await prepareWaitingForUser(service);
+    expect((await service.getSigningPackage("job:test")).packageId).toBe(
+      "signing-package:test",
+    );
+
+    currentTime = new Date("2026-07-12T10:04:30.000Z");
+    const refreshed = await service.getSigningPackages("job:test");
+    const persisted = await service.getJob("job:test");
+
+    expect(refreshed[0]?.packageId).toBe("signing-package:refreshed");
+    expect(refreshed[0]?.planHash).toBe(planHash);
+    expect(persisted.simulation?.results[0]?.id).toBe("simulation:refreshed");
+    expect(simulationCalls).toBe(2);
+    expect(packageBuilds).toBe(2);
   });
 
   it("accepts a scoped buyer report only after verifier confirmation", async () => {
