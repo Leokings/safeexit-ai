@@ -44,7 +44,7 @@ function ExplanationMessage({ explanation }: { explanation: GroundedExplanation 
                 {statement.evidence.map((reference) => (
                   <span
                     key={`${reference.source}:${reference.recordId}:${reference.field ?? "record"}`}
-                    className="rounded border border-border bg-background px-1.5 py-1 font-mono text-[9px] text-dim"
+                    className="rounded-[2px] border-2 border-border-strong bg-surface-raised px-1.5 py-1 font-mono text-[9px] font-bold text-foreground"
                   >
                     {reference.source}:{reference.recordId}
                   </span>
@@ -54,8 +54,8 @@ function ExplanationMessage({ explanation }: { explanation: GroundedExplanation 
           </div>
         ))}
       </div>
-      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-3">
-        <Database className="size-3.5 text-accent" />
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t-2 border-border-strong pt-3">
+        <Database className="size-3.5" />
         {explanation.toolsUsed.length > 0 ? (
           explanation.toolsUsed.map((tool) => (
             <span key={tool} className="font-mono text-[9px] text-dim">
@@ -107,20 +107,25 @@ export function IncidentChat({
   }
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/60" role="presentation">
+    <div className="fixed inset-0 z-[70] bg-black/55" role="presentation">
       <aside
-        className="absolute inset-y-0 right-0 flex w-full flex-col border-l border-border bg-surface shadow-2xl sm:w-[430px]"
+        className="absolute inset-y-0 right-0 flex w-full flex-col border-l-2 border-border-strong bg-surface shadow-[-6px_0_0_var(--border-strong)] sm:w-[460px]"
         aria-label="Grounded incident assistant"
       >
-        <header className="border-b border-border p-4 sm:p-5">
+        <div className="window-bar shrink-0">
+          <span className="window-dot" />
+          <span className="window-dot" />
+          <span className="ml-auto">incident-assistant.output</span>
+        </div>
+        <header className="border-b-2 border-border-strong p-4 sm:p-5">
           <div className="flex items-start justify-between gap-4">
             <div className="flex gap-3">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-md border border-accent/35 bg-accent/10 text-accent">
+              <span className="flex size-10 shrink-0 items-center justify-center border-2 border-border-strong bg-accent">
                 <Bot className="size-4" />
               </span>
               <div>
-                <h2 className="text-sm font-semibold">Grounded incident assistant</h2>
-                <p className="mt-1 text-xs text-muted">Structured evidence only</p>
+                <h2 className="text-base font-black">Grounded incident assistant</h2>
+                <p className="mt-1 text-xs font-semibold text-muted">Structured evidence only</p>
               </div>
             </div>
             <Button
@@ -147,13 +152,13 @@ export function IncidentChat({
               <article
                 key={message.id}
                 className={cn(
-                  "border p-4",
+                  "border-2 border-border-strong p-4",
                   message.role === "USER"
-                    ? "ml-8 border-info/30 bg-info/5"
-                    : "mr-3 border-border bg-background",
+                    ? "ml-8 bg-info/15"
+                    : "mr-3 bg-surface-muted",
                 )}
               >
-                <p className="mb-3 font-mono text-[9px] uppercase text-dim">
+                <p className="mb-3 font-mono text-[9px] font-bold uppercase text-dim">
                   {message.role === "USER" ? "You" : "SAFEEXIT grounded layer"}
                 </p>
                 {message.role === "USER" ? (
@@ -167,14 +172,14 @@ export function IncidentChat({
 
           {messages.length === 1 && (
             <div className="mt-5">
-              <p className="mb-3 font-mono text-[9px] uppercase text-dim">Grounded questions</p>
+              <p className="mb-3 font-mono text-[9px] font-bold uppercase text-dim">Grounded questions</p>
               <div className="grid gap-2">
                 {suggestions.map((suggestion) => (
                   <button
                     key={suggestion}
                     type="button"
                     onClick={() => ask(suggestion)}
-                    className="min-h-10 rounded-md border border-border bg-background px-3 py-2 text-left text-xs text-muted transition-colors hover:border-border-strong hover:text-foreground"
+                    className="min-h-10 rounded-[2px] border-2 border-border-strong bg-surface px-3 py-2 text-left text-xs font-bold text-muted transition-colors hover:bg-accent/25 hover:text-foreground"
                   >
                     {suggestion}
                   </button>
@@ -184,7 +189,7 @@ export function IncidentChat({
           )}
         </div>
 
-        <footer className="border-t border-border bg-background p-4">
+        <footer className="border-t-2 border-border-strong bg-surface-raised p-4">
           <form onSubmit={submit} className="flex items-end gap-2">
             <label className="min-w-0 flex-1">
               <span className="sr-only">Ask about this incident</span>
@@ -193,7 +198,7 @@ export function IncidentChat({
                 onChange={(event) => setInput(event.target.value)}
                 placeholder="Ask about evidence, approvals, plan, or status"
                 rows={2}
-                className="max-h-32 min-h-12 w-full resize-none rounded-md border border-border-strong bg-surface px-3 py-2 text-sm leading-5 text-foreground placeholder:text-dim focus:border-accent focus:outline focus:outline-1"
+                className="max-h-32 min-h-12 w-full resize-none rounded-[2px] border-2 border-border-strong bg-surface px-3 py-2 text-sm font-medium leading-5 text-foreground placeholder:text-dim focus:bg-white focus:outline focus:outline-2"
               />
             </label>
             <Button
@@ -207,8 +212,8 @@ export function IncidentChat({
               <CornerDownLeft className="size-4" />
             </Button>
           </form>
-          <p className="mt-3 flex items-center gap-2 text-[10px] leading-4 text-dim">
-            <ShieldCheck className="size-3.5 shrink-0 text-accent" />
+          <p className="mt-3 flex items-center gap-2 text-[10px] font-semibold leading-4 text-dim">
+            <ShieldCheck className="size-3.5 shrink-0" />
             Cannot sign, broadcast, change recipients, or create arbitrary calls.
           </p>
         </footer>

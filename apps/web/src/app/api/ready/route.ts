@@ -8,7 +8,6 @@ import { parseDeploymentEnvironment } from "@/lib/deployment-env";
 import { probeConfiguredRpcEndpoints } from "@/lib/rpc-endpoints";
 import {
   getSafeExitX402Configuration,
-  SAFEEXIT_X402_PRICE,
 } from "@/lib/okx-x402";
 
 export const runtime = "nodejs";
@@ -16,11 +15,6 @@ export const runtime = "nodejs";
 export async function GET(): Promise<Response> {
   try {
     const config = parseDeploymentEnvironment();
-    const checks: Record<string, string> = {
-      agent: config.agentMode,
-      store: config.agentStore,
-      ai: config.aiMode,
-    };
     if (
       config.nodeEnv === "production" &&
       config.publicBaseUrl === "https://safeexit.invalid"
@@ -34,19 +28,15 @@ export async function GET(): Promise<Response> {
       if (!config.okxProviderAgentId) {
         throw new Error("SAFEEXIT_OKX_PROVIDER_AGENT_ID is required for the A2A bridge");
       }
-      checks.okxProviderBridge = `configured:${config.okxProviderAgentId}`;
     }
     if (config.x402Mode === "MAINNET") {
-      const x402 = getSafeExitX402Configuration(config);
-      checks.paidAgentApi = `configured:${x402.network}:${SAFEEXIT_X402_PRICE}`;
+      getSafeExitX402Configuration(config);
     }
     if (config.agentMode !== "DISABLED" && config.agentStore === "DATABASE") {
       await checkDatabaseConnection();
-      checks.database = "connected";
     }
     if (config.nodeEnv === "production") {
       await checkSharedRateLimitStore(getPrismaClient());
-      checks.rateLimitStore = "shared:postgresql";
     }
     if (config.agentMode === "LIVE_READONLY") {
       if (
@@ -57,15 +47,13 @@ export async function GET(): Promise<Response> {
       ) {
         throw new Error("OKX Wallet API credentials and a dedicated RPC are required");
       }
-      checks.okxWalletApi = "configured";
     }
-    Object.assign(checks, await probeConfiguredRpcEndpoints(config));
+    await probeConfiguredRpcEndpoints(config);
     if (config.aiMode === "GATEWAY" && !config.aiModel?.includes("/")) {
       throw new Error("SAFEEXIT_AI_MODEL must use provider/model format");
     }
-    checks.aiBudget = `${config.aiMaxEstimatedInputTokens}:${config.aiMaxOutputTokens}:${config.aiTimeoutMs}`;
     return Response.json(
-      { status: "ready", checks },
+      { status: "ready" },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch {

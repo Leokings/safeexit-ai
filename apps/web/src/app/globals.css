@@ -1,21 +1,23 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: dark;
-  --background: #090d0d;
-  --surface: #0f1414;
-  --surface-raised: #151b1a;
-  --surface-muted: #1a211f;
-  --border: #293330;
-  --border-strong: #3a4743;
-  --foreground: #eef3f1;
-  --muted: #99a6a2;
-  --dim: #687570;
-  --accent: #62d6b0;
-  --accent-strong: #8be4c6;
-  --warning: #e4b85d;
-  --danger: #f0796f;
-  --info: #83a8cf;
+  color-scheme: light;
+  --background: #e8e8e3;
+  --surface: #fbfbf7;
+  --surface-raised: #d8d8d3;
+  --surface-muted: #f0f0eb;
+  --border: #3c3d3a;
+  --border-strong: #10110f;
+  --foreground: #11120f;
+  --muted: #4f514c;
+  --dim: #6e706a;
+  --accent: #9ce7d3;
+  --accent-strong: #72d7bb;
+  --warning: #e7b94d;
+  --danger: #d75f50;
+  --info: #548eaa;
+  --font-sans: var(--font-safeexit-sans), "Arial Rounded MT Bold", Arial, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-safeexit-mono), "Cascadia Mono", Consolas, monospace;
 }
 
 @theme inline {
@@ -33,8 +35,8 @@
   --color-warning: var(--warning);
   --color-danger: var(--danger);
   --color-info: var(--info);
-  --font-sans: "Segoe UI", "Helvetica Neue", Arial, ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --font-sans: var(--font-safeexit-sans), "Arial Rounded MT Bold", Arial, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-safeexit-mono), "Cascadia Mono", Consolas, monospace;
 }
 
 * {
@@ -43,21 +45,24 @@
 
 html {
   background: var(--background);
+  scroll-behavior: smooth;
 }
 
 body {
   min-height: 100vh;
   margin: 0;
-  background: var(--background);
+  background-color: var(--background);
+  background-image: radial-gradient(rgba(17, 18, 15, 0.12) 0.65px, transparent 0.65px);
+  background-size: 5px 5px;
   color: var(--foreground);
-  font-family: var(--font-sans);
+  font-family: var(--font-safeexit-sans), "Arial Rounded MT Bold", Arial, ui-sans-serif, system-ui, sans-serif;
   letter-spacing: 0;
 }
 
 button,
 input,
 select {
-  font: inherit;
+  font-family: inherit;
 }
 
 button,
@@ -69,21 +74,80 @@ select {
 }
 
 ::selection {
-  background: rgba(98, 214, 176, 0.25);
+  background: var(--accent);
+  color: var(--foreground);
 }
 
 .content-shell {
-  width: min(100% - 32px, 1380px);
+  width: min(100% - 32px, 1440px);
   margin-inline: auto;
 }
 
 .dot-grid {
-  background-image: radial-gradient(circle, rgba(153, 166, 162, 0.16) 1px, transparent 1px);
-  background-size: 20px 20px;
+  background-image: radial-gradient(rgba(17, 18, 15, 0.2) 0.75px, transparent 0.75px);
+  background-size: 6px 6px;
+}
+
+.paper-panel {
+  border: 2px solid var(--border-strong);
+  background: var(--surface);
+}
+
+.hard-shadow {
+  box-shadow: 5px 5px 0 var(--border-strong);
+}
+
+.window-panel {
+  overflow: hidden;
+  border: 2px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--surface);
+  box-shadow: 4px 4px 0 var(--border-strong);
+}
+
+.window-bar {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 2px solid var(--border-strong);
+  background: var(--surface-raised);
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.window-dot {
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.section-rule {
+  border-bottom: 2px solid var(--border-strong);
+  padding-bottom: 14px;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border: 2px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--accent);
 }
 
 @media (max-width: 640px) {
   .content-shell {
-    width: min(100% - 24px, 1380px);
+    width: min(100% - 20px, 1440px);
+  }
+
+  .hard-shadow,
+  .window-panel {
+    box-shadow: 3px 3px 0 var(--border-strong);
   }
 }

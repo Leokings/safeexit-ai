@@ -8,6 +8,17 @@ import {
 import { AgentJobStatus, type PrismaClient } from "./generated/prisma/client";
 import { PrismaSafeExitRepository } from "./repository";
 
+function parsePersistedJob(record: { state: unknown; revision: number }): AgentServiceJob {
+  if (!record.state) {
+    throw new Error("Agent job does not contain a recoverable lifecycle snapshot");
+  }
+  const job = agentServiceJobSchema.parse(record.state);
+  if (job.revision !== record.revision) {
+    throw new Error("Agent job snapshot revision does not match its persistence record");
+  }
+  return job;
+}
+
 export class PrismaAgentServiceJobStore implements AgentServiceJobStore {
   private readonly repository: PrismaSafeExitRepository;
 
@@ -18,44 +29,35 @@ export class PrismaAgentServiceJobStore implements AgentServiceJobStore {
   async get(jobId: string): Promise<AgentServiceJob | undefined> {
     const record = await this.client.agentJob.findUnique({
       where: { id: jobId },
-      select: { state: true },
+      select: { state: true, revision: true },
     });
     if (!record) {
       return undefined;
     }
-    if (!record.state) {
-      throw new Error("Agent job does not contain a recoverable lifecycle snapshot");
-    }
-    return agentServiceJobSchema.parse(record.state);
+    return parsePersistedJob(record);
   }
 
   async getByRequestId(requestId: string): Promise<AgentServiceJob | undefined> {
     const record = await this.client.agentJob.findUnique({
       where: { requestId },
-      select: { state: true },
+      select: { state: true, revision: true },
     });
     if (!record) {
       return undefined;
     }
-    if (!record.state) {
-      throw new Error("Agent job does not contain a recoverable lifecycle snapshot");
-    }
-    return agentServiceJobSchema.parse(record.state);
+    return parsePersistedJob(record);
   }
 
   async getByIncidentId(incidentId: string): Promise<AgentServiceJob | undefined> {
     const record = await this.client.agentJob.findFirst({
       where: { incidentId },
       orderBy: { updatedAt: "desc" },
-      select: { state: true },
+      select: { state: true, revision: true },
     });
     if (!record) {
       return undefined;
     }
-    if (!record.state) {
-      throw new Error("Agent job does not contain a recoverable lifecycle snapshot");
-    }
-    return agentServiceJobSchema.parse(record.state);
+    return parsePersistedJob(record);
   }
 
   async listByStatuses(
@@ -70,19 +72,16 @@ export class PrismaAgentServiceJobStore implements AgentServiceJobStore {
       },
       orderBy: { updatedAt: "asc" },
       take: Math.max(1, Math.min(limit, 100)),
-      select: { state: true },
+      select: { state: true, revision: true },
     });
     return records.map((record) => {
-      if (!record.state) {
-        throw new Error("Agent job does not contain a recoverable lifecycle snapshot");
-      }
-      return agentServiceJobSchema.parse(record.state);
+      return parsePersistedJob(record);
     });
   }
 
-  async save(value: AgentServiceJob): Promise<AgentServiceJob> {
+  async save(value: AgentServiceJob, expectedRevision?: number): Promise<AgentServiceJob> {
     const job = agentServiceJobSchema.parse(value);
-    await this.repository.saveAgentJob(job);
+    await this.repository.saveAgentJob(job, expectedRevision);
     return job;
   }
 }

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { encodeAbiParameters, encodeEventTopics, type Hex } from "viem";
+import {
+  encodeAbiParameters,
+  encodeEventTopics,
+  encodeFunctionData,
+  parseSignature,
+  type Address,
+  type Hex,
+} from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 
 import {
   BuyerReceiptPendingError,
@@ -15,6 +23,7 @@ import {
   PERMIT_KIND_ERC2612,
   PERMIT_SETTLEMENT_NAME,
   PERMIT_SETTLEMENT_VERSION,
+  permitSettlementAbi,
 } from "@safeexit/adapters";
 import { xLayerMainnetConfig } from "@safeexit/chain";
 
@@ -23,7 +32,8 @@ import {
   type BuyerReceiptClient,
 } from "./live-buyer-report-verifier";
 
-const source = "0x1111111111111111111111111111111111111111" as const;
+const sourceAccount = privateKeyToAccount(`0x${"22".repeat(32)}`);
+const source = sourceAccount.address;
 const destination = "0x2222222222222222222222222222222222222222" as const;
 const wrongDestination = "0x3333333333333333333333333333333333333333" as const;
 const token = "0x4444444444444444444444444444444444444444" as const;
@@ -159,10 +169,71 @@ const report = buyerExecutionReportSchema.parse({
   completedAt: "2026-07-13T10:01:00.000Z",
 });
 
-function clientFor(recipient: `0x${string}`): BuyerReceiptClient {
+function signatureParts(signature: Hex) {
+  const parsed = parseSignature(signature);
+  return {
+    v: Number(parsed.v ?? BigInt((parsed.yParity ?? 0) + 27)),
+    r: parsed.r,
+    s: parsed.s,
+  };
+}
+
+async function transactionInput(): Promise<Hex> {
+  if (signingPackage.route !== "ERC2612_PERMIT_SETTLEMENT") {
+    throw new Error("Expected ERC-2612 signing package fixture");
+  }
+  const requests = signingPackage.sourceSigningRequests;
+  const signatures = await Promise.all(requests.map((request) => {
+    const types = { ...request.typedData.types } as Record<
+      string,
+      readonly { name: string; type: string }[]
+    >;
+    delete types.EIP712Domain;
+    return sourceAccount.signTypedData({
+      domain: {
+        ...request.typedData.domain,
+        verifyingContract: request.typedData.domain.verifyingContract as Address,
+      },
+      types,
+      primaryType: request.typedData.primaryType,
+      message: Object.fromEntries(
+        Object.entries(request.typedData.message).map(([key, value]) => [
+          key,
+          typeof value === "string" && /^\d+$/.test(value) ? BigInt(value) : value,
+        ]),
+      ),
+    });
+  }));
+  const permit = signatures[0];
+  const rescue = signatures[1];
+  if (!permit || !rescue) throw new Error("Missing test signatures");
+  const committed = requests[1].typedData.message;
+  return encodeFunctionData({
+    abi: permitSettlementAbi,
+    functionName: "settleERC2612",
+    args: [
+      token,
+      source,
+      destination,
+      100n,
+      0n,
+      BigInt(committed.deadline),
+      committed.rescueNonce as Hex,
+      signatureParts(permit),
+      signatureParts(rescue),
+    ],
+  });
+}
+
+async function clientFor(
+  recipient: `0x${string}`,
+  destinationBalance = 100n,
+): Promise<BuyerReceiptClient> {
+  const input = await transactionInput();
   return {
     getTransactionReceipt: async () => ({
       status: "success",
+      blockNumber: 101n,
       logs: [{
         address: token,
         topics: encodeEventTopics({
@@ -173,6 +244,14 @@ function clientFor(recipient: `0x${string}`): BuyerReceiptClient {
         data: encodeAbiParameters([{ type: "uint256" }], [100n]),
       }],
     }),
+    getTransaction: async () => ({
+      from: destination,
+      to: settlementContract as Address,
+      value: 0n,
+      input,
+    }),
+    getErc20Balance: async () => destinationBalance,
+    getErc721Owner: async () => destination,
   };
 }
 
@@ -182,7 +261,7 @@ describe("live buyer receipt verification", () => {
       xLayerMainnetConfig,
       "https://unused.invalid",
       () => new Date("2026-07-13T10:01:00.000Z"),
-      clientFor(destination),
+      await clientFor(destination),
     );
     const observation = await verifier.verify(
       { signingPackage } as AgentServiceJob,
@@ -198,7 +277,7 @@ describe("live buyer receipt verification", () => {
       xLayerMainnetConfig,
       "https://unused.invalid",
       () => new Date("2026-07-13T10:01:00.000Z"),
-      clientFor(wrongDestination),
+      await clientFor(wrongDestination),
     );
 
     await expect(verifier.verify(
@@ -210,11 +289,12 @@ describe("live buyer receipt verification", () => {
   it("distinguishes a pending receipt from a rejected transfer", async () => {
     const receiptMissing = new Error("receipt not found");
     receiptMissing.name = "TransactionReceiptNotFoundError";
+    const client = await clientFor(destination);
     const verifier = new LiveBuyerExecutionVerifier(
       xLayerMainnetConfig,
       "https://unused.invalid",
       () => new Date("2026-07-13T10:01:00.000Z"),
-      { getTransactionReceipt: async () => { throw receiptMissing; } },
+      { ...client, getTransactionReceipt: async () => { throw receiptMissing; } },
     );
 
     await expect(verifier.verify(
@@ -224,16 +304,38 @@ describe("live buyer receipt verification", () => {
   });
 
   it("distinguishes a reverted settlement receipt", async () => {
+    const client = await clientFor(destination);
     const verifier = new LiveBuyerExecutionVerifier(
       xLayerMainnetConfig,
       "https://unused.invalid",
       () => new Date("2026-07-13T10:01:00.000Z"),
-      { getTransactionReceipt: async () => ({ status: "reverted", logs: [] }) },
+      {
+        ...client,
+        getTransactionReceipt: async () => ({
+          status: "reverted",
+          blockNumber: 101n,
+          logs: [],
+        }),
+      },
     );
 
     await expect(verifier.verify(
       { signingPackage } as AgentServiceJob,
       report,
     )).rejects.toBeInstanceOf(BuyerReceiptRevertedError);
+  });
+
+  it("rejects a receipt when final token state does not contain the rescued amount", async () => {
+    const verifier = new LiveBuyerExecutionVerifier(
+      xLayerMainnetConfig,
+      "https://unused.invalid",
+      () => new Date("2026-07-13T10:01:00.000Z"),
+      await clientFor(destination, 99n),
+    );
+
+    await expect(verifier.verify(
+      { signingPackage } as AgentServiceJob,
+      report,
+    )).rejects.toBeInstanceOf(BuyerReceiptRejectedError);
   });
 });

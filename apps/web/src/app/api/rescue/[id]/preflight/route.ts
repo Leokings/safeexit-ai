@@ -2,6 +2,7 @@ import {
   ERC20_RESCUE_TYPEHASH,
   ERC721_RESCUE_TYPEHASH,
   getConfiguredPermitSettlementAddress,
+  getConfiguredPermitSettlementRuntimeHash,
   PERMIT_KIND_DAI,
   PERMIT_KIND_ERC2612,
   PERMIT_SETTLEMENT_NAME,
@@ -61,11 +62,15 @@ async function verifiedPermitSettlement(
   blockNumber: bigint,
 ): Promise<EvmAddress | undefined> {
   const configured = getConfiguredPermitSettlementAddress(chainId);
-  if (!configured) return undefined;
+  const expectedRuntimeHash = getConfiguredPermitSettlementRuntimeHash(chainId);
+  if (!configured || !expectedRuntimeHash) return undefined;
   const address = configured as Address;
   try {
     const code = await client.getCode({ address, blockNumber });
     if (!code || code === "0x") return undefined;
+    if (keccak256(code).toLowerCase() !== expectedRuntimeHash.toLowerCase()) {
+      return undefined;
+    }
     const [domain, erc2612Kind, daiKind, erc20Typehash, erc721Typehash] =
       await Promise.all([
         client.readContract({

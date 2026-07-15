@@ -10,6 +10,7 @@ import {
 
 import {
   AgentIncidentService,
+  AgentJobRevisionConflictError,
   BuyerReceiptPendingError,
   BuyerReceiptRevertedError,
   InMemoryAgentServiceJobStore,
@@ -447,6 +448,28 @@ async function prepareWaitingForUser(service: AgentIncidentService) {
 }
 
 describe("agent service lifecycle", () => {
+  it("rejects stale job snapshots instead of overwriting newer state", async () => {
+    const store = new InMemoryAgentServiceJobStore();
+    const { service } = createService();
+    const original = await service.createIncident({ incident });
+    await store.save(original);
+    const stale = await store.get(original.id);
+    if (!stale) throw new Error("Missing stale job fixture");
+    await store.save({
+      ...stale,
+      dashboardUrl: "https://safeexit.xyz/rescue/concurrent",
+      revision: stale.revision + 1,
+      updatedAt: "2026-07-12T10:00:01.000Z",
+    }, stale.revision);
+
+    await expect(store.save({
+      ...stale,
+      dashboardUrl: "https://safeexit.xyz/rescue/stale",
+      revision: stale.revision + 1,
+      updatedAt: "2026-07-12T10:00:02.000Z",
+    }, stale.revision)).rejects.toBeInstanceOf(AgentJobRevisionConflictError);
+  });
+
   it("records RECEIVED before waiting for source", async () => {
     const { service } = createService();
     const job = await service.createIncident({ requestId: "request:empty" });
@@ -677,6 +700,42 @@ describe("agent service lifecycle", () => {
     expect(reconciled.status).toBe("CONFIRMED");
     expect(reconciled.job.status).toBe("COMPLETED");
     expect(reconciled.job.receiptSubmissions?.[0]?.status).toBe("CONFIRMED");
+  });
+
+  it("retries receipt registration after a concurrent job update", async () => {
+    const { service, store } = createService();
+    await prepareWaitingForUser(service);
+    await service.getSigningPackage("job:test");
+
+    const save = store.save.bind(store);
+    let injectConflict = true;
+    store.save = async (job, expectedRevision) => {
+      if (injectConflict && job.receiptSubmissions?.length === 1) {
+        injectConflict = false;
+        const current = await store.get(job.id);
+        if (!current) throw new Error("Missing current job fixture");
+        await save({
+          ...current,
+          dashboardUrl: "https://safeexit.xyz/rescue/concurrent",
+          revision: current.revision + 1,
+          updatedAt: "2026-07-12T10:00:01.000Z",
+        }, current.revision);
+        throw new AgentJobRevisionConflictError(job.id);
+      }
+      return save(job, expectedRevision);
+    };
+
+    const updated = await service.recordBuyerReceiptSubmission("job:test", {
+      packageId: "signing-package:test",
+      transactionHash: txHash,
+    });
+
+    expect(updated.dashboardUrl).toBe("https://safeexit.xyz/rescue/concurrent");
+    expect(updated.receiptSubmissions).toMatchObject([{
+      packageId: "signing-package:test",
+      transactionHash: txHash,
+      status: "PENDING",
+    }]);
   });
 
   it("keeps an unmined receipt pending and makes registration idempotent", async () => {

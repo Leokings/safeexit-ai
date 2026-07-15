@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { AgentJobRevisionConflictError } from "@safeexit/agent-service";
+
 import {
   executionAttemptSchema,
   mapAgentJob,
@@ -11,6 +13,7 @@ import {
   normalizePostgresTlsUrl,
   parsePersistenceEnvironment,
   PrismaAgentServiceJobStore,
+  pruneExpiredRateLimitBuckets,
   PrismaSafeExitRepository,
 } from "../src";
 
@@ -311,6 +314,58 @@ describe("repository validation boundary", () => {
       "plan:shared",
     )).rejects.toThrow("different incident");
   });
+
+  it("uses an exact expected revision when persisting agent jobs", async () => {
+    const transaction = {
+      agentJob: {
+        findUnique: vi.fn().mockResolvedValue({ revision: 3 }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      agentJobTransition: {
+        deleteMany: vi.fn(),
+        createMany: vi.fn(),
+      },
+    };
+    const repository = new PrismaSafeExitRepository({
+      $transaction: vi.fn(async (callback) => callback(transaction)),
+    } as never);
+    const job = {
+      id: "job-revision-test",
+      service: "safeexit-incident-response",
+      status: "RECEIVED",
+      history: [{
+        sequence: 0,
+        from: null,
+        to: "RECEIVED",
+        reason: "JOB_CREATED",
+        at: now,
+      }],
+      revision: 4,
+      createdAt: now,
+      updatedAt: now,
+    } as const;
+
+    await expect(repository.saveAgentJob(job, 2)).rejects.toBeInstanceOf(
+      AgentJobRevisionConflictError,
+    );
+    expect(transaction.agentJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: job.id, revision: 2 },
+    }));
+  });
+});
+
+describe("rate-limit retention", () => {
+  it("prunes only buckets expired beyond the retention window", async () => {
+    const deleteMany = vi.fn().mockResolvedValue({ count: 7 });
+    const current = new Date("2026-07-15T12:00:00.000Z");
+
+    await expect(pruneExpiredRateLimitBuckets({
+      rateLimitBucket: { deleteMany },
+    } as never, current)).resolves.toBe(7);
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { resetAt: { lt: new Date("2026-07-14T12:00:00.000Z") } },
+    });
+  });
 });
 
 describe("agent job store lookups", () => {
@@ -355,8 +410,11 @@ describe("agent job store lookups", () => {
   } as const;
 
   it("loads the latest incident job and pending lifecycle batches", async () => {
-    const findFirst = vi.fn().mockResolvedValue({ state: jobState });
-    const findMany = vi.fn().mockResolvedValue([{ state: jobState }]);
+    const findFirst = vi.fn().mockResolvedValue({ state: jobState, revision: jobState.revision });
+    const findMany = vi.fn().mockResolvedValue([{
+      state: jobState,
+      revision: jobState.revision,
+    }]);
     const store = new PrismaAgentServiceJobStore({
       agentJob: { findFirst, findMany },
     } as never);

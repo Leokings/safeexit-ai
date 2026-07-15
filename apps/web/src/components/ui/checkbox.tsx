@@ -9,7 +9,7 @@ export function Checkbox({ className, ...props }: React.ComponentProps<"input">)
     <input
       type="checkbox"
       className={cn(
-        "size-5 shrink-0 cursor-pointer rounded border border-border-strong bg-background accent-[#62d6b0] focus-visible:outline focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-50",
+        "size-5 shrink-0 cursor-pointer rounded-[2px] border-2 border-border-strong bg-surface accent-[#72d7bb] focus-visible:outline focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       {...props}

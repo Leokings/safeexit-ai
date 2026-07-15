@@ -12,7 +12,14 @@ export interface AgentServiceJobStore {
     statuses: readonly AgentServiceStatus[],
     limit: number,
   ): Promise<AgentServiceJob[]>;
-  save(job: AgentServiceJob): Promise<AgentServiceJob>;
+  save(job: AgentServiceJob, expectedRevision?: number): Promise<AgentServiceJob>;
+}
+
+export class AgentJobRevisionConflictError extends Error {
+  constructor(readonly jobId: string) {
+    super(`Agent-service job revision changed while updating ${jobId}`);
+    this.name = "AgentJobRevisionConflictError";
+  }
 }
 
 export class InMemoryAgentServiceJobStore implements AgentServiceJobStore {
@@ -47,13 +54,18 @@ export class InMemoryAgentServiceJobStore implements AgentServiceJobStore {
       .map((job) => agentServiceJobSchema.parse(job));
   }
 
-  async save(value: AgentServiceJob): Promise<AgentServiceJob> {
+  async save(value: AgentServiceJob, expectedRevision?: number): Promise<AgentServiceJob> {
     const job = agentServiceJobSchema.parse(value);
     if (job.requestId) {
       const existing = await this.getByRequestId(job.requestId);
       if (existing && existing.id !== job.id) {
         throw new Error(`Agent-service request already exists: ${job.requestId}`);
       }
+    }
+    const current = this.jobs.get(job.id);
+    const expected = expectedRevision ?? job.revision - 1;
+    if (current && (current.revision !== expected || job.revision <= expected)) {
+      throw new AgentJobRevisionConflictError(job.id);
     }
     this.jobs.set(job.id, job);
     return agentServiceJobSchema.parse(job);

@@ -165,101 +165,141 @@ export function StartRescueForm() {
   }
 
   return (
-    <form onSubmit={submit} className="max-w-3xl" noValidate>
-      <div className="grid gap-5 sm:grid-cols-2">
-        <label className="block">
-          <span className="mb-2 block text-sm font-semibold">Source wallet</span>
-          <Input
-            value={source}
-            onChange={(event) => setSource(event.target.value.trim())}
-            placeholder="0x..."
-            autoComplete="off"
-            spellCheck={false}
-            aria-invalid={Boolean(errors.source)}
-          />
-          <span className="mt-2 block min-h-5 text-xs text-danger">{errors.source}</span>
-        </label>
-
-        <label className="block">
-          <span className="mb-2 block text-sm font-semibold">Safe destination</span>
-          <Input
-            value={destination}
-            onChange={(event) => setDestination(event.target.value.trim())}
-            placeholder="0x..."
-            autoComplete="off"
-            spellCheck={false}
-            aria-invalid={Boolean(errors.destination)}
-          />
-          <span className="mt-2 block min-h-5 text-xs text-danger">
-            {errors.destination}
-          </span>
-        </label>
-      </div>
-
-      <label className="mt-1 block max-w-sm">
-        <span className="mb-2 block text-sm font-semibold">Network</span>
-        <select
-          value={chainId}
-          onChange={(event) => setChainId(Number(event.target.value))}
-          className="h-11 w-full rounded-md border border-border-strong bg-background px-3 text-sm text-foreground focus:border-accent focus:outline focus:outline-1"
-        >
-          {rescueMainnetChainConfigs.map((config) => (
-            <option key={config.chain.id} value={config.chain.id}>
-              {config.chain.name} / {config.chain.id}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <div className="mt-6 border-t border-border pt-5">
-        <div className="mb-4">
-          <p className="text-sm font-semibold">Assets to rescue</p>
-          <p className="mt-1 text-xs leading-5 text-muted">
-            Paste every known contract in this incident. SAFEEXIT verifies each entry onchain before it can enter a rescue plan.
-          </p>
-        </div>
-        <label className="block">
-          <span className="mb-2 block text-xs font-semibold uppercase text-dim">ERC-20 contracts</span>
-          <textarea
-            value={erc20Input}
-            onChange={(event) => setErc20Input(event.target.value)}
-            rows={3}
-            placeholder="0x... one contract per line"
-            spellCheck={false}
-            aria-invalid={Boolean(errors.assets)}
-            className="w-full resize-y rounded-md border border-border-strong bg-background p-3 font-mono text-sm text-foreground placeholder:text-dim focus:border-accent focus:outline focus:outline-1"
-          />
-        </label>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <label className="block">
-            <span className="mb-2 block text-xs font-semibold uppercase text-dim">ERC-721 assets</span>
-            <textarea
-              value={erc721Input}
-              onChange={(event) => setErc721Input(event.target.value)}
-              rows={3}
-              placeholder="0xCollection:tokenId"
+    <form onSubmit={submit} className="w-full" noValidate>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_300px]">
+        <div className="window-panel">
+          <div className="window-bar">
+            <span className="window-dot" />
+            <span className="window-dot" />
+            <span className="ml-auto">source.wallet</span>
+          </div>
+          <label className="block p-4 sm:p-5">
+            <span className="mb-2 block text-sm font-extrabold">Source wallet</span>
+            <Input
+              value={source}
+              onChange={(event) => setSource(event.target.value.trim())}
+              placeholder="0x..."
+              autoComplete="off"
               spellCheck={false}
-              aria-invalid={Boolean(errors.assets)}
-              className="w-full resize-y rounded-md border border-border-strong bg-background p-3 font-mono text-sm text-foreground placeholder:text-dim focus:border-accent focus:outline focus:outline-1"
+              aria-invalid={Boolean(errors.source)}
             />
-          </label>
-          <label className="block">
-            <span className="mb-2 block text-xs font-semibold uppercase text-dim">ERC-1155 assets</span>
-            <textarea
-              value={erc1155Input}
-              onChange={(event) => setErc1155Input(event.target.value)}
-              rows={3}
-              placeholder="0xCollection:tokenId"
-              spellCheck={false}
-              aria-invalid={Boolean(errors.assets)}
-              className="w-full resize-y rounded-md border border-border-strong bg-background p-3 font-mono text-sm text-foreground placeholder:text-dim focus:border-accent focus:outline focus:outline-1"
-            />
+            <span className="mt-2 block min-h-5 text-xs font-semibold text-danger">
+              {errors.source}
+            </span>
           </label>
         </div>
-        <p className="mt-2 min-h-5 text-xs text-danger">{errors.assets}</p>
+
+        <div className="window-panel">
+          <div className="window-bar">
+            <span className="window-dot" />
+            <span className="window-dot" />
+            <span className="ml-auto">destination.wallet</span>
+          </div>
+          <label className="block p-4 sm:p-5">
+            <span className="mb-2 block text-sm font-extrabold">Safe destination</span>
+            <Input
+              value={destination}
+              onChange={(event) => setDestination(event.target.value.trim())}
+              placeholder="0x..."
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={Boolean(errors.destination)}
+            />
+            <span className="mt-2 block min-h-5 text-xs font-semibold text-danger">
+              {errors.destination}
+            </span>
+          </label>
+        </div>
+
+        <div className="window-panel">
+          <div className="window-bar">
+            <span className="window-dot" />
+            <span className="window-dot" />
+            <span className="ml-auto">chain.scope</span>
+          </div>
+          <label className="block p-4 sm:p-5">
+            <span className="mb-2 block text-sm font-extrabold">Network</span>
+            <select
+              value={chainId}
+              onChange={(event) => setChainId(Number(event.target.value))}
+              className="h-11 w-full rounded-[2px] border-2 border-border-strong bg-surface px-3 font-mono text-sm font-medium text-foreground focus:bg-white focus:outline focus:outline-2"
+            >
+              {rescueMainnetChainConfigs.map((config) => (
+                <option key={config.chain.id} value={config.chain.id}>
+                  {config.chain.name} / {config.chain.id}
+                </option>
+              ))}
+            </select>
+            <span className="mt-2 block text-xs font-semibold leading-5 text-muted">
+              Verified mainnet RPC only.
+            </span>
+          </label>
+        </div>
       </div>
 
-      <div className="mt-6 border-y border-border py-5">
+      <div className="window-panel mt-7">
+        <div className="window-bar">
+          <span className="window-dot" />
+          <span className="window-dot" />
+          <span className="ml-auto">asset-manifest.input</span>
+        </div>
+        <div className="p-4 sm:p-6">
+          <div className="mb-5 grid gap-2 sm:grid-cols-[220px_1fr] sm:items-start">
+            <p className="text-base font-black">Assets to rescue</p>
+            <p className="text-xs font-semibold leading-5 text-muted">
+              Paste every known contract in this incident. SAFEEXIT verifies each entry
+              onchain before it can enter a rescue plan.
+            </p>
+          </div>
+          <label className="block">
+            <span className="mb-2 block font-mono text-[10px] font-bold uppercase text-dim">
+              ERC-20 contracts
+            </span>
+            <textarea
+              value={erc20Input}
+              onChange={(event) => setErc20Input(event.target.value)}
+              rows={3}
+              placeholder="0x... one contract per line"
+              spellCheck={false}
+              aria-invalid={Boolean(errors.assets)}
+              className="w-full resize-y rounded-[2px] border-2 border-border-strong bg-surface p-3 font-mono text-sm font-medium text-foreground placeholder:text-dim focus:bg-white focus:outline focus:outline-2"
+            />
+          </label>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-2 block font-mono text-[10px] font-bold uppercase text-dim">
+                ERC-721 assets
+              </span>
+              <textarea
+                value={erc721Input}
+                onChange={(event) => setErc721Input(event.target.value)}
+                rows={3}
+                placeholder="0xCollection:tokenId"
+                spellCheck={false}
+                aria-invalid={Boolean(errors.assets)}
+                className="w-full resize-y rounded-[2px] border-2 border-border-strong bg-surface p-3 font-mono text-sm font-medium text-foreground placeholder:text-dim focus:bg-white focus:outline focus:outline-2"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-2 block font-mono text-[10px] font-bold uppercase text-dim">
+                ERC-1155 assets
+              </span>
+              <textarea
+                value={erc1155Input}
+                onChange={(event) => setErc1155Input(event.target.value)}
+                rows={3}
+                placeholder="0xCollection:tokenId"
+                spellCheck={false}
+                aria-invalid={Boolean(errors.assets)}
+                className="w-full resize-y rounded-[2px] border-2 border-border-strong bg-surface p-3 font-mono text-sm font-medium text-foreground placeholder:text-dim focus:bg-white focus:outline focus:outline-2"
+              />
+            </label>
+          </div>
+          <p className="mt-2 min-h-5 text-xs font-semibold text-danger">{errors.assets}</p>
+        </div>
+      </div>
+
+      <div className="paper-panel mt-7 bg-accent/20 p-4 sm:p-5">
         <label className="flex cursor-pointer items-start gap-3">
           <Checkbox
             checked={authorized}
@@ -267,33 +307,37 @@ export function StartRescueForm() {
             aria-describedby="authorization-detail"
           />
           <span>
-            <span className="block text-sm font-semibold leading-5">
+            <span className="block text-sm font-extrabold leading-5">
               I confirm that I am authorised to control and sign for this wallet.
             </span>
-            <span id="authorization-detail" className="mt-1 block text-xs leading-5 text-muted">
+            <span id="authorization-detail" className="mt-1 block text-xs font-semibold leading-5 text-muted">
               SAFEEXIT will never request a seed phrase, private key, keystore, or raw credential.
             </span>
           </span>
         </label>
         {errors.authorization && (
-          <p className="mt-3 flex items-center gap-2 text-xs text-danger">
+          <p className="mt-3 flex items-center gap-2 text-xs font-bold text-danger">
             <TriangleAlert className="size-3.5" />
             {errors.authorization}
           </p>
         )}
       </div>
 
-      <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="flex items-center gap-2 text-xs text-muted">
-          <ShieldCheck className="size-4 text-accent" />
+      <div className="mt-7 flex flex-col-reverse gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="flex items-center gap-2 text-xs font-semibold text-muted">
+          <ShieldCheck className="size-4" />
           Mainnet signing requires a fresh deterministic preflight for every action.
         </p>
-        <Button type="submit" size="lg" className="sm:min-w-44" disabled={submitting}>
+        <Button type="submit" size="lg" className="sm:min-w-56" disabled={submitting}>
           {submitting ? "Creating incident..." : "Create rescue incident"}
           <ArrowRight className="size-4" />
         </Button>
       </div>
-      {submitError && <p role="alert" className="mt-4 text-xs text-danger">{submitError}</p>}
+      {submitError && (
+        <p role="alert" className="paper-panel mt-4 bg-danger/15 p-3 text-xs font-bold text-danger">
+          {submitError}
+        </p>
+      )}
     </form>
   );
 }

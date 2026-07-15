@@ -1,6 +1,7 @@
 import {
   TransactionReceiptNotFoundError,
   decodeEventLog,
+  type Address,
   type Hex,
 } from "viem";
 
@@ -19,6 +20,7 @@ import {
   createDedicatedPublicClient,
   type ChainAdapterConfig,
 } from "@safeexit/chain";
+import { assertReceiptSubmissionTransaction } from "./buyer-receipt-registration";
 
 const erc20TransferAbi = [{
   type: "event",
@@ -47,13 +49,46 @@ function sameAddress(left: string, right: string): boolean {
 export interface BuyerReceiptClient {
   getTransactionReceipt(input: { hash: Hex }): Promise<{
     status: "success" | "reverted";
+    blockNumber: bigint;
     logs: Array<{
       address: `0x${string}`;
       data: Hex;
       topics: readonly Hex[];
     }>;
   }>;
+  getTransaction(input: { hash: Hex }): Promise<{
+    from: Address;
+    to: Address | null;
+    value: bigint;
+    input: Hex;
+  }>;
+  getErc20Balance(input: {
+    token: Address;
+    owner: Address;
+    blockNumber: bigint;
+  }): Promise<bigint>;
+  getErc721Owner(input: {
+    collection: Address;
+    tokenId: bigint;
+    blockNumber: bigint;
+  }): Promise<Address>;
 }
+
+const erc20BalanceAbi = [{
+  type: "function",
+  name: "balanceOf",
+  stateMutability: "view",
+  inputs: [{ name: "account", type: "address" }],
+  outputs: [{ name: "", type: "uint256" }],
+}] as const;
+
+const erc721OwnerAbi = [{
+  type: "function",
+  name: "ownerOf",
+  stateMutability: "view",
+  inputs: [{ name: "tokenId", type: "uint256" }],
+  outputs: [{ name: "", type: "address" }],
+}] as const;
 
 export class LiveBuyerExecutionVerifier implements BuyerExecutionVerifierPort {
   private readonly client: BuyerReceiptClient;
@@ -64,7 +99,29 @@ export class LiveBuyerExecutionVerifier implements BuyerExecutionVerifierPort {
     private readonly clock: () => Date = () => new Date(),
     client?: BuyerReceiptClient,
   ) {
-    this.client = client ?? createDedicatedPublicClient(chain, rpcUrl);
+    if (client) {
+      this.client = client;
+      return;
+    }
+    const publicClient = createDedicatedPublicClient(chain, rpcUrl);
+    this.client = {
+      getTransactionReceipt: (input) => publicClient.getTransactionReceipt(input),
+      getTransaction: (input) => publicClient.getTransaction(input),
+      getErc20Balance: (input) => publicClient.readContract({
+        address: input.token,
+        abi: erc20BalanceAbi,
+        functionName: "balanceOf",
+        args: [input.owner],
+        blockNumber: input.blockNumber,
+      }),
+      getErc721Owner: (input) => publicClient.readContract({
+        address: input.collection,
+        abi: erc721OwnerAbi,
+        functionName: "ownerOf",
+        args: [input.tokenId],
+        blockNumber: input.blockNumber,
+      }),
+    };
   }
 
   async verify(
@@ -76,10 +133,18 @@ export class LiveBuyerExecutionVerifier implements BuyerExecutionVerifierPort {
     if (!signingPackage || report.chainId !== this.chain.chain.id) {
       throw new Error("Buyer receipt verification is not configured for this report");
     }
+    if (report.transactionHashes.length !== 1) {
+      throw new BuyerReceiptRejectedError();
+    }
     let receipts: Awaited<ReturnType<BuyerReceiptClient["getTransactionReceipt"]>>[];
+    let transactions: Awaited<ReturnType<BuyerReceiptClient["getTransaction"]>>[];
     try {
-      receipts = await Promise.all(report.transactionHashes.map((hash) =>
-        this.client.getTransactionReceipt({ hash: hash as Hex })));
+      [receipts, transactions] = await Promise.all([
+        Promise.all(report.transactionHashes.map((hash) =>
+          this.client.getTransactionReceipt({ hash: hash as Hex }))),
+        Promise.all(report.transactionHashes.map((hash) =>
+          this.client.getTransaction({ hash: hash as Hex }))),
+      ]);
     } catch (error) {
       if (
         error instanceof TransactionReceiptNotFoundError ||
@@ -91,6 +156,12 @@ export class LiveBuyerExecutionVerifier implements BuyerExecutionVerifierPort {
     }
     if (receipts.some((receipt) => receipt.status !== "success")) {
       throw new BuyerReceiptRevertedError();
+    }
+
+    try {
+      await assertReceiptSubmissionTransaction(signingPackage, transactions[0]!);
+    } catch {
+      throw new BuyerReceiptRejectedError();
     }
 
     const matchedTransfer = receipts.some((receipt) => receipt.logs.some((log) => {
@@ -128,13 +199,33 @@ export class LiveBuyerExecutionVerifier implements BuyerExecutionVerifierPort {
     if (!matchedTransfer) {
       throw new BuyerReceiptRejectedError();
     }
+    const receiptBlock = receipts[0]!.blockNumber;
+    if (signingPackage.route === "ERC4494_PERMIT_SETTLEMENT") {
+      const owner = await this.client.getErc721Owner({
+        collection: signingPackage.collectionAddress as Address,
+        tokenId: BigInt(signingPackage.tokenId),
+        blockNumber: receiptBlock,
+      });
+      if (!sameAddress(owner, signingPackage.destinationAddress)) {
+        throw new BuyerReceiptRejectedError();
+      }
+    } else {
+      const balance = await this.client.getErc20Balance({
+        token: signingPackage.tokenAddress as Address,
+        owner: signingPackage.destinationAddress as Address,
+        blockNumber: receiptBlock,
+      });
+      if (balance < BigInt(signingPackage.amount)) {
+        throw new BuyerReceiptRejectedError();
+      }
+    }
     return {
       phase: "COMPLETED",
       completedActionIds: [signingPackage.actionId],
       failedActionIds: [],
       transactionHashes: [...report.transactionHashes],
       observedAt: this.clock().toISOString(),
-      detail: `Receipt status and committed Transfer event verified by ${this.chain.chain.name} RPC.`,
+      detail: `Receipt calldata, source authorization, Transfer event, and final asset state verified by ${this.chain.chain.name} RPC.`,
     };
   }
 }

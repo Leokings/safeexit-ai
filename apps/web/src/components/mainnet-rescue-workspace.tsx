@@ -1,8 +1,6 @@
 "use client";
 
-import Link from "next/link";
 import {
-  ArrowLeft,
   ExternalLink,
   FileSignature,
   LoaderCircle,
@@ -528,12 +526,9 @@ export function MainnetRescueWorkspace({
   }
 
   return (
-    <main>
-      <section className="border-b border-border bg-surface">
-        <div className="content-shell py-8 sm:py-10">
-          <Link href="/" className="mb-6 inline-flex items-center gap-2 text-xs text-muted hover:text-foreground">
-            <ArrowLeft className="size-3.5" /> Start rescue
-          </Link>
+    <main className="pb-12 sm:pb-16">
+      <section className="content-shell border-x-2 border-b-2 border-border-strong bg-surface">
+        <div className="px-5 py-8 sm:px-8 sm:py-10">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -541,34 +536,32 @@ export function MainnetRescueWorkspace({
                 <Badge variant="success">Source pays 0 gas</Badge>
                 <Badge variant="danger">Real funds</Badge>
               </div>
-              <p className="font-mono text-[10px] uppercase text-dim">Incident {incidentId}</p>
-              <h1 className="mt-2 text-3xl font-semibold">Destination-paid rescue</h1>
+              <p className="font-mono text-[10px] font-bold uppercase text-dim">Incident {incidentId}</p>
+              <h1 className="mt-2 text-3xl font-black sm:text-4xl">Destination-paid rescue</h1>
             </div>
             <Badge variant="info">{chainConfig.chain.name} / {chainId}</Badge>
           </div>
         </div>
       </section>
 
-      <section className="border-b border-border">
-        <div className="content-shell grid py-6 md:grid-cols-2">
-          <div className="min-w-0 border-b border-border pb-5 md:border-b-0 md:border-r md:pb-0 md:pr-6">
-            <div className="mb-2 flex items-center gap-2"><ShieldAlert className="size-3.5 text-danger" /><span className="font-mono text-[10px] uppercase text-dim">Source signs only</span></div>
+      <section className="content-shell grid border-x-2 border-b-2 border-border-strong bg-surface-raised md:grid-cols-2">
+          <div className="min-w-0 border-b-2 border-border-strong p-5 sm:p-6 md:border-b-0 md:border-r-2">
+            <div className="mb-2 flex items-center gap-2"><ShieldAlert className="size-3.5 text-danger" /><span className="font-mono text-[10px] font-bold uppercase text-dim">Source signs only</span></div>
             <CopyAddress address={source} />
           </div>
-          <div className="min-w-0 pt-5 md:pl-6 md:pt-0">
-            <div className="mb-2 flex items-center gap-2"><ShieldCheck className="size-3.5 text-accent" /><span className="font-mono text-[10px] uppercase text-dim">Destination pays network fee</span></div>
+          <div className="min-w-0 p-5 sm:p-6">
+            <div className="mb-2 flex items-center gap-2"><ShieldCheck className="size-3.5" /><span className="font-mono text-[10px] font-bold uppercase text-dim">Destination pays network fee</span></div>
             <CopyAddress address={destination} />
           </div>
-        </div>
       </section>
 
-      <section className="content-shell py-10 sm:py-14">
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_380px]">
-          <div className="space-y-10">
+      <section className="content-shell border-x-2 border-b-2 border-border-strong bg-surface">
+        <div className="grid lg:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="space-y-10 p-5 sm:p-8 lg:p-10">
             <section>
-              <div className="border-b border-border pb-4">
-                <p className="font-mono text-[10px] uppercase text-info">01 / Deterministic scan</p>
-                <h2 className="mt-2 text-xl font-semibold">Verify destination-paid asset paths</h2>
+              <div className="section-rule">
+                <p className="font-mono text-[10px] font-bold uppercase text-info">01 / Deterministic scan</p>
+                <h2 className="mt-2 text-xl font-black sm:text-2xl">Verify destination-paid asset paths</h2>
               </div>
               <label className="mt-5 block">
                 <span className="mb-2 block text-sm font-semibold">Known ERC-20 contracts</span>
@@ -579,7 +572,7 @@ export function MainnetRescueWorkspace({
                   rows={3}
                   placeholder="0x... one address per line"
                   spellCheck={false}
-                  className="w-full resize-y rounded-md border border-border-strong bg-background p-3 font-mono text-sm text-foreground placeholder:text-dim focus:border-accent focus:outline focus:outline-1"
+                  className="w-full resize-y rounded-[2px] border-2 border-border-strong bg-surface p-3 font-mono text-sm font-medium text-foreground placeholder:text-dim focus:bg-white focus:outline focus:outline-2"
                 />
                 <span className="mt-2 block text-xs leading-5 text-muted">Every submitted contract is verified independently at the same pinned block before authorization is enabled.</span>
               </label>
@@ -592,7 +585,7 @@ export function MainnetRescueWorkspace({
                   rows={3}
                   placeholder="0xCollection:tokenId one per line"
                   spellCheck={false}
-                  className="w-full resize-y rounded-md border border-border-strong bg-background p-3 font-mono text-sm text-foreground placeholder:text-dim focus:border-accent focus:outline focus:outline-1"
+                  className="w-full resize-y rounded-[2px] border-2 border-border-strong bg-surface p-3 font-mono text-sm font-medium text-foreground placeholder:text-dim focus:bg-white focus:outline focus:outline-2"
                 />
                 <span className="mt-2 block text-xs leading-5 text-muted">Only explicitly listed token IDs are checked. ERC-4494 support and ownership are verified onchain before signing.</span>
               </label>
@@ -605,7 +598,7 @@ export function MainnetRescueWorkspace({
                   rows={3}
                   placeholder="0xCollection:tokenId one per line"
                   spellCheck={false}
-                  className="w-full resize-y rounded-md border border-border-strong bg-background p-3 font-mono text-sm text-foreground placeholder:text-dim focus:border-accent focus:outline focus:outline-1"
+                  className="w-full resize-y rounded-[2px] border-2 border-border-strong bg-surface p-3 font-mono text-sm font-medium text-foreground placeholder:text-dim focus:bg-white focus:outline focus:outline-2"
                 />
                 <span className="mt-2 block text-xs leading-5 text-muted">ERC-1155 balances are verified onchain. Assets remain blocked unless a destination-paid recovery adapter is available.</span>
               </label>
@@ -621,16 +614,16 @@ export function MainnetRescueWorkspace({
             </section>
 
             <section>
-              <div className="border-b border-border pb-4">
-                <p className="font-mono text-[10px] uppercase text-info">02 / Rescue plan</p>
-                <h2 className="mt-2 text-xl font-semibold">Destination-paid eligibility</h2>
+              <div className="section-rule">
+                <p className="font-mono text-[10px] font-bold uppercase text-info">02 / Rescue plan</p>
+                <h2 className="mt-2 text-xl font-black sm:text-2xl">Destination-paid eligibility</h2>
               </div>
               {!preflight ? (
                 <p className="mt-5 text-sm text-muted">Run preflight to read current mainnet state and verify token capabilities.</p>
               ) : preflight.plan.actions.length === 0 ? (
                 <p className="mt-5 text-sm text-muted">No positive supported balances were detected for the current manifest.</p>
               ) : (
-                <div className="mt-5 divide-y divide-border border-y border-border">
+                <div className="mt-5 divide-y-2 divide-border-strong border-y-2 border-border-strong">
                   {preflight.plan.actions.map((action, index) => {
                     const gasless = preflight.gaslessActions.find((item) => item.actionId === action.id);
                     const blocked = preflight.blockedActions.find((item) => item.actionId === action.id);
@@ -639,7 +632,7 @@ export function MainnetRescueWorkspace({
                       <div key={action.id} className="grid gap-3 py-4 sm:grid-cols-[40px_1fr_auto] sm:items-start">
                         <span className="font-mono text-xs text-dim">{String(index + 1).padStart(2, "0")}</span>
                         <div className="min-w-0">
-                          <p className="text-sm font-semibold capitalize">{actionLabel(action.actionType)}</p>
+                          <p className="text-sm font-extrabold capitalize">{actionLabel(action.actionType)}</p>
                           <div className="mt-1"><CopyAddress address={actionTarget(action)} compact /></div>
                           <p className="mt-2 text-xs leading-5 text-muted">{gasless ? `${preflight.gaslessActions.filter((item) => item.actionId === action.id).length} destination-paid route(s) detected. Source signature is offchain; destination submits.` : blocked?.reason}</p>
                           <code className="mt-1 block truncate font-mono text-[11px] text-dim">State preflight: {simulation?.status ?? "NOT RUN"}</code>
@@ -653,24 +646,30 @@ export function MainnetRescueWorkspace({
             </section>
 
             <section>
-              <div className="border-b border-border pb-4">
-                <p className="font-mono text-[10px] uppercase text-info">03 / Sequential account handoff</p>
-                <h2 className="mt-2 text-xl font-semibold">One active OKX account at a time</h2>
+              <div className="section-rule">
+                <p className="font-mono text-[10px] font-bold uppercase text-info">03 / Sequential account handoff</p>
+                <h2 className="mt-2 text-xl font-black sm:text-2xl">One active OKX account at a time</h2>
               </div>
               <div className="mt-5 grid gap-5 sm:grid-cols-2">
-                <div className="border-l-2 border-info bg-info/5 p-4">
-                  <div className="flex items-center justify-between gap-3"><span className="text-sm font-semibold">1. Source account</span><Badge variant={signed ? "success" : sourceConnected ? "info" : "neutral"}>{signed ? "SIGNED" : sourceConnected ? "ACTIVE" : "STEP 1"}</Badge></div>
-                  <p className="mt-3 text-xs leading-5 text-muted">Make the source active in OKX Wallet and sign typed data. It does not remain connected and pays no gas.</p>
-                  <Button type="button" className="mt-4 w-full" variant="secondary" onClick={() => void connectExpected("SOURCE")} disabled={Boolean(signed) || busy !== null}>
-                    <Wallet className="size-4" /> Use source account
-                  </Button>
+                <div className="window-panel">
+                  <div className="window-bar"><span className="window-dot" /><span className="window-dot" /><span className="ml-auto">source.account</span></div>
+                  <div className="p-4">
+                    <div className="flex items-center justify-between gap-3"><span className="text-sm font-extrabold">1. Source account</span><Badge variant={signed ? "success" : sourceConnected ? "info" : "neutral"}>{signed ? "SIGNED" : sourceConnected ? "ACTIVE" : "STEP 1"}</Badge></div>
+                    <p className="mt-3 text-xs font-semibold leading-5 text-muted">Make the source active in OKX Wallet and sign typed data. It does not remain connected and pays no gas.</p>
+                    <Button type="button" className="mt-4 w-full" variant="secondary" onClick={() => void connectExpected("SOURCE")} disabled={Boolean(signed) || busy !== null}>
+                      <Wallet className="size-4" /> Use source account
+                    </Button>
+                  </div>
                 </div>
-                <div className="border-l-2 border-accent bg-accent/5 p-4">
-                  <div className="flex items-center justify-between gap-3"><span className="text-sm font-semibold">2. Safe destination</span><Badge variant={destinationConnected ? "success" : signed ? "info" : "neutral"}>{destinationConnected ? "ACTIVE" : signed ? "SWITCH NOW" : "AFTER SIGN"}</Badge></div>
-                  <p className="mt-3 text-xs leading-5 text-muted">After signing, switch the active OKX account to the destination. Keep this tab open so the authorization stays in memory.</p>
-                  <Button type="button" className="mt-4 w-full" variant="secondary" onClick={() => void connectExpected("DESTINATION")} disabled={!signed || busy !== null}>
-                    <Wallet className="size-4" /> Check destination account
-                  </Button>
+                <div className="window-panel">
+                  <div className="window-bar"><span className="window-dot" /><span className="window-dot" /><span className="ml-auto">destination.account</span></div>
+                  <div className="p-4">
+                    <div className="flex items-center justify-between gap-3"><span className="text-sm font-extrabold">2. Safe destination</span><Badge variant={destinationConnected ? "success" : signed ? "info" : "neutral"}>{destinationConnected ? "ACTIVE" : signed ? "SWITCH NOW" : "AFTER SIGN"}</Badge></div>
+                    <p className="mt-3 text-xs font-semibold leading-5 text-muted">After signing, switch the active OKX account to the destination. Keep this tab open so the authorization stays in memory.</p>
+                    <Button type="button" className="mt-4 w-full" variant="secondary" onClick={() => void connectExpected("DESTINATION")} disabled={!signed || busy !== null}>
+                      <Wallet className="size-4" /> Check destination account
+                    </Button>
+                  </div>
                 </div>
               </div>
               {preflight && preflight.gaslessActions.length > 0 && (
@@ -685,7 +684,7 @@ export function MainnetRescueWorkspace({
                           setSelectedRoute(gaslessRouteKey(route));
                           setSigned(undefined);
                         }}
-                        className={`flex items-center justify-between gap-4 border px-3 py-3 text-left text-sm ${nextGaslessAction && gaslessRouteKey(nextGaslessAction) === gaslessRouteKey(route) ? "border-accent bg-accent/5" : "border-border bg-background"}`}
+                        className={`flex items-center justify-between gap-4 border-2 border-border-strong px-3 py-3 text-left text-sm font-extrabold transition-colors ${nextGaslessAction && gaslessRouteKey(nextGaslessAction) === gaslessRouteKey(route) ? "bg-accent/35" : "bg-surface hover:bg-surface-raised"}`}
                       >
                         <span>
                           <span className="block">{executionPathLabel(route.executionPath)}</span>
@@ -701,7 +700,7 @@ export function MainnetRescueWorkspace({
                   </div>
                 </div>
               )}
-              <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
+              <div className="paper-panel mt-5 flex flex-wrap items-center gap-3 bg-surface-muted p-3 text-sm font-semibold">
                 <span className="text-muted">Current OKX account</span>
                 {connectedAccount ? <CopyAddress address={connectedAccount} compact /> : <Badge variant="neutral">Not connected</Badge>}
               </div>
@@ -709,7 +708,7 @@ export function MainnetRescueWorkspace({
 
             {transactions.length > 0 && (
               <section>
-                <div className="border-b border-border pb-4"><p className="font-mono text-[10px] uppercase text-accent">Execution status</p><h2 className="mt-2 text-xl font-semibold">Destination-paid settlements</h2></div>
+                <div className="section-rule"><p className="font-mono text-[10px] font-bold uppercase text-info">Execution status</p><h2 className="mt-2 text-xl font-black sm:text-2xl">Destination-paid settlements</h2></div>
                 <div className="mt-5 space-y-4">
                   {transactions.map((transaction) => (
                     <div key={transaction.hash} className="border-l-2 border-border-strong pl-4">
@@ -737,10 +736,10 @@ export function MainnetRescueWorkspace({
             )}
           </div>
 
-          <aside className="self-start border-l-2 border-warning bg-warning/5 p-5 lg:sticky lg:top-6">
-            <p className="font-mono text-[10px] uppercase text-warning">Authorization checkpoint</p>
-            <h2 className="mt-2 text-lg font-semibold">Source-funded execution disabled</h2>
-            <div className="mt-5 space-y-4 border-y border-border py-4 text-xs">
+          <aside className="self-start border-t-2 border-border-strong bg-surface-muted p-5 sm:p-7 lg:sticky lg:top-[76px] lg:border-l-2 lg:border-t-0">
+            <p className="font-mono text-[10px] font-bold uppercase text-info">Authorization checkpoint</p>
+            <h2 className="mt-2 text-xl font-black">Source-funded execution disabled</h2>
+            <div className="mt-5 divide-y-2 divide-border-strong border-y-2 border-border-strong text-xs font-semibold [&>div]:py-3">
               <div className="flex justify-between gap-4"><span className="text-muted">Network</span><span>{chainConfig.chain.name}</span></div>
               <div className="space-y-2"><span className="block text-muted">Source signs</span><CopyAddress address={source} compact /></div>
               <div className="space-y-2"><span className="block text-muted">Destination receives and pays gas</span><CopyAddress address={destination} compact /></div>
@@ -768,18 +767,18 @@ export function MainnetRescueWorkspace({
               </>
             ) : (
               <>
-                <p className="mt-5 flex items-start gap-2 text-xs leading-5 text-accent"><ShieldCheck className="mt-0.5 size-3.5 shrink-0" />Authorization signed locally. Without refreshing this page, switch OKX Wallet to the displayed destination account.</p>
+                <p className="paper-panel mt-5 flex items-start gap-2 bg-accent/30 p-3 text-xs font-semibold leading-5"><ShieldCheck className="mt-0.5 size-3.5 shrink-0" />Authorization signed locally. Without refreshing this page, switch OKX Wallet to the displayed destination account.</p>
                 <Button type="button" className="mt-5 w-full" size="lg" onClick={() => void settleAuthorization()} disabled={busy !== null}>
                   {busy === "SETTLE" ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
                   Check destination and settle
                 </Button>
               </>
             )}
-            <p className="mt-4 text-xs leading-5 text-muted">This action moves real assets. The authorization is short-lived and stays in this browser tab. SAFEEXIT never receives the private key, seed phrase, or signature.</p>
+            <p className="mt-4 text-xs font-semibold leading-5 text-muted">This action moves real assets. The authorization is short-lived and stays in this browser tab. SAFEEXIT never receives the private key, seed phrase, or signature.</p>
             {preflight?.blockedActions.some((item) => preflight.plan.actions.find((action) => action.id === item.actionId)?.actionType === "TRANSFER_NATIVE") && (
-              <p className="mt-4 flex items-start gap-2 text-xs leading-5 text-warning"><TriangleAlert className="mt-0.5 size-3.5 shrink-0" />Native {chainConfig.chain.nativeCurrency.symbol} is blocked until a verified sponsored EIP-7702 or private atomic bundle adapter is available.</p>
+              <p className="paper-panel mt-4 flex items-start gap-2 bg-warning/25 p-3 text-xs font-semibold leading-5"><TriangleAlert className="mt-0.5 size-3.5 shrink-0" />Native {chainConfig.chain.nativeCurrency.symbol} is blocked until a verified sponsored EIP-7702 or private atomic bundle adapter is available.</p>
             )}
-            {error && <p role="alert" className="mt-4 flex items-start gap-2 text-xs leading-5 text-danger"><TriangleAlert className="mt-0.5 size-3.5 shrink-0" />{error}</p>}
+            {error && <p role="alert" className="paper-panel mt-4 flex items-start gap-2 bg-danger/15 p-3 text-xs font-bold leading-5 text-danger"><TriangleAlert className="mt-0.5 size-3.5 shrink-0" />{error}</p>}
           </aside>
         </div>
       </section>

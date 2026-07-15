@@ -11,6 +11,7 @@ import {
   ERC20_RESCUE_TYPEHASH,
   ERC721_RESCUE_TYPEHASH,
   getConfiguredPermitSettlementAddress,
+  getConfiguredPermitSettlementRuntimeHash,
   PERMIT_KIND_DAI,
   PERMIT_KIND_ERC2612,
   PERMIT_SETTLEMENT_NAME,
@@ -341,11 +342,15 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
     blockNumber: bigint,
   ): Promise<Address | undefined> {
     const configured = getConfiguredPermitSettlementAddress(this.chain.chain.id);
-    if (!configured) return undefined;
+    const expectedRuntimeHash = getConfiguredPermitSettlementRuntimeHash(this.chain.chain.id);
+    if (!configured || !expectedRuntimeHash) return undefined;
     const address = configured as Address;
     try {
       const code = await this.client.getCode({ address, blockNumber });
       if (!code || code === "0x") return undefined;
+      if (keccak256(code).toLowerCase() !== expectedRuntimeHash.toLowerCase()) {
+        return undefined;
+      }
       const [domain, erc2612Kind, daiKind, erc20Typehash, erc721Typehash] =
         await Promise.all([
           this.client.readContract({

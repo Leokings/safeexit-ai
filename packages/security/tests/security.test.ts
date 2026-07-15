@@ -177,7 +177,7 @@ describe("rate limiting", () => {
 
 describe("security headers", () => {
   it("uses a production CSP without unsafe-eval", () => {
-    const policy = createContentSecurityPolicy(false);
+    const policy = createContentSecurityPolicy(false, "test-nonce");
     expect(policy).toContain("frame-ancestors 'none'");
     expect(policy).toContain("object-src 'none'");
     expect(policy).toContain("https://rpc.xlayer.tech");
@@ -185,6 +185,10 @@ describe("security headers", () => {
     expect(policy).toContain("https://arb1.arbitrum.io");
     expect(policy).toContain("https://api.avax.network");
     expect(policy).not.toContain("'unsafe-eval'");
+    const scriptDirective = policy.split(";").find((directive) =>
+      directive.trim().startsWith("script-src"));
+    expect(scriptDirective).not.toContain("'unsafe-inline'");
+    expect(policy).toContain("'nonce-test-nonce'");
     expect(createSecurityHeaders(false)).toContainEqual({
       key: "X-Content-Type-Options",
       value: "nosniff",

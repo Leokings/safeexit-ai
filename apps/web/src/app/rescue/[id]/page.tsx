@@ -12,6 +12,16 @@ import { getAgentIncidentService } from "@/lib/agent-runtime";
 
 export const metadata: Metadata = {
   title: "Rescue Workspace",
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: {
+      index: false,
+      follow: false,
+      noimageindex: true,
+    },
+  },
 };
 
 export const dynamic = "force-dynamic";

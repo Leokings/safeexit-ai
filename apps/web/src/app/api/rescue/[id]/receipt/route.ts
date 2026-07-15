@@ -129,10 +129,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       input.transactionHash,
     );
     try {
-      assertReceiptSubmissionTransaction(signingPackage, {
+      await assertReceiptSubmissionTransaction(signingPackage, {
         from: transaction.from,
         to: transaction.to,
         value: transaction.value,
+        input: transaction.input,
       });
     } catch (error) {
       throw new AgentHttpError(

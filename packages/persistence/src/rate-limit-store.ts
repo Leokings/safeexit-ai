@@ -12,6 +12,17 @@ export async function checkSharedRateLimitStore(client: PrismaClient): Promise<v
   await client.$queryRaw`SELECT "key" FROM "rate_limit_buckets" LIMIT 1`;
 }
 
+export async function pruneExpiredRateLimitBuckets(
+  client: PrismaClient,
+  now = new Date(),
+): Promise<number> {
+  const retentionCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1_000);
+  const result = await client.rateLimitBucket.deleteMany({
+    where: { resetAt: { lt: retentionCutoff } },
+  });
+  return result.count;
+}
+
 export class PrismaRateLimitStore implements SharedRateLimitStore {
   constructor(
     private readonly client: PrismaClient,

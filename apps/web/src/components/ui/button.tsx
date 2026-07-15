@@ -5,19 +5,19 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-45",
+  "inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-[2px] px-4 text-sm font-extrabold transition-[background-color,color,box-shadow,transform] focus-visible:outline focus-visible:outline-2 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-45",
   {
     variants: {
       variant: {
-        default: "bg-accent text-[#07110e] hover:bg-accent-strong",
-        secondary: "border border-border-strong bg-surface-raised text-foreground hover:bg-surface-muted",
+        default: "border-2 border-border-strong bg-accent text-foreground shadow-[3px_3px_0_var(--border-strong)] hover:bg-accent-strong active:translate-x-0.5 active:translate-y-0.5 active:shadow-[1px_1px_0_var(--border-strong)]",
+        secondary: "border-2 border-border-strong bg-surface text-foreground shadow-[3px_3px_0_var(--border-strong)] hover:bg-surface-raised active:translate-x-0.5 active:translate-y-0.5 active:shadow-[1px_1px_0_var(--border-strong)]",
         ghost: "text-muted hover:bg-surface-raised hover:text-foreground",
-        danger: "border border-danger/40 bg-danger/10 text-danger hover:bg-danger/15",
+        danger: "border-2 border-border-strong bg-danger/15 text-foreground shadow-[3px_3px_0_var(--border-strong)] hover:bg-danger/25",
       },
       size: {
         default: "h-10 px-4",
         sm: "h-8 px-3 text-xs",
-        lg: "h-12 px-5 text-sm",
+        lg: "h-12 px-5 text-base",
         icon: "size-9 px-0",
       },
     },

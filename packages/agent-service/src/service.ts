@@ -43,7 +43,10 @@ import {
   signingPackageListSchema,
   type SigningPackage,
 } from "./signing-package";
-import type { AgentServiceJobStore } from "./store";
+import {
+  AgentJobRevisionConflictError,
+  type AgentServiceJobStore,
+} from "./store";
 
 export type AgentIncidentServiceOptions = {
   store: AgentServiceJobStore;
@@ -351,8 +354,15 @@ export class AgentIncidentService {
     jobId: string,
     reportValue: BuyerExecutionReport,
   ): Promise<AgentServiceJob> {
-    const job = await this.requireJob(jobId);
     const report = buyerExecutionReportSchema.parse(reportValue);
+    return this.retryJobMutation(jobId, (job) =>
+      this.recordBuyerExecutionReportForJob(job, report));
+  }
+
+  private async recordBuyerExecutionReportForJob(
+    job: AgentServiceJob,
+    report: BuyerExecutionReport,
+  ): Promise<AgentServiceJob> {
     if (job.status === "COMPLETED" || job.status === "PARTIAL") {
       const signingPackage = this.validateBuyerReportScope(job, report);
       const observedHashes = new Set(
@@ -439,8 +449,15 @@ export class AgentIncidentService {
     jobId: string,
     value: BuyerReceiptRegistration,
   ): Promise<AgentServiceJob> {
-    const job = await this.requireJob(jobId);
     const input = buyerReceiptRegistrationSchema.parse(value);
+    return this.retryJobMutation(jobId, (job) =>
+      this.recordBuyerReceiptSubmissionForJob(job, input));
+  }
+
+  private async recordBuyerReceiptSubmissionForJob(
+    job: AgentServiceJob,
+    input: BuyerReceiptRegistration,
+  ): Promise<AgentServiceJob> {
     const signingPackage = (job.signingPackages ?? (job.signingPackage ? [job.signingPackage] : []))
       .find((candidate) => candidate.packageId === input.packageId);
     if (!signingPackage) {
@@ -525,12 +542,13 @@ export class AgentIncidentService {
     patch: TransitionPatch = {},
   ): Promise<AgentServiceJob> {
     let next = job;
+    const expectedRevision = job.revision;
 
     if (observation.phase === "WAITING_FOR_USER") {
       if (next.status !== "WAITING_FOR_USER") {
         throw new Error("Monitor observation would regress the rescue lifecycle");
       }
-      return this.updateJob(next, { ...patch, monitor: observation });
+      return this.updateJob(next, { ...patch, monitor: observation }, expectedRevision);
     }
 
     if (next.status === "WAITING_FOR_USER") {
@@ -540,7 +558,7 @@ export class AgentIncidentService {
       if (next.status !== "SIGNING") {
         throw new Error("Monitor observation would regress the rescue lifecycle");
       }
-      return this.updateJob(next, { ...patch, monitor: observation });
+      return this.updateJob(next, { ...patch, monitor: observation }, expectedRevision);
     }
 
     if (next.status === "SIGNING") {
@@ -550,7 +568,7 @@ export class AgentIncidentService {
       if (next.status !== "EXECUTING") {
         throw new Error("Monitor observation would regress the rescue lifecycle");
       }
-      return this.updateJob(next, { ...patch, monitor: observation });
+      return this.updateJob(next, { ...patch, monitor: observation }, expectedRevision);
     }
 
     if (next.status !== "EXECUTING") {
@@ -565,6 +583,7 @@ export class AgentIncidentService {
     const target = terminal[observation.phase];
     return this.store.save(
       transitionJob(next, target[0], target[1], this.now(), { ...patch, monitor: observation }),
+      expectedRevision,
     );
   }
 
@@ -627,14 +646,16 @@ export class AgentIncidentService {
     input: BuyerReceiptRegistration,
     status: Extract<BuyerReceiptSubmissionStatus, "REVERTED" | "REJECTED">,
   ): Promise<AgentServiceJob> {
-    const at = this.now();
-    return this.updateJob(job, {
-      receiptSubmissions: job.receiptSubmissions?.map((submission) =>
-        submission.packageId === input.packageId &&
-        submission.transactionHash.toLowerCase() === input.transactionHash.toLowerCase()
-          ? { ...submission, status, updatedAt: at }
-          : submission),
-    });
+    return this.retryJobMutation(job.id, (current) => {
+      const at = this.now();
+      return this.updateJob(current, {
+        receiptSubmissions: current.receiptSubmissions?.map((submission) =>
+          submission.packageId === input.packageId &&
+          submission.transactionHash.toLowerCase() === input.transactionHash.toLowerCase()
+            ? { ...submission, status, updatedAt: at }
+            : submission),
+      });
+    }, job);
   }
 
   private validateSimulation(
@@ -785,6 +806,7 @@ export class AgentIncidentService {
   private async updateJob(
     job: AgentServiceJob,
     patch: Partial<Pick<AgentServiceJob, "incident" | "scan" | "simulation" | "signingPackage" | "signingPackages" | "receiptSubmissions" | "monitor" | "dashboardUrl">>,
+    expectedRevision = job.revision,
   ): Promise<AgentServiceJob> {
     const at = this.now();
     return this.store.save(
@@ -794,7 +816,27 @@ export class AgentIncidentService {
         revision: job.revision + 1,
         updatedAt: at,
       }),
+      expectedRevision,
     );
+  }
+
+  private async retryJobMutation(
+    jobId: string,
+    mutate: (job: AgentServiceJob) => Promise<AgentServiceJob>,
+    initialJob?: AgentServiceJob,
+  ): Promise<AgentServiceJob> {
+    const maximumAttempts = 5;
+    for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+      const job = attempt === 0 && initialJob ? initialJob : await this.requireJob(jobId);
+      try {
+        return await mutate(job);
+      } catch (error) {
+        if (!(error instanceof AgentJobRevisionConflictError) || attempt === maximumAttempts - 1) {
+          throw error;
+        }
+      }
+    }
+    throw new AgentJobRevisionConflictError(jobId);
   }
 
   private async requireJob(jobId: string): Promise<AgentServiceJob> {

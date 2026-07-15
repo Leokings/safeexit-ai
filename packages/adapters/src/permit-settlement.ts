@@ -10,14 +10,26 @@ export const ERC20_RESCUE_TYPEHASH =
 export const ERC721_RESCUE_TYPEHASH =
   "0xc8c5f2f27df3d275d82978fa06e4b58b1efd6eec9c83f8786baf5a82269ff793";
 
-const permitSettlementAddresses: Readonly<Partial<Record<number, EvmAddress>>> = {
-  196: evmAddressSchema.parse("0x73E8A8d165EC9710aC27f91B0Df02975CC4a48d0"),
+const permitSettlementDeployments: Readonly<Partial<Record<number, Readonly<{
+  address: EvmAddress;
+  expectedRuntimeHash: `0x${string}`;
+}>>>> = {
+  196: {
+    address: evmAddressSchema.parse("0x73E8A8d165EC9710aC27f91B0Df02975CC4a48d0"),
+    expectedRuntimeHash: "0x955c4b306894721c464f129075049c055ba9da3688cf5e538cf5eb90c0cbd3de",
+  },
 };
 
 export function getConfiguredPermitSettlementAddress(
   chainId: number,
 ): EvmAddress | undefined {
-  return permitSettlementAddresses[chainId];
+  return permitSettlementDeployments[chainId]?.address;
+}
+
+export function getConfiguredPermitSettlementRuntimeHash(
+  chainId: number,
+): `0x${string}` | undefined {
+  return permitSettlementDeployments[chainId]?.expectedRuntimeHash;
 }
 
 export const permitSettlementDomainTypes = [

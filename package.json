@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "packageManager": "npm@11.6.2",
+  "packageManager": "npm@11.18.0",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -47,6 +47,9 @@
   },
   "overrides": {
     "@hono/node-server": "1.19.13",
+    "next": {
+      "postcss": "8.5.19"
+    },
     "postcss": "8.5.19"
   }
 }

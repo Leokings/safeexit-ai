@@ -1,4 +1,7 @@
-import type { AgentServiceJob } from "@safeexit/agent-service";
+import {
+  AgentJobRevisionConflictError,
+  type AgentServiceJob,
+} from "@safeexit/agent-service";
 import type {
   Incident,
   RescuePlan,
@@ -6,7 +9,7 @@ import type {
   WalletScan,
 } from "@safeexit/shared";
 
-import type { PrismaClient } from "./generated/prisma/client";
+import type { Prisma, PrismaClient } from "./generated/prisma/client";
 import {
   mapAgentJob,
   mapExecutionAttempt,
@@ -21,6 +24,73 @@ function updateData<T extends { id: string }>(data: T): Omit<T, "id"> {
   const update = { ...data } as Partial<T>;
   delete update.id;
   return update as Omit<T, "id">;
+}
+
+type TransactionClient = Prisma.TransactionClient;
+
+async function persistIncident(
+  client: TransactionClient,
+  data: ReturnType<typeof mapIncident>,
+): Promise<void> {
+  await client.incident.upsert({
+    where: { id: data.id },
+    create: data,
+    update: updateData(data),
+  });
+}
+
+async function persistWalletScan(
+  client: TransactionClient,
+  mapped: ReturnType<typeof mapWalletScan>,
+): Promise<void> {
+  await client.walletScan.upsert({
+    where: { id: mapped.scan.id },
+    create: mapped.scan,
+    update: updateData(mapped.scan),
+  });
+  await client.asset.deleteMany({ where: { scanId: mapped.scan.id } });
+  await client.approval.deleteMany({ where: { scanId: mapped.scan.id } });
+  if (mapped.assets.length > 0) {
+    await client.asset.createMany({ data: mapped.assets });
+  }
+  if (mapped.approvals.length > 0) {
+    await client.approval.createMany({ data: mapped.approvals });
+  }
+}
+
+async function persistRescuePlan(
+  client: TransactionClient,
+  mapped: ReturnType<typeof mapRescuePlan>,
+): Promise<void> {
+  await client.rescuePlan.upsert({
+    where: { id: mapped.plan.id },
+    create: mapped.plan,
+    update: updateData(mapped.plan),
+  });
+  await client.rescueAction.deleteMany({
+    where: {
+      planId: mapped.plan.id,
+      id: { notIn: mapped.actions.map((action) => action.id) },
+    },
+  });
+  for (const action of mapped.actions) {
+    await client.rescueAction.upsert({
+      where: { id: action.id },
+      create: action,
+      update: updateData(action),
+    });
+  }
+}
+
+async function persistSimulation(
+  client: TransactionClient,
+  data: ReturnType<typeof mapSimulation>,
+): Promise<void> {
+  await client.simulation.upsert({
+    where: { id: data.id },
+    create: data,
+    update: updateData(data),
+  });
 }
 
 export class PrismaSafeExitRepository {
@@ -52,30 +122,14 @@ export class PrismaSafeExitRepository {
   async saveIncident(value: unknown): Promise<Incident> {
     const domain = (await import("@safeexit/shared")).incidentSchema.parse(value);
     const data = mapIncident(domain);
-    await this.client.incident.upsert({
-      where: { id: data.id },
-      create: data,
-      update: updateData(data),
-    });
+    await persistIncident(this.client, data);
     return domain;
   }
 
   async saveWalletScan(value: unknown): Promise<WalletScan> {
     const mapped = mapWalletScan(value);
     await this.client.$transaction(async (transaction) => {
-      await transaction.walletScan.upsert({
-        where: { id: mapped.scan.id },
-        create: mapped.scan,
-        update: updateData(mapped.scan),
-      });
-      await transaction.asset.deleteMany({ where: { scanId: mapped.scan.id } });
-      await transaction.approval.deleteMany({ where: { scanId: mapped.scan.id } });
-      if (mapped.assets.length > 0) {
-        await transaction.asset.createMany({ data: mapped.assets });
-      }
-      if (mapped.approvals.length > 0) {
-        await transaction.approval.createMany({ data: mapped.approvals });
-      }
+      await persistWalletScan(transaction, mapped);
     });
     return mapped.domain;
   }
@@ -83,24 +137,7 @@ export class PrismaSafeExitRepository {
   async saveRescuePlan(value: unknown): Promise<RescuePlan> {
     const mapped = mapRescuePlan(value);
     await this.client.$transaction(async (transaction) => {
-      await transaction.rescuePlan.upsert({
-        where: { id: mapped.plan.id },
-        create: mapped.plan,
-        update: updateData(mapped.plan),
-      });
-      await transaction.rescueAction.deleteMany({
-        where: {
-          planId: mapped.plan.id,
-          id: { notIn: mapped.actions.map((action) => action.id) },
-        },
-      });
-      for (const action of mapped.actions) {
-        await transaction.rescueAction.upsert({
-          where: { id: action.id },
-          create: action,
-          update: updateData(action),
-        });
-      }
+      await persistRescuePlan(transaction, mapped);
     });
     return mapped.domain;
   }
@@ -130,11 +167,7 @@ export class PrismaSafeExitRepository {
   async saveSimulation(value: unknown): Promise<SimulationResult> {
     const domain = (await import("@safeexit/shared")).simulationResultSchema.parse(value);
     const data = mapSimulation(domain);
-    await this.client.simulation.upsert({
-      where: { id: data.id },
-      create: data,
-      update: updateData(data),
-    });
+    await persistSimulation(this.client, data);
     return domain;
   }
 
@@ -149,28 +182,45 @@ export class PrismaSafeExitRepository {
     return domain;
   }
 
-  async saveAgentJob(value: unknown): Promise<AgentServiceJob> {
+  async saveAgentJob(value: unknown, expectedRevision?: number): Promise<AgentServiceJob> {
     const mapped = mapAgentJob(value);
-
-    if (mapped.domain.incident) {
-      await this.saveIncident(mapped.domain.incident);
-    }
-    if (mapped.domain.scan) {
-      await this.saveWalletScan(mapped.domain.scan);
-    }
-    if (mapped.domain.plan) {
-      await this.saveRescuePlan(mapped.domain.plan);
-    }
-    for (const simulation of mapped.domain.simulation?.results ?? []) {
-      await this.saveSimulation(simulation);
-    }
+    const incident = mapped.domain.incident
+      ? mapIncident(mapped.domain.incident)
+      : undefined;
+    const scan = mapped.domain.scan
+      ? mapWalletScan(mapped.domain.scan)
+      : undefined;
+    const plan = mapped.domain.plan
+      ? mapRescuePlan(mapped.domain.plan)
+      : undefined;
+    const simulations = (mapped.domain.simulation?.results ?? []).map(mapSimulation);
 
     await this.client.$transaction(async (transaction) => {
-      await transaction.agentJob.upsert({
+      if (incident) await persistIncident(transaction, incident);
+      if (scan) await persistWalletScan(transaction, scan);
+      if (plan) await persistRescuePlan(transaction, plan);
+      for (const simulation of simulations) {
+        await persistSimulation(transaction, simulation);
+      }
+      const existing = await transaction.agentJob.findUnique({
         where: { id: mapped.job.id },
-        create: mapped.job,
-        update: updateData(mapped.job),
+        select: { revision: true },
       });
+      if (!existing) {
+        await transaction.agentJob.create({ data: mapped.job });
+      } else {
+        const expected = expectedRevision ?? mapped.job.revision - 1;
+        if (expected < 0 || mapped.job.revision <= expected) {
+          throw new AgentJobRevisionConflictError(mapped.job.id);
+        }
+        const updated = await transaction.agentJob.updateMany({
+          where: { id: mapped.job.id, revision: expected },
+          data: updateData(mapped.job),
+        });
+        if (updated.count !== 1) {
+          throw new AgentJobRevisionConflictError(mapped.job.id);
+        }
+      }
       await transaction.agentJobTransition.deleteMany({
         where: { jobId: mapped.job.id },
       });

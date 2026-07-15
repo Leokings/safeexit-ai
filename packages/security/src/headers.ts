@@ -1,7 +1,13 @@
 export type SecurityHeader = Readonly<{ key: string; value: string }>;
 
-export function createContentSecurityPolicy(isDevelopment: boolean): string {
-  const scriptSources = ["'self'", "'unsafe-inline'"];
+export function createContentSecurityPolicy(
+  isDevelopment: boolean,
+  nonce?: string,
+): string {
+  const scriptSources = ["'self'"];
+  if (nonce) {
+    scriptSources.push(`'nonce-${nonce}'`, "'strict-dynamic'");
+  }
   const connectSources = [
     "'self'",
     "https://eth.merkle.io",
@@ -36,7 +42,6 @@ export function createContentSecurityPolicy(isDevelopment: boolean): string {
 
 export function createSecurityHeaders(isDevelopment: boolean): SecurityHeader[] {
   return [
-    { key: "Content-Security-Policy", value: createContentSecurityPolicy(isDevelopment) },
     { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
     { key: "X-Content-Type-Options", value: "nosniff" },
     { key: "X-Frame-Options", value: "DENY" },

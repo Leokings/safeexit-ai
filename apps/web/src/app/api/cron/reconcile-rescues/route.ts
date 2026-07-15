@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 
 import {
   getPrismaClient,
+  pruneExpiredRateLimitBuckets,
   PrismaAgentServiceJobStore,
 } from "@safeexit/persistence";
 
@@ -35,7 +36,8 @@ export async function GET(request: Request): Promise<Response> {
     );
   }
 
-  const store = new PrismaAgentServiceJobStore(getPrismaClient());
+  const prisma = getPrismaClient();
+  const store = new PrismaAgentServiceJobStore(prisma);
   const jobs = await store.listByStatuses(
     ["WAITING_FOR_USER", "SIGNING", "EXECUTING"],
     25,
@@ -68,8 +70,10 @@ export async function GET(request: Request): Promise<Response> {
     }
   }
 
+  const prunedRateLimitBuckets = await pruneExpiredRateLimitBuckets(prisma);
+
   return NextResponse.json(
-    { checked, confirmed, terminalFailures, pending, errors },
+    { checked, confirmed, terminalFailures, pending, errors, prunedRateLimitBuckets },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
