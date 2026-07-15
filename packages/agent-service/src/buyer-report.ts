@@ -41,4 +41,31 @@ export const buyerExecutionReportSchema = z
     }
   });
 
+export const buyerReceiptRegistrationSchema = z.strictObject({
+  packageId: identifierSchema,
+  transactionHash: hashSchema,
+});
+
+export class BuyerReceiptPendingError extends Error {
+  constructor(message = "The submitted transaction receipt is not available yet") {
+    super(message);
+    this.name = "BuyerReceiptPendingError";
+  }
+}
+
+export class BuyerReceiptRevertedError extends Error {
+  constructor(message = "The submitted destination settlement transaction reverted") {
+    super(message);
+    this.name = "BuyerReceiptRevertedError";
+  }
+}
+
+export class BuyerReceiptRejectedError extends Error {
+  constructor(message = "The submitted receipt does not prove the committed asset transfer") {
+    super(message);
+    this.name = "BuyerReceiptRejectedError";
+  }
+}
+
 export type BuyerExecutionReport = z.infer<typeof buyerExecutionReportSchema>;
+export type BuyerReceiptRegistration = z.infer<typeof buyerReceiptRegistrationSchema>;

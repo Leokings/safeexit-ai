@@ -23,7 +23,7 @@ export const ALLOWED_AGENT_SERVICE_TRANSITIONS: Readonly<
 export type TransitionPatch = Partial<
   Pick<
     AgentServiceJob,
-    "incident" | "scan" | "plan" | "simulation" | "signingPackage" | "signingPackages" | "monitor" | "dashboardUrl" | "error"
+    "incident" | "scan" | "plan" | "simulation" | "signingPackage" | "signingPackages" | "receiptSubmissions" | "monitor" | "dashboardUrl" | "error"
   >
 >;
 

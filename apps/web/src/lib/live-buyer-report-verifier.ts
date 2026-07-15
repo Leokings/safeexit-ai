@@ -1,10 +1,19 @@
-import { decodeEventLog, type Hex } from "viem";
+import {
+  TransactionReceiptNotFoundError,
+  decodeEventLog,
+  type Hex,
+} from "viem";
 
 import type {
   AgentServiceJob,
   BuyerExecutionReport,
   BuyerExecutionVerifierPort,
   RescueMonitorObservation,
+} from "@safeexit/agent-service";
+import {
+  BuyerReceiptPendingError,
+  BuyerReceiptRejectedError,
+  BuyerReceiptRevertedError,
 } from "@safeexit/agent-service";
 import {
   createDedicatedPublicClient,
@@ -67,10 +76,21 @@ export class LiveBuyerExecutionVerifier implements BuyerExecutionVerifierPort {
     if (!signingPackage || report.chainId !== this.chain.chain.id) {
       throw new Error("Buyer receipt verification is not configured for this report");
     }
-    const receipts = await Promise.all(report.transactionHashes.map((hash) =>
-      this.client.getTransactionReceipt({ hash: hash as Hex })));
+    let receipts: Awaited<ReturnType<BuyerReceiptClient["getTransactionReceipt"]>>[];
+    try {
+      receipts = await Promise.all(report.transactionHashes.map((hash) =>
+        this.client.getTransactionReceipt({ hash: hash as Hex })));
+    } catch (error) {
+      if (
+        error instanceof TransactionReceiptNotFoundError ||
+        (error instanceof Error && error.name === "TransactionReceiptNotFoundError")
+      ) {
+        throw new BuyerReceiptPendingError();
+      }
+      throw error;
+    }
     if (receipts.some((receipt) => receipt.status !== "success")) {
-      throw new Error("A reported destination settlement transaction reverted");
+      throw new BuyerReceiptRevertedError();
     }
 
     const matchedTransfer = receipts.some((receipt) => receipt.logs.some((log) => {
@@ -106,7 +126,7 @@ export class LiveBuyerExecutionVerifier implements BuyerExecutionVerifierPort {
       }
     }));
     if (!matchedTransfer) {
-      throw new Error("Reported receipts do not prove the committed asset transfer");
+      throw new BuyerReceiptRejectedError();
     }
     return {
       phase: "COMPLETED",

@@ -32,6 +32,7 @@ SAFEEXIT_PUBLIC_BASE_URL=https://<your-domain>
 SAFEEXIT_AGENT_MODE=LIVE_READONLY
 SAFEEXIT_AGENT_STORE=DATABASE
 SAFEEXIT_AGENT_API_KEY=<at-least-32-random-characters>
+CRON_SECRET=<at-least-32-random-characters>
 SAFEEXIT_OKX_PROVIDER_AGENT_ID=<registered numeric ASP agent ID>
 SAFEEXIT_AI_MODE=GATEWAY
 SAFEEXIT_AI_MODEL=deepseek/deepseek-v4-flash
@@ -45,6 +46,10 @@ SAFEEXIT_RATE_LIMIT_WINDOW_MS=60000
 `SAFEEXIT_AGENT_API_KEY` is a temporary server-to-server credential for the
 SAFEEXIT API. It is not an OKX wallet secret and must never have a
 `NEXT_PUBLIC_` prefix.
+
+`CRON_SECRET` authorizes Vercel's receipt-reconciliation backstop. Keep it
+server-only and newline-free. Vercel sends it as a bearer token to the daily
+`/api/cron/reconcile-rescues` invocation.
 
 `SAFEEXIT_OKX_PROVIDER_AGENT_ID` pins normalized handoffs to one registered ASP.
 It is an identity number, not a wallet credential.
@@ -284,6 +289,20 @@ issued package has a receipt containing the exact committed ERC-20 or ERC-721
 transfer from source to destination. It finishes `PARTIAL` when verified
 packages complete but unsupported or uncovered plan actions remain.
 Signatures and settlement calldata are never returned to the hosted service.
+
+The paid browser handoff does not require the buyer to construct that report.
+Immediately after wallet broadcast it sends only `{ packageId,
+transactionHash }` to `POST /api/rescue/{incidentId}/receipt`. SAFEEXIT first
+requires the transaction to be visible on the incident chain, originate from
+the committed destination, target the issued token or settlement contract, and
+carry no native value. It persists the public hash and verifies the receipt in
+the request, after the response, and through the authenticated scheduled
+backstop. A closed browser therefore does not leave a registered successful
+settlement waiting for a typed "done" message.
+
+The direct x402 payment is already settled when `prepare-paid` succeeds. It is
+not an escrowed A2A task, so marketplace payment completion never depends on
+the receipt callback; the callback completes SAFEEXIT's own incident record.
 
 The dashboard is optional and is not created with the job. Request it only for
 a manual audit handoff:

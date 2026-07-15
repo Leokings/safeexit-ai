@@ -74,6 +74,21 @@ export const rescueMonitorObservationSchema = z.strictObject({
   detail: z.string().min(1).max(500).optional(),
 });
 
+export const buyerReceiptSubmissionStatusSchema = z.enum([
+  "PENDING",
+  "CONFIRMED",
+  "REVERTED",
+  "REJECTED",
+]);
+
+export const buyerReceiptSubmissionSchema = z.strictObject({
+  packageId: identifierSchema,
+  transactionHash: transactionHashSchema,
+  status: buyerReceiptSubmissionStatusSchema,
+  submittedAt: timestampSchema,
+  updatedAt: timestampSchema,
+});
+
 export const agentServiceErrorSchema = z.strictObject({
   code: z.enum([
     "ANALYSIS_FAILED",
@@ -96,6 +111,7 @@ export const agentServiceJobSchema = z
     simulation: agentSimulationReportSchema.optional(),
     signingPackage: signingPackageSchema.optional(),
     signingPackages: signingPackageListSchema.optional(),
+    receiptSubmissions: z.array(buyerReceiptSubmissionSchema).max(64).optional(),
     monitor: rescueMonitorObservationSchema.optional(),
     dashboardUrl: z.string().url().optional(),
     error: agentServiceErrorSchema.optional(),
@@ -162,6 +178,38 @@ export const agentServiceJobSchema = z
         code: "custom",
         message: "Signing packages require a simulation report",
         path: ["signingPackages"],
+      });
+    }
+    if (job.receiptSubmissions && !job.signingPackage && !job.signingPackages) {
+      context.addIssue({
+        code: "custom",
+        message: "Receipt submissions require an issued signing package",
+        path: ["receiptSubmissions"],
+      });
+    }
+    if (job.receiptSubmissions) {
+      const packageIds = new Set(
+        (job.signingPackages ?? (job.signingPackage ? [job.signingPackage] : []))
+          .map((signingPackage) => signingPackage.packageId),
+      );
+      const transactionHashes = new Set<string>();
+      job.receiptSubmissions.forEach((submission, index) => {
+        if (!packageIds.has(submission.packageId)) {
+          context.addIssue({
+            code: "custom",
+            message: "Receipt submission must reference an issued signing package",
+            path: ["receiptSubmissions", index, "packageId"],
+          });
+        }
+        const normalizedHash = submission.transactionHash.toLowerCase();
+        if (transactionHashes.has(normalizedHash)) {
+          context.addIssue({
+            code: "custom",
+            message: "Receipt submission transaction hashes must be unique",
+            path: ["receiptSubmissions", index, "transactionHash"],
+          });
+        }
+        transactionHashes.add(normalizedHash);
       });
     }
     if (
@@ -252,6 +300,8 @@ export type TransitionReason = z.infer<typeof transitionReasonSchema>;
 export type LifecycleTransition = z.infer<typeof lifecycleTransitionSchema>;
 export type AgentSimulationReport = z.infer<typeof agentSimulationReportSchema>;
 export type RescueMonitorObservation = z.infer<typeof rescueMonitorObservationSchema>;
+export type BuyerReceiptSubmissionStatus = z.infer<typeof buyerReceiptSubmissionStatusSchema>;
+export type BuyerReceiptSubmission = z.infer<typeof buyerReceiptSubmissionSchema>;
 export type AgentServiceError = z.infer<typeof agentServiceErrorSchema>;
 export type AgentServiceJob = z.infer<typeof agentServiceJobSchema>;
 export type CreateIncidentInput = z.infer<typeof createIncidentInputSchema>;

@@ -19,7 +19,15 @@ import type {
   RescuePlanSimulatorPort,
   SigningPackageBuilderPort,
 } from "./ports";
-import { buyerExecutionReportSchema, type BuyerExecutionReport } from "./buyer-report";
+import {
+  BuyerReceiptPendingError,
+  BuyerReceiptRejectedError,
+  BuyerReceiptRevertedError,
+  buyerExecutionReportSchema,
+  buyerReceiptRegistrationSchema,
+  type BuyerExecutionReport,
+  type BuyerReceiptRegistration,
+} from "./buyer-report";
 import {
   agentServiceJobSchema,
   agentSimulationReportSchema,
@@ -27,6 +35,7 @@ import {
   rescueMonitorObservationSchema,
   type AgentServiceError,
   type AgentServiceJob,
+  type BuyerReceiptSubmissionStatus,
   type CreateIncidentInput,
   type RescueMonitorObservation,
 } from "./schemas";
@@ -355,7 +364,14 @@ export class AgentIncidentService {
       if (!exactVerifiedRetry) {
         throw new Error("Completed buyer report retry does not match verified receipts");
       }
-      return job;
+      const receiptPatch = this.confirmedReceiptPatch(
+        job,
+        signingPackage.packageId,
+        report.transactionHashes,
+      );
+      return receiptPatch.receiptSubmissions
+        ? this.updateJob(job, receiptPatch)
+        : job;
     }
     if (
       !["WAITING_FOR_USER", "SIGNING", "EXECUTING"].includes(job.status) ||
@@ -364,7 +380,7 @@ export class AgentIncidentService {
     ) {
       throw new Error(`Buyer execution reporting is not available while job is ${job.status}`);
     }
-    this.validateBuyerReportScope(job, report);
+    const signingPackage = this.validateBuyerReportScope(job, report);
     const observation = rescueMonitorObservationSchema.parse(
       await this.executionVerifier.verify(job, report),
     );
@@ -416,7 +432,87 @@ export class AgentIncidentService {
           ? "All issued SAFEEXIT signing packages were verified onchain"
           : "All issued SAFEEXIT signing packages were verified; unsupported or uncovered actions remain"
         : "A SAFEEXIT signing package was verified; additional issued packages remain",
-    }));
+    }), this.confirmedReceiptPatch(job, signingPackage.packageId, report.transactionHashes));
+  }
+
+  async recordBuyerReceiptSubmission(
+    jobId: string,
+    value: BuyerReceiptRegistration,
+  ): Promise<AgentServiceJob> {
+    const job = await this.requireJob(jobId);
+    const input = buyerReceiptRegistrationSchema.parse(value);
+    const signingPackage = (job.signingPackages ?? (job.signingPackage ? [job.signingPackage] : []))
+      .find((candidate) => candidate.packageId === input.packageId);
+    if (!signingPackage) {
+      throw new Error("Receipt submission does not reference an issued signing package");
+    }
+    const existing = job.receiptSubmissions?.find(
+      (submission) =>
+        submission.transactionHash.toLowerCase() === input.transactionHash.toLowerCase(),
+    );
+    if (existing) {
+      if (existing.packageId !== input.packageId) {
+        throw new Error("A transaction hash cannot be registered for multiple signing packages");
+      }
+      return job;
+    }
+    if (!["WAITING_FOR_USER", "SIGNING", "EXECUTING"].includes(job.status)) {
+      throw new Error(`Receipt submission is not available while job is ${job.status}`);
+    }
+    const at = this.now();
+    return this.updateJob(job, {
+      receiptSubmissions: [
+        ...(job.receiptSubmissions ?? []),
+        {
+          packageId: input.packageId,
+          transactionHash: input.transactionHash,
+          status: "PENDING",
+          submittedAt: at,
+          updatedAt: at,
+        },
+      ],
+    });
+  }
+
+  async reconcileBuyerReceiptSubmission(
+    jobId: string,
+    value: BuyerReceiptRegistration,
+  ): Promise<{
+    status: BuyerReceiptSubmissionStatus;
+    job: AgentServiceJob;
+  }> {
+    const input = buyerReceiptRegistrationSchema.parse(value);
+    let job = await this.requireJob(jobId);
+    const submission = job.receiptSubmissions?.find(
+      (candidate) =>
+        candidate.packageId === input.packageId &&
+        candidate.transactionHash.toLowerCase() === input.transactionHash.toLowerCase(),
+    );
+    if (!submission) {
+      throw new Error("Receipt submission must be registered before reconciliation");
+    }
+    if (submission.status !== "PENDING") {
+      return { status: submission.status, job };
+    }
+
+    const report = this.reportForReceiptSubmission(job, input);
+    try {
+      job = await this.recordBuyerExecutionReport(job.id, report);
+      return { status: "CONFIRMED", job };
+    } catch (error) {
+      if (error instanceof BuyerReceiptPendingError) {
+        return { status: "PENDING", job };
+      }
+      if (error instanceof BuyerReceiptRevertedError) {
+        job = await this.setReceiptSubmissionStatus(job, input, "REVERTED");
+        return { status: "REVERTED", job };
+      }
+      if (error instanceof BuyerReceiptRejectedError) {
+        job = await this.setReceiptSubmissionStatus(job, input, "REJECTED");
+        return { status: "REJECTED", job };
+      }
+      throw error;
+    }
   }
 
   async getJob(jobId: string): Promise<AgentServiceJob> {
@@ -426,6 +522,7 @@ export class AgentIncidentService {
   private async advanceToObservation(
     job: AgentServiceJob,
     observation: RescueMonitorObservation,
+    patch: TransitionPatch = {},
   ): Promise<AgentServiceJob> {
     let next = job;
 
@@ -433,7 +530,7 @@ export class AgentIncidentService {
       if (next.status !== "WAITING_FOR_USER") {
         throw new Error("Monitor observation would regress the rescue lifecycle");
       }
-      return this.updateJob(next, { monitor: observation });
+      return this.updateJob(next, { ...patch, monitor: observation });
     }
 
     if (next.status === "WAITING_FOR_USER") {
@@ -443,7 +540,7 @@ export class AgentIncidentService {
       if (next.status !== "SIGNING") {
         throw new Error("Monitor observation would regress the rescue lifecycle");
       }
-      return this.updateJob(next, { monitor: observation });
+      return this.updateJob(next, { ...patch, monitor: observation });
     }
 
     if (next.status === "SIGNING") {
@@ -453,7 +550,7 @@ export class AgentIncidentService {
       if (next.status !== "EXECUTING") {
         throw new Error("Monitor observation would regress the rescue lifecycle");
       }
-      return this.updateJob(next, { monitor: observation });
+      return this.updateJob(next, { ...patch, monitor: observation });
     }
 
     if (next.status !== "EXECUTING") {
@@ -467,8 +564,77 @@ export class AgentIncidentService {
     } as const;
     const target = terminal[observation.phase];
     return this.store.save(
-      transitionJob(next, target[0], target[1], this.now(), { monitor: observation }),
+      transitionJob(next, target[0], target[1], this.now(), { ...patch, monitor: observation }),
     );
+  }
+
+  private reportForReceiptSubmission(
+    job: AgentServiceJob,
+    submission: BuyerReceiptRegistration,
+  ): BuyerExecutionReport {
+    const signingPackage = (job.signingPackages ?? (job.signingPackage ? [job.signingPackage] : []))
+      .find((candidate) => candidate.packageId === submission.packageId);
+    const simulation = job.simulation?.results.find(
+      (result) => result.id === signingPackage?.simulation.resultId,
+    );
+    if (!signingPackage || !simulation) {
+      throw new Error("Receipt submission is missing its issued package or simulation commitment");
+    }
+    return buyerExecutionReportSchema.parse({
+      schemaVersion: "safeexit-buyer-report-v1",
+      packageId: signingPackage.packageId,
+      jobId: job.id,
+      incidentId: signingPackage.incidentId,
+      planId: signingPackage.planId,
+      planHash: signingPackage.planHash,
+      actionId: signingPackage.actionId,
+      route: signingPackage.route,
+      chainId: signingPackage.chainId,
+      sourceAddress: signingPackage.sourceAddress,
+      destinationAddress: signingPackage.destinationAddress,
+      status: "COMPLETED",
+      simulationProviderId: simulation.providerId,
+      simulatedAt: simulation.simulatedAt,
+      transactionHashes: [submission.transactionHash],
+      completedAt: this.now(),
+    });
+  }
+
+  private confirmedReceiptPatch(
+    job: AgentServiceJob,
+    packageId: string,
+    transactionHashes: readonly string[],
+  ): TransitionPatch {
+    const hashes = new Set(transactionHashes.map((hash) => hash.toLowerCase()));
+    let changed = false;
+    const at = this.now();
+    const receiptSubmissions = job.receiptSubmissions?.map((submission) => {
+      if (
+        submission.packageId !== packageId ||
+        !hashes.has(submission.transactionHash.toLowerCase()) ||
+        submission.status === "CONFIRMED"
+      ) {
+        return submission;
+      }
+      changed = true;
+      return { ...submission, status: "CONFIRMED" as const, updatedAt: at };
+    });
+    return changed && receiptSubmissions ? { receiptSubmissions } : {};
+  }
+
+  private async setReceiptSubmissionStatus(
+    job: AgentServiceJob,
+    input: BuyerReceiptRegistration,
+    status: Extract<BuyerReceiptSubmissionStatus, "REVERTED" | "REJECTED">,
+  ): Promise<AgentServiceJob> {
+    const at = this.now();
+    return this.updateJob(job, {
+      receiptSubmissions: job.receiptSubmissions?.map((submission) =>
+        submission.packageId === input.packageId &&
+        submission.transactionHash.toLowerCase() === input.transactionHash.toLowerCase()
+          ? { ...submission, status, updatedAt: at }
+          : submission),
+    });
   }
 
   private validateSimulation(
@@ -618,7 +784,7 @@ export class AgentIncidentService {
 
   private async updateJob(
     job: AgentServiceJob,
-    patch: Partial<Pick<AgentServiceJob, "incident" | "scan" | "simulation" | "signingPackage" | "signingPackages" | "monitor" | "dashboardUrl">>,
+    patch: Partial<Pick<AgentServiceJob, "incident" | "scan" | "simulation" | "signingPackage" | "signingPackages" | "receiptSubmissions" | "monitor" | "dashboardUrl">>,
   ): Promise<AgentServiceJob> {
     const at = this.now();
     return this.store.save(

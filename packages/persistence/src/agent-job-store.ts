@@ -2,9 +2,10 @@ import {
   agentServiceJobSchema,
   type AgentServiceJob,
   type AgentServiceJobStore,
+  type AgentServiceStatus,
 } from "@safeexit/agent-service";
 
-import type { PrismaClient } from "./generated/prisma/client";
+import { AgentJobStatus, type PrismaClient } from "./generated/prisma/client";
 import { PrismaSafeExitRepository } from "./repository";
 
 export class PrismaAgentServiceJobStore implements AgentServiceJobStore {
@@ -40,6 +41,43 @@ export class PrismaAgentServiceJobStore implements AgentServiceJobStore {
       throw new Error("Agent job does not contain a recoverable lifecycle snapshot");
     }
     return agentServiceJobSchema.parse(record.state);
+  }
+
+  async getByIncidentId(incidentId: string): Promise<AgentServiceJob | undefined> {
+    const record = await this.client.agentJob.findFirst({
+      where: { incidentId },
+      orderBy: { updatedAt: "desc" },
+      select: { state: true },
+    });
+    if (!record) {
+      return undefined;
+    }
+    if (!record.state) {
+      throw new Error("Agent job does not contain a recoverable lifecycle snapshot");
+    }
+    return agentServiceJobSchema.parse(record.state);
+  }
+
+  async listByStatuses(
+    statuses: readonly AgentServiceStatus[],
+    limit: number,
+  ): Promise<AgentServiceJob[]> {
+    const records = await this.client.agentJob.findMany({
+      where: {
+        status: {
+          in: statuses.map((status) => AgentJobStatus[status]),
+        },
+      },
+      orderBy: { updatedAt: "asc" },
+      take: Math.max(1, Math.min(limit, 100)),
+      select: { state: true },
+    });
+    return records.map((record) => {
+      if (!record.state) {
+        throw new Error("Agent job does not contain a recoverable lifecycle snapshot");
+      }
+      return agentServiceJobSchema.parse(record.state);
+    });
   }
 
   async save(value: AgentServiceJob): Promise<AgentServiceJob> {

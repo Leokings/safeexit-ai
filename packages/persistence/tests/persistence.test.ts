@@ -10,6 +10,7 @@ import {
   mapWalletScan,
   normalizePostgresTlsUrl,
   parsePersistenceEnvironment,
+  PrismaAgentServiceJobStore,
   PrismaSafeExitRepository,
 } from "../src";
 
@@ -309,5 +310,64 @@ describe("repository validation boundary", () => {
       incident.id,
       "plan:shared",
     )).rejects.toThrow("different incident");
+  });
+});
+
+describe("agent job store lookups", () => {
+  const jobState = {
+    id: "job-store-1",
+    service: "safeexit-incident-response",
+    status: "WAITING_FOR_USER",
+    incident,
+    history: [
+      {
+        sequence: 0,
+        from: null,
+        to: "RECEIVED",
+        reason: "JOB_CREATED",
+        at: now,
+      },
+      {
+        sequence: 1,
+        from: "RECEIVED",
+        to: "ANALYSING",
+        reason: "ANALYSIS_STARTED",
+        at: now,
+      },
+      {
+        sequence: 2,
+        from: "ANALYSING",
+        to: "PLAN_READY",
+        reason: "PLAN_GENERATED",
+        at: now,
+      },
+      {
+        sequence: 3,
+        from: "PLAN_READY",
+        to: "WAITING_FOR_USER",
+        reason: "SIMULATION_READY",
+        at: now,
+      },
+    ],
+    revision: 3,
+    createdAt: now,
+    updatedAt: now,
+  } as const;
+
+  it("loads the latest incident job and pending lifecycle batches", async () => {
+    const findFirst = vi.fn().mockResolvedValue({ state: jobState });
+    const findMany = vi.fn().mockResolvedValue([{ state: jobState }]);
+    const store = new PrismaAgentServiceJobStore({
+      agentJob: { findFirst, findMany },
+    } as never);
+
+    await expect(store.getByIncidentId(incident.id)).resolves.toMatchObject({
+      id: jobState.id,
+    });
+    await expect(store.listByStatuses(["WAITING_FOR_USER"], 25)).resolves.toHaveLength(1);
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { incidentId: incident.id },
+    }));
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 25 }));
   });
 });

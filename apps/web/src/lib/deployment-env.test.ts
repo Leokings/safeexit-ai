@@ -29,6 +29,22 @@ describe("deployment environment", () => {
     ).toThrow();
   });
 
+  it("accepts only a sufficiently long newline-free cron secret", () => {
+    const config = parseDeploymentEnvironment({
+      NODE_ENV: "production",
+      CRON_SECRET: "c".repeat(40),
+    });
+    expect(config.cronSecret).toBe("c".repeat(40));
+    expect(() => parseDeploymentEnvironment({
+      NODE_ENV: "production",
+      CRON_SECRET: `${"c".repeat(40)}\n`,
+    })).toThrow();
+    expect(() => parseDeploymentEnvironment({
+      NODE_ENV: "production",
+      CRON_SECRET: "too-short",
+    })).toThrow();
+  });
+
   it("parses server-only live discovery configuration", () => {
     const config = parseDeploymentEnvironment({
       NODE_ENV: "production",

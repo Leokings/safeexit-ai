@@ -10,6 +10,8 @@ import {
 
 import {
   AgentIncidentService,
+  BuyerReceiptPendingError,
+  BuyerReceiptRevertedError,
   InMemoryAgentServiceJobStore,
   OKX_AI_INTEGRATION_BOUNDARIES,
   SIGNING_PACKAGE_EIP712_TYPES,
@@ -387,6 +389,7 @@ type ServiceOptions = {
   simulationFactory?: () => AgentSimulationReport;
   signingPackagesFactory?: () => SigningPackage[];
   clock?: () => Date;
+  executionError?: Error;
 };
 
 function createService(options: ServiceOptions = {}) {
@@ -414,13 +417,18 @@ function createService(options: ServiceOptions = {}) {
         options.signingPackages ?? [options.signingPackage ?? signingPackage()],
     },
     executionVerifier: {
-      verify: async (_job, report) => ({
-        phase: "COMPLETED",
-        completedActionIds: [report.actionId],
-        failedActionIds: [],
-        transactionHashes: report.transactionHashes,
-        observedAt: report.completedAt,
-      }),
+      verify: async (_job, report) => {
+        if (options.executionError) {
+          throw options.executionError;
+        }
+        return {
+          phase: "COMPLETED",
+          completedActionIds: [report.actionId],
+          failedActionIds: [],
+          transactionHashes: report.transactionHashes,
+          observedAt: report.completedAt,
+        };
+      },
     },
     monitor: {
       observe: async () => pendingObservations.shift() ?? observation("WAITING_FOR_USER"),
@@ -644,6 +652,79 @@ describe("agent service lifecycle", () => {
 
     expect(completed.status).toBe("COMPLETED");
     expect(completed.monitor?.transactionHashes).toEqual([txHash]);
+  });
+
+  it("registers a public receipt hash and completes the job after onchain verification", async () => {
+    const { service } = createService();
+    await prepareWaitingForUser(service);
+    await service.getSigningPackage("job:test");
+
+    const registered = await service.recordBuyerReceiptSubmission("job:test", {
+      packageId: "signing-package:test",
+      transactionHash: txHash,
+    });
+    expect(registered.status).toBe("WAITING_FOR_USER");
+    expect(registered.receiptSubmissions).toEqual([expect.objectContaining({
+      packageId: "signing-package:test",
+      transactionHash: txHash,
+      status: "PENDING",
+    })]);
+
+    const reconciled = await service.reconcileBuyerReceiptSubmission("job:test", {
+      packageId: "signing-package:test",
+      transactionHash: txHash,
+    });
+    expect(reconciled.status).toBe("CONFIRMED");
+    expect(reconciled.job.status).toBe("COMPLETED");
+    expect(reconciled.job.receiptSubmissions?.[0]?.status).toBe("CONFIRMED");
+  });
+
+  it("keeps an unmined receipt pending and makes registration idempotent", async () => {
+    const { service } = createService({
+      executionError: new BuyerReceiptPendingError(),
+    });
+    await prepareWaitingForUser(service);
+    await service.getSigningPackage("job:test");
+    const input = {
+      packageId: "signing-package:test",
+      transactionHash: txHash,
+    };
+
+    const first = await service.recordBuyerReceiptSubmission("job:test", input);
+    const retry = await service.recordBuyerReceiptSubmission("job:test", input);
+    const reconciled = await service.reconcileBuyerReceiptSubmission("job:test", input);
+
+    expect(retry.revision).toBe(first.revision);
+    expect(reconciled.status).toBe("PENDING");
+    expect(reconciled.job.status).toBe("WAITING_FOR_USER");
+  });
+
+  it("records a reverted receipt without failing the whole recovery job", async () => {
+    const { service } = createService({
+      executionError: new BuyerReceiptRevertedError(),
+    });
+    await prepareWaitingForUser(service);
+    await service.getSigningPackage("job:test");
+    const input = {
+      packageId: "signing-package:test",
+      transactionHash: txHash,
+    };
+    await service.recordBuyerReceiptSubmission("job:test", input);
+
+    const reconciled = await service.reconcileBuyerReceiptSubmission("job:test", input);
+
+    expect(reconciled.status).toBe("REVERTED");
+    expect(reconciled.job.status).toBe("WAITING_FOR_USER");
+    expect(reconciled.job.receiptSubmissions?.[0]?.status).toBe("REVERTED");
+  });
+
+  it("finds jobs by incident and lists reconciliation lifecycle states", async () => {
+    const { service, store } = createService();
+    await prepareWaitingForUser(service);
+
+    expect((await store.getByIncidentId(incident.id))?.id).toBe("job:test");
+    expect((await store.listByStatuses(["WAITING_FOR_USER"], 10)).map((job) => job.id))
+      .toEqual(["job:test"]);
   });
 
   it("issues and verifies an ordered mixed ERC-20 and NFT rescue package set", async () => {

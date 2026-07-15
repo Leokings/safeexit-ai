@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { encodeAbiParameters, encodeEventTopics, type Hex } from "viem";
 
 import {
+  BuyerReceiptPendingError,
+  BuyerReceiptRejectedError,
+  BuyerReceiptRevertedError,
   SIGNING_PACKAGE_EIP712_TYPES,
   buyerExecutionReportSchema,
   signingPackageSchema,
@@ -201,6 +204,36 @@ describe("live buyer receipt verification", () => {
     await expect(verifier.verify(
       { signingPackage } as AgentServiceJob,
       report,
-    )).rejects.toThrow("do not prove the committed asset transfer");
+    )).rejects.toBeInstanceOf(BuyerReceiptRejectedError);
+  });
+
+  it("distinguishes a pending receipt from a rejected transfer", async () => {
+    const receiptMissing = new Error("receipt not found");
+    receiptMissing.name = "TransactionReceiptNotFoundError";
+    const verifier = new LiveBuyerExecutionVerifier(
+      xLayerMainnetConfig,
+      "https://unused.invalid",
+      () => new Date("2026-07-13T10:01:00.000Z"),
+      { getTransactionReceipt: async () => { throw receiptMissing; } },
+    );
+
+    await expect(verifier.verify(
+      { signingPackage } as AgentServiceJob,
+      report,
+    )).rejects.toBeInstanceOf(BuyerReceiptPendingError);
+  });
+
+  it("distinguishes a reverted settlement receipt", async () => {
+    const verifier = new LiveBuyerExecutionVerifier(
+      xLayerMainnetConfig,
+      "https://unused.invalid",
+      () => new Date("2026-07-13T10:01:00.000Z"),
+      { getTransactionReceipt: async () => ({ status: "reverted", logs: [] }) },
+    );
+
+    await expect(verifier.verify(
+      { signingPackage } as AgentServiceJob,
+      report,
+    )).rejects.toBeInstanceOf(BuyerReceiptRevertedError);
   });
 });

@@ -3,7 +3,11 @@ import { notFound } from "next/navigation";
 
 import { isRescueMainnetChainId } from "@safeexit/chain";
 import { MainnetRescueWorkspace } from "@/components/mainnet-rescue-workspace";
-import { getPrismaClient, PrismaSafeExitRepository } from "@safeexit/persistence";
+import {
+  getPrismaClient,
+  PrismaAgentServiceJobStore,
+  PrismaSafeExitRepository,
+} from "@safeexit/persistence";
 import { getAgentIncidentService } from "@/lib/agent-runtime";
 
 export const metadata: Metadata = {
@@ -32,12 +36,23 @@ export default async function RescuePage({ params }: { params: Promise<{ id: str
     notFound();
   }
 
+  const agentJob = await new PrismaAgentServiceJobStore(getPrismaClient())
+    .getByIncidentId(incident.id);
+  const receiptBindings = (
+    agentJob?.signingPackages ??
+    (agentJob?.signingPackage ? [agentJob.signingPackage] : [])
+  ).map((signingPackage) => ({
+    actionId: signingPackage.actionId,
+    packageId: signingPackage.packageId,
+  }));
+
   return (
     <MainnetRescueWorkspace
       incidentId={incident.id}
       chainId={incident.chainId}
       source={incident.sourceAddress}
       destination={incident.destinationAddress}
+      receiptBindings={receiptBindings}
       {...(incident.assetManifest ? { assetManifest: incident.assetManifest } : {})}
     />
   );

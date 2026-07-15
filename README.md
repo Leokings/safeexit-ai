@@ -94,6 +94,13 @@ destination-paid settlement stay in the buyer's local runtime. Jobs are
 dashboardless by default; an audit URL is created only through the explicit
 dashboard endpoint.
 
+The browser handoff automatically registers the public transaction hash as
+soon as the destination broadcasts. SAFEEXIT accepts no signature or calldata:
+it verifies that the destination submitted the transaction to the issued route,
+then independently proves the exact committed transfer from the chain receipt.
+An after-response worker and authenticated scheduled reconciliation retry
+registered hashes if the buyer closes the browser before confirmation.
+
 An opt-in `LIVE_READONLY` agent mode replaces fixture analysis with real
 incident-chain mainnet reads. It discovers non-risk ERC-20 candidates through the official OKX
 Wallet API, rechecks each candidate at a pinned block through a dedicated RPC,
@@ -141,6 +148,11 @@ issuing replacement packages. The continuation cannot change the chain,
 source, destination, asset manifest, plan, or execution policy.
 The same response includes the exact incident dashboard URL for buyers who
 prefer a browser wallet handoff over a local agent runtime.
+
+The x402 API payment settles when the paid preparation request succeeds; it is
+not an escrowed marketplace task waiting for the buyer to type a completion
+message. The persisted SAFEEXIT incident still progresses automatically to
+`COMPLETED` or `PARTIAL` after all issued package receipts are verified.
 
 Buyer agents should call this A2MCP endpoint directly. They should not publish
 an A2A task and wait for marketplace events for deterministic preparation.
@@ -245,8 +257,9 @@ the executable plan.
 
 `@safeexit/agent-service` adds the provider-neutral incident job lifecycle and
 the methods `createIncident`, `analyseIncident`, `generatePlan`, `simulatePlan`,
-`getSigningPackage`, `getSigningPackages`, `recordBuyerExecutionReport`, `getDashboardUrl`, and
-`monitorRescue`. Scanner, planner, simulator, signing-package, receipt
+`getSigningPackage`, `getSigningPackages`, `recordBuyerExecutionReport`,
+`recordBuyerReceiptSubmission`, `reconcileBuyerReceiptSubmission`,
+`getDashboardUrl`, and `monitorRescue`. Scanner, planner, simulator, signing-package, receipt
 verification, dashboard, and monitor behavior are injected ports. The hosted
 service has no signing or wallet-execution port.
 
@@ -259,6 +272,12 @@ destination. It supports ERC-3009, ERC-2612, DAI-style permit, and ERC-4494
 routes. SAFEEXIT accepts neither signatures nor arbitrary calldata. It accepts
 only a receipt-only completion report, then independently proves the exact
 committed transfer from chain receipts before completing the job.
+
+Public receipt registration is package-bound and accepts only a transaction
+hash. Before persistence, the transaction must already be visible on the
+incident chain, originate from the committed destination, target the issued
+token or settlement contract, and carry no native value. Receipt logs remain
+the final authority. `CRON_SECRET` protects the reconciliation backstop.
 
 The package also contains versioned conceptual A2A request/response schemas.
 They are SAFEEXIT contracts, not claimed OKX wire formats. ASP registration,

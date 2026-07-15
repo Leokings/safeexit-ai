@@ -56,6 +56,19 @@ type SubmittedTransaction = {
   actionId: string;
   hash: Hex;
   status: "CONFIRMING" | "CONFIRMED" | "FAILED";
+  reportStatus:
+    | "NOT_REQUIRED"
+    | "REPORTING"
+    | "PENDING"
+    | "CONFIRMED"
+    | "REVERTED"
+    | "REJECTED"
+    | "ERROR";
+};
+
+type ReceiptBinding = {
+  actionId: string;
+  packageId: string;
 };
 
 function errorMessage(error: unknown): string {
@@ -167,18 +180,39 @@ function actionTarget(action: RescueAction): EvmAddress {
   }
 }
 
+function reportStatusLabel(status: SubmittedTransaction["reportStatus"]): string {
+  switch (status) {
+    case "NOT_REQUIRED":
+      return "Manual incident";
+    case "REPORTING":
+      return "Registering";
+    case "PENDING":
+      return "Agent verification pending";
+    case "CONFIRMED":
+      return "Agent verified";
+    case "REVERTED":
+      return "Agent saw revert";
+    case "REJECTED":
+      return "Receipt rejected";
+    case "ERROR":
+      return "Report retry needed";
+  }
+}
+
 export function MainnetRescueWorkspace({
   incidentId,
   chainId,
   source,
   destination,
   assetManifest,
+  receiptBindings = [],
 }: {
   incidentId: string;
   chainId: number;
   source: EvmAddress;
   destination: EvmAddress;
   assetManifest?: RescueAssetManifest;
+  receiptBindings?: ReceiptBinding[];
 }) {
   const chainConfig = getRescueMainnetChainConfig(chainId);
   const [connectedAccount, setConnectedAccount] = useState<`0x${string}`>();
@@ -265,6 +299,49 @@ export function MainnetRescueWorkspace({
         : result.gaslessActions[0] ? gaslessRouteKey(result.gaslessActions[0]) : undefined,
     );
     return result;
+  }
+
+  async function reportTransactionReceipt(
+    actionId: string,
+    transactionHash: Hex,
+  ): Promise<SubmittedTransaction["reportStatus"]> {
+    const binding = receiptBindings.find((candidate) => candidate.actionId === actionId);
+    if (!binding) {
+      return "NOT_REQUIRED";
+    }
+    try {
+      const response = await fetch(`/api/rescue/${encodeURIComponent(incidentId)}/receipt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          packageId: binding.packageId,
+          transactionHash,
+        }),
+      });
+      const body: unknown = await response.json();
+      if (
+        body &&
+        typeof body === "object" &&
+        "status" in body &&
+        typeof body.status === "string" &&
+        ["PENDING", "CONFIRMED", "REVERTED", "REJECTED"].includes(body.status)
+      ) {
+        return body.status as SubmittedTransaction["reportStatus"];
+      }
+      return "ERROR";
+    } catch {
+      return "ERROR";
+    }
+  }
+
+  function updateReportStatus(
+    transactionHash: Hex,
+    reportStatus: SubmittedTransaction["reportStatus"],
+  ): void {
+    setTransactions((current) =>
+      current.map((item) =>
+        item.hash === transactionHash ? { ...item, reportStatus } : item),
+    );
   }
 
   async function refreshPreflight() {
@@ -405,8 +482,19 @@ export function MainnetRescueWorkspace({
       }
       setTransactions((current) => [
         ...current,
-        { actionId: signed.authorization.actionId, hash, status: "CONFIRMING" },
+        {
+          actionId: signed.authorization.actionId,
+          hash,
+          status: "CONFIRMING",
+          reportStatus: receiptBindings.some(
+            (binding) => binding.actionId === signed.authorization.actionId,
+          ) ? "REPORTING" : "NOT_REQUIRED",
+        },
       ]);
+      updateReportStatus(
+        hash,
+        await reportTransactionReceipt(signed.authorization.actionId, hash),
+      );
       const receipt = await publicClient.waitForTransactionReceipt({
         hash,
         confirmations: 1,
@@ -426,6 +514,10 @@ export function MainnetRescueWorkspace({
           "The confirmed receipt does not prove the exact committed asset transfer.",
         );
       }
+      updateReportStatus(
+        hash,
+        await reportTransactionReceipt(signed.authorization.actionId, hash),
+      );
       setSigned(undefined);
       await requestPreflight();
     } catch (nextError) {
@@ -621,7 +713,20 @@ export function MainnetRescueWorkspace({
                 <div className="mt-5 space-y-4">
                   {transactions.map((transaction) => (
                     <div key={transaction.hash} className="border-l-2 border-border-strong pl-4">
-                      <Badge variant={transaction.status === "CONFIRMED" ? "success" : transaction.status === "FAILED" ? "danger" : "info"}>{transaction.status}</Badge>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant={transaction.status === "CONFIRMED" ? "success" : transaction.status === "FAILED" ? "danger" : "info"}>{transaction.status}</Badge>
+                        <Badge
+                          variant={
+                            transaction.reportStatus === "CONFIRMED" || transaction.reportStatus === "NOT_REQUIRED"
+                              ? "success"
+                              : ["REVERTED", "REJECTED", "ERROR"].includes(transaction.reportStatus)
+                                ? "danger"
+                                : "info"
+                          }
+                        >
+                          {reportStatusLabel(transaction.reportStatus)}
+                        </Badge>
+                      </div>
                       {chainConfig.chain.blockExplorers?.default && (
                         <a href={`${chainConfig.chain.blockExplorers.default.url}/tx/${transaction.hash}`} target="_blank" rel="noreferrer" className="mt-2 inline-flex max-w-full items-center gap-2 font-mono text-[11px] text-info hover:text-foreground"><span className="break-all">{transaction.hash}</span><ExternalLink className="size-3.5 shrink-0" /></a>
                       )}
