@@ -13,7 +13,9 @@ The scanner pins one block and obtains values only from EVM read calls or
 explicit test fixtures. ERC-20 contracts, ERC-721/ERC-1155 token IDs, spenders,
 and NFT operators must be supplied in a scan manifest. An empty result means
 only that no state was found for the requested manifest; it is not a claim that
-the wallet has no other assets or approvals.
+the wallet has no other assets or approvals. Marketplace and paid-agent
+requests treat that manifest as a hard signing scope: wallet discovery may
+enrich listed assets, but it cannot add an unrequested signing package.
 
 Scanner states have distinct meanings:
 

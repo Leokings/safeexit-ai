@@ -218,7 +218,7 @@ The request body is:
 }
 ```
 
-`buyerAgentId` is optional. X Layer mainnet requires an explicit asset manifest.
+`buyerAgentId` is optional. Every mainnet request requires an explicit asset manifest.
 Unknown fields, credentials, signatures, and arbitrary calldata are rejected.
 
 These are not claimed OKX callback endpoints. After the official runtime emits
@@ -229,12 +229,15 @@ The returned signing-package JSON is delivered through the official A2A task
 flow. After local buyer execution, only the receipt report is mapped into
 `buyer-report`; source signatures must never be included.
 
-The normalized bridge accepts X Layer mainnet (`196`) only. Every handoff must
+The normalized bridge accepts the verified mainnets Ethereum (`1`), BNB Smart
+Chain (`56`), Polygon (`137`), Arbitrum One (`42161`), Optimism (`10`), Base
+(`8453`), Avalanche C-Chain (`43114`), and X Layer (`196`). Every handoff must
 declare one to eight ERC-20 contracts in
 `assetManifest.erc20TokenAddresses` and explicit NFT entries in
-`assetManifest.erc721Assets` or `assetManifest.erc1155Assets`. Mainnet merges
-the explicit manifest with OKX-backed ERC-20 discovery and verifies all
-submitted entries at the pinned RPC block.
+`assetManifest.erc721Assets` or `assetManifest.erc1155Assets`. The manifest is a
+hard execution scope. OKX-backed discovery may enrich listed ERC-20 metadata
+and valuation, but unrequested assets cannot produce signing packages. Every
+submitted entry is re-verified at the pinned RPC block.
 
 Analysis, planning, simulation, and monitoring accept the strict body
 `{ "schemaVersion": "safeexit-agent-api-v1" }`.

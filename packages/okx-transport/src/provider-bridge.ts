@@ -80,13 +80,23 @@ function assertSigningScope(
   job: AgentServiceJob,
   signingPackage: SigningPackage,
 ): void {
+  const isRequestedAsset = signingPackage.route === "ERC4494_PERMIT_SETTLEMENT"
+    ? request.assetManifest.erc721Assets.some(
+      (asset) =>
+        sameAddress(asset.collectionAddress, signingPackage.collectionAddress) &&
+        asset.tokenId === signingPackage.tokenId,
+    )
+    : request.assetManifest.erc20TokenAddresses.some((address) =>
+      sameAddress(address, signingPackage.tokenAddress),
+    );
   if (
     signingPackage.jobId !== job.id ||
     !job.plan?.actions.some((action) => action.id === signingPackage.actionId) ||
     !job.simulation?.executableActionIds.includes(signingPackage.actionId) ||
     signingPackage.chainId !== request.walletContext.chainId ||
     !sameAddress(signingPackage.sourceAddress, request.walletContext.sourceAddress) ||
-    !sameAddress(signingPackage.destinationAddress, request.walletContext.destinationAddress)
+    !sameAddress(signingPackage.destinationAddress, request.walletContext.destinationAddress) ||
+    !isRequestedAsset
   ) {
     throw new OkxProviderBridgeError(
       "HANDOFF_SCOPE_MISMATCH",

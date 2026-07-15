@@ -80,6 +80,7 @@ function safeOnchainMetadata(value: string, maximum: number, fallback: string): 
   return normalized || fallback;
 }
 
+import { selectManifestScopedErc20Candidates } from "./asset-manifest-scope";
 import {
   getDeploymentRpcUrl,
   parseDeploymentEnvironment,
@@ -129,12 +130,15 @@ class LiveMainnetAnalyzer implements IncidentAnalyzerPort {
       incident.sourceAddress,
       incident.chainId,
     );
-    const uniqueCandidates = [
-      ...new Map(
-        discovered.map((candidate) => [candidate.tokenAddress.toLowerCase(), candidate]),
-      ).values(),
-    ];
-    const selectedCandidates = uniqueCandidates.slice(0, 50);
+    const selectedCandidates = selectManifestScopedErc20Candidates(
+      discovered,
+      this.manifest?.erc20TokenAddresses,
+    );
+    const scopedCandidateCount = selectManifestScopedErc20Candidates(
+      discovered,
+      this.manifest?.erc20TokenAddresses,
+      Number.MAX_SAFE_INTEGER,
+    ).length;
     const metadata = await Promise.all(
       selectedCandidates.map(async (candidate) => {
         try {
@@ -326,10 +330,11 @@ class LiveMainnetAnalyzer implements IncidentAnalyzerPort {
       assets: valuedAssets,
       warnings: [
         ...report.scan.warnings,
-        "ERC-20 candidates were discovered by the official OKX Wallet API and balances were re-verified at the pinned RPC block.",
-        "Explicit incident asset contracts were merged with discovery and re-verified at the pinned RPC block.",
+        ...(this.manifest
+          ? ["The explicit incident asset manifest was enforced as the scan scope and re-verified at the pinned RPC block."]
+          : ["ERC-20 candidates were discovered by the official OKX Wallet API and balances were re-verified at the pinned RPC block."]),
         "NFT, allowance, operator-approval, Permit2, airdrop, and protocol-position discovery is not exhaustive in this release.",
-        ...(uniqueCandidates.length > selectedCandidates.length
+        ...(scopedCandidateCount > selectedCandidates.length
           ? ["Token discovery was capped at 50 candidates for this incident."]
           : []),
         ...(metadataFailures > 0

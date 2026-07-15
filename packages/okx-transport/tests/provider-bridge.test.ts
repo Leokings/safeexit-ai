@@ -367,7 +367,19 @@ describe("OKX A2A provider bridge", () => {
       [OKX_A2A_XLAYER_MAINNET_CHAIN_ID],
     );
     const versions: string[] = [];
-    for (const tokenAddress of [token, destination]) {
+    const manifests = [
+      {
+        erc20TokenAddresses: [token],
+        erc721Assets: [],
+        erc1155Assets: [],
+      },
+      {
+        erc20TokenAddresses: [token],
+        erc721Assets: [{ collectionAddress: destination, tokenId: "42" }],
+        erc1155Assets: [],
+      },
+    ];
+    for (const assetManifest of manifests) {
       const service = lifecycle();
       await expect(bridge.prepareSigningDeliverable(service, {
         ...request,
@@ -375,11 +387,7 @@ describe("OKX A2A provider bridge", () => {
           ...request.walletContext,
           chainId: OKX_A2A_XLAYER_MAINNET_CHAIN_ID,
         },
-        assetManifest: {
-          erc20TokenAddresses: [tokenAddress],
-          erc721Assets: [],
-          erc1155Assets: [],
-        },
+        assetManifest,
       })).resolves.toMatchObject({ status: "SIGNING_PACKAGES_READY" });
       const createIncident = vi.mocked(service.createIncident);
       const input = createIncident.mock.calls[0]?.[0];
@@ -409,6 +417,19 @@ describe("OKX A2A provider bridge", () => {
         executionPath: "DIRECT_AUTHORIZATION",
       }],
     }).success).toBe(false);
+  });
+
+  it("rejects signing packages outside the buyer's explicit asset manifest", async () => {
+    const bridge = new OkxA2AProviderBridge("5196", () => new Date(now));
+
+    await expect(bridge.prepareSigningDeliverable(lifecycle(), {
+      ...request,
+      assetManifest: {
+        erc20TokenAddresses: [destination],
+        erc721Assets: [],
+        erc1155Assets: [],
+      },
+    })).rejects.toMatchObject({ code: "HANDOFF_SCOPE_MISMATCH" });
   });
 
   it("prepares a paid direct deliverable without a conversational task round-trip", async () => {

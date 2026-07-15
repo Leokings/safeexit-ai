@@ -21,9 +21,10 @@ Required task fields are:
 Tasks on a verified rescue mainnet require an explicit `assetManifest` with
 a bounded batch of ERC-20 contract addresses and explicit ERC-721/ERC-1155
 `collectionAddress` plus `tokenId` entries. SAFEEXIT reads those identified
-assets at a pinned block and may merge the manifest with OKX-backed ERC-20
-discovery so explicitly requested contracts are not omitted when an indexer
-does not return them. Unverified chains are rejected. The currently verified
+assets at a pinned block. The manifest is a hard execution scope: OKX-backed
+discovery may enrich listed ERC-20 metadata and valuation, but it cannot add an
+unrequested signing package. Provider handoff verification rejects any package
+outside that scope. Unverified chains are rejected. The currently verified
 chain IDs are `1`, `56`, `137`, `42161`, `10`, `8453`, `43114`, and `196`.
 
 The canonical manifest is committed into the persisted incident scope.
@@ -58,7 +59,8 @@ provider override, marketplace job ID, source signature, or credential.
 
 The bridge derives its internal idempotency scope from `requestId` and the
 configured provider identity, then returns
-`safeexit-okx-x402-deliverable-v1`. The hosted route may attach a bounded
+`safeexit-okx-x402-deliverable-v2` with an ordered `signingPackages` set for
+every supported requested action. The hosted route may attach a bounded
 `incidentAnalysis` whose authority is explicitly `EXPLANATION_ONLY`; its
 executable plan source is always `DETERMINISTIC`. Model failure falls back to
 deterministic grounded output and cannot alter the signing package. This path
