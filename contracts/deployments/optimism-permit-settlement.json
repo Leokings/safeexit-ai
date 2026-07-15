@@ -1,0 +1,30 @@
+{
+  "warning": "INTERNALLY REVIEWED - NOT INDEPENDENTLY AUDITED",
+  "chainId": 10,
+  "chainName": "OP Mainnet",
+  "factoryAddress": "0x4e59b44847b379578588920cA78FbF26c0B4956C",
+  "contractName": "SafeExitPermitSettlementV2",
+  "address": "0x73E8A8d165EC9710aC27f91B0Df02975CC4a48d0",
+  "salt": "0x5f9ff403b1d03c37b6b593e2795f69cd3b90d167b8ecb567f06096e5b611b0e9",
+  "initCodeHash": "0x221e829db2a61937f2958bae8cbf5e6ea51474e220d5908ae41f77a1894abcdc",
+  "expectedRuntimeHash": "0xdd90cd4be84e1aedc9d16a9da8bdf6caa040dda8b2b9f312c433caf6be1ade55",
+  "expectedTemplateHash": "0x7541ad91f5820c9dc006d552d12da784203a41920f0405a1ed3edc773b3ab889",
+  "actualRuntimeHash": "0xdd90cd4be84e1aedc9d16a9da8bdf6caa040dda8b2b9f312c433caf6be1ade55",
+  "actualTemplateHash": "0x7541ad91f5820c9dc006d552d12da784203a41920f0405a1ed3edc773b3ab889",
+  "behavior": {
+    "verified": true,
+    "reason": null
+  },
+  "deploymentTransaction": {
+    "verified": true,
+    "hash": "0xa994fa0c83a9a4fb2cc810d8719dc648d4aef259b0c4fa090e0c37f08d106344",
+    "blockNumber": "154263464",
+    "from": "0x63038a310a46ac61a59c1bc5ead5fe41040ef38e",
+    "to": "0x4e59b44847b379578588920ca78fbf26c0b4956c",
+    "value": "0",
+    "payloadHash": "0xba5029ff13a8de8fb877ac7cad07f6b8cc1d8fda48f6d2712630a87d10acb756"
+  },
+  "status": "VERIFIED",
+  "observedAtBlock": "154263805",
+  "generatedAt": "2026-07-15T14:39:47.580Z"
+}

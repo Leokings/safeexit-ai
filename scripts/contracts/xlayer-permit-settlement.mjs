@@ -7,6 +7,7 @@ import {
   concatHex,
   createPublicClient,
   defineChain,
+  formatEther,
   getAddress,
   getCreate2Address,
   hashDomain,
@@ -15,12 +16,99 @@ import {
   stringToHex,
   zeroHash,
 } from "viem";
+import {
+  arbitrum,
+  avalanche,
+  base,
+  bsc,
+  mainnet,
+  optimism,
+  polygon,
+} from "viem/chains";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const rootDirectory = resolve(scriptDirectory, "../..");
 const requestedCommand = process.argv[2] ?? "prepare";
 const targetVersion = requestedCommand.endsWith("-v1") ? "1" : "2";
 const command = requestedCommand.replace(/-v1$/, "");
+const requestedChainKey = (process.argv[3] ?? "xlayer").toLowerCase();
+const requestedTransactionHash = process.argv[4]?.trim();
+if (requestedTransactionHash && !/^0x[a-fA-F0-9]{64}$/.test(requestedTransactionHash)) {
+  throw new Error("Deployment transaction hash must be a 32-byte hex value");
+}
+
+const xLayer = defineChain({
+  id: 196,
+  name: "X Layer",
+  nativeCurrency: { name: "OKB", symbol: "OKB", decimals: 18 },
+  rpcUrls: { default: { http: ["https://rpc.xlayer.tech", "https://xlayerrpc.okx.com"] } },
+  blockExplorers: {
+    default: { name: "OKX Explorer", url: "https://www.okx.com/web3/explorer/xlayer" },
+  },
+});
+
+const chainTargets = {
+  ethereum: {
+    chain: mainnet,
+    deploymentName: "ethereum-permit-settlement.json",
+    rpcEnvironmentVariable: "ETHEREUM_MAINNET_RPC_URL",
+    publicRpcUrl: "https://ethereum-rpc.publicnode.com",
+  },
+  bnb: {
+    chain: bsc,
+    deploymentName: "bnb-permit-settlement.json",
+    rpcEnvironmentVariable: "BNB_MAINNET_RPC_URL",
+    publicRpcUrl: "https://56.rpc.thirdweb.com",
+  },
+  polygon: {
+    chain: polygon,
+    deploymentName: "polygon-permit-settlement.json",
+    rpcEnvironmentVariable: "POLYGON_MAINNET_RPC_URL",
+    publicRpcUrl: "https://polygon.drpc.org",
+  },
+  arbitrum: {
+    chain: arbitrum,
+    deploymentName: "arbitrum-permit-settlement.json",
+    rpcEnvironmentVariable: "ARBITRUM_MAINNET_RPC_URL",
+    publicRpcUrl: "https://arb1.arbitrum.io/rpc",
+  },
+  optimism: {
+    chain: optimism,
+    deploymentName: "optimism-permit-settlement.json",
+    rpcEnvironmentVariable: "OPTIMISM_MAINNET_RPC_URL",
+    publicRpcUrl: "https://mainnet.optimism.io",
+  },
+  base: {
+    chain: base,
+    deploymentName: "base-permit-settlement.json",
+    rpcEnvironmentVariable: "BASE_MAINNET_RPC_URL",
+    publicRpcUrl: "https://mainnet.base.org",
+  },
+  avalanche: {
+    chain: avalanche,
+    deploymentName: "avalanche-permit-settlement.json",
+    rpcEnvironmentVariable: "AVALANCHE_MAINNET_RPC_URL",
+    publicRpcUrl: "https://api.avax.network/ext/bc/C/rpc",
+  },
+  xlayer: {
+    chain: xLayer,
+    deploymentName: "xlayer-permit-settlement.json",
+    rpcEnvironmentVariable: "XLAYER_MAINNET_RPC_URL",
+    legacyRpcEnvironmentVariable: "XLAYER_RPC_URL",
+    publicRpcUrl: "https://rpc.xlayer.tech",
+  },
+};
+
+const selectedTarget = chainTargets[requestedChainKey];
+if (!selectedTarget) {
+  throw new Error(
+    `Unknown chain ${requestedChainKey}. Expected one of: ${Object.keys(chainTargets).join(", ")}`,
+  );
+}
+if (targetVersion === "1" && requestedChainKey !== "xlayer") {
+  throw new Error("The archived V1 settlement verifier is supported only for X Layer");
+}
+const selectedChain = selectedTarget.chain;
 const target = targetVersion === "1"
   ? {
       sourceName: "SafeExitPermitSettlement.sol",
@@ -31,7 +119,7 @@ const target = targetVersion === "1"
   : {
       sourceName: "SafeExitPermitSettlementV2.sol",
       contractName: "SafeExitPermitSettlementV2",
-      deploymentName: "xlayer-permit-settlement.json",
+      deploymentName: selectedTarget.deploymentName,
       saltLabel: "SafeExit X Layer permit settlement v2:SafeExitPermitSettlementV2",
     };
 const { sourceName, contractName } = target;
@@ -45,13 +133,6 @@ const expectedFactoryRuntime =
 const deploymentSalt = keccak256(
   stringToHex(target.saltLabel),
 );
-
-const xLayer = defineChain({
-  id: 196,
-  name: "X Layer",
-  nativeCurrency: { name: "OKB", symbol: "OKB", decimals: 18 },
-  rpcUrls: { default: { http: ["https://rpc.xlayer.tech"] } },
-});
 
 const settlementDomain = {
   name: "SafeExit Permit Settlement",
@@ -113,7 +194,13 @@ const verificationAbi = [
 ];
 
 function rpcUrl() {
-  return process.env.XLAYER_RPC_URL?.trim() || xLayer.rpcUrls.default.http[0];
+  return (
+    process.env[selectedTarget.rpcEnvironmentVariable]?.trim() ||
+    (selectedTarget.legacyRpcEnvironmentVariable
+      ? process.env[selectedTarget.legacyRpcEnvironmentVariable]?.trim()
+      : undefined) ||
+    selectedTarget.publicRpcUrl
+  );
 }
 
 async function loadArtifact() {
@@ -156,16 +243,32 @@ async function loadArtifact() {
 }
 
 async function createVerifiedClient() {
-  const client = createPublicClient({ chain: xLayer, transport: http(rpcUrl()) });
+  const client = createPublicClient({
+    chain: selectedChain,
+    transport: http(rpcUrl(), { retryCount: 1, timeout: 15_000 }),
+  });
   const actualChainId = await client.getChainId();
-  if (actualChainId !== xLayer.id) {
-    throw new Error(`Expected X Layer chain ID 196, received ${actualChainId}`);
+  if (actualChainId !== selectedChain.id) {
+    throw new Error(
+      `Expected ${selectedChain.name} chain ID ${selectedChain.id}, received ${actualChainId}`,
+    );
   }
   const factoryRuntime = await client.getCode({ address: factoryAddress });
   if (!factoryRuntime || factoryRuntime.toLowerCase() !== expectedFactoryRuntime.toLowerCase()) {
-    throw new Error("The canonical CREATE2 deployment proxy runtime does not match on X Layer");
+    throw new Error(
+      `The canonical CREATE2 deployment proxy runtime does not match on ${selectedChain.name}`,
+    );
   }
   return client;
+}
+
+async function loadExistingManifest() {
+  try {
+    return JSON.parse(await readFile(deploymentFile, "utf8"));
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return null;
+    throw error;
+  }
 }
 
 function maskImmutables(bytecode, immutableReferences) {
@@ -204,12 +307,12 @@ function expectedImmutableValues(address) {
     _cachedDomainSeparator: hashDomain({
       domain: {
         ...settlementDomain,
-        chainId: xLayer.id,
+        chainId: selectedChain.id,
         verifyingContract: address,
       },
       types: eip712DomainTypes,
     }),
-    _cachedChainId: uint256Word(xLayer.id),
+    _cachedChainId: uint256Word(selectedChain.id),
     _cachedThis: addressWord(address),
     _hashedName: keccak256(stringToHex(settlementDomain.name)),
     _hashedVersion: keccak256(stringToHex(settlementDomain.version)),
@@ -257,7 +360,7 @@ async function verifyBehavior(client, address) {
       fields === "0x0f" &&
       name === settlementDomain.name &&
       version === settlementDomain.version &&
-      chainId === 196n &&
+      chainId === BigInt(selectedChain.id) &&
       verifyingContract.toLowerCase() === address.toLowerCase() &&
       salt === zeroHash &&
       extensions.length === 0 &&
@@ -276,10 +379,42 @@ async function verifyBehavior(client, address) {
   }
 }
 
+async function verifyDeploymentTransaction(client, transactionHash, deploymentData) {
+  const hash = transactionHash;
+  const [transaction, receipt] = await Promise.all([
+    client.getTransaction({ hash }),
+    client.getTransactionReceipt({ hash }),
+  ]);
+  if (receipt.status !== "success") {
+    throw new Error(`Deployment transaction ${hash} did not succeed`);
+  }
+  if (!transaction.to || transaction.to.toLowerCase() !== factoryAddress.toLowerCase()) {
+    throw new Error(`Deployment transaction ${hash} does not target the canonical factory`);
+  }
+  if (transaction.value !== 0n) {
+    throw new Error(`Deployment transaction ${hash} carries a non-zero value`);
+  }
+  const payloadHash = keccak256(transaction.input);
+  const expectedPayloadHash = keccak256(deploymentData);
+  if (payloadHash !== expectedPayloadHash) {
+    throw new Error(`Deployment transaction ${hash} payload does not match the fixed artifact`);
+  }
+  return {
+    verified: true,
+    hash,
+    blockNumber: receipt.blockNumber.toString(),
+    from: transaction.from,
+    to: transaction.to,
+    value: transaction.value.toString(),
+    payloadHash,
+  };
+}
+
 async function prepareOrVerify() {
   const artifact = await loadArtifact();
   const client = await createVerifiedClient();
   const initCodeHash = keccak256(artifact.bytecode);
+  const deploymentData = concatHex([deploymentSalt, artifact.bytecode]);
   const address = getCreate2Address({
     from: factoryAddress,
     salt: deploymentSalt,
@@ -306,6 +441,11 @@ async function prepareOrVerify() {
   const behavior = runtime
     ? await verifyBehavior(client, address)
     : { verified: false, reason: "Contract is not deployed" };
+  const existingManifest = await loadExistingManifest();
+  const transactionHash = requestedTransactionHash ?? existingManifest?.deploymentTransaction?.hash;
+  const deploymentTransaction = runtime && transactionHash
+    ? await verifyDeploymentTransaction(client, transactionHash, deploymentData)
+    : null;
   const status = !runtime
     ? "NOT_DEPLOYED"
     : actualRuntimeHash === expectedRuntimeHash &&
@@ -315,8 +455,8 @@ async function prepareOrVerify() {
       : "CODE_MISMATCH";
   const manifest = {
     warning: "INTERNALLY REVIEWED - NOT INDEPENDENTLY AUDITED",
-    chainId: xLayer.id,
-    chainName: xLayer.name,
+    chainId: selectedChain.id,
+    chainName: selectedChain.name,
     factoryAddress,
     contractName,
     address,
@@ -327,6 +467,7 @@ async function prepareOrVerify() {
     actualRuntimeHash,
     actualTemplateHash,
     behavior,
+    deploymentTransaction,
     status,
     observedAtBlock: blockNumber.toString(),
     generatedAt: new Date().toISOString(),
@@ -335,7 +476,7 @@ async function prepareOrVerify() {
   await mkdir(dirname(deploymentFile), { recursive: true });
   await writeFile(deploymentFile, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`);
-  if (process.argv[2] === "verify" && status !== "VERIFIED") {
+  if (command === "verify" && status !== "VERIFIED") {
     process.exitCode = 1;
   }
 }
@@ -343,6 +484,46 @@ async function prepareOrVerify() {
 async function printPayload() {
   const artifact = await loadArtifact();
   process.stdout.write(concatHex([deploymentSalt, artifact.bytecode]));
+}
+
+async function printEstimate() {
+  const artifact = await loadArtifact();
+  const client = await createVerifiedClient();
+  const deploymentData = concatHex([deploymentSalt, artifact.bytecode]);
+  const address = getCreate2Address({
+    from: factoryAddress,
+    salt: deploymentSalt,
+    bytecodeHash: keccak256(artifact.bytecode),
+  });
+  const existingCode = await client.getCode({ address });
+  if (existingCode) {
+    process.stdout.write(`${JSON.stringify({
+      chainId: selectedChain.id,
+      chainName: selectedChain.name,
+      address,
+      status: "ALREADY_DEPLOYED",
+    }, null, 2)}\n`);
+    return;
+  }
+  const [estimatedGas, fees, blockNumber] = await Promise.all([
+    client.estimateGas({ to: factoryAddress, data: deploymentData }),
+    client.estimateFeesPerGas(),
+    client.getBlockNumber(),
+  ]);
+  const feePerGas = fees.maxFeePerGas ?? fees.gasPrice ?? null;
+  const maximumCostWei = feePerGas ? estimatedGas * feePerGas : null;
+  process.stdout.write(`${JSON.stringify({
+    chainId: selectedChain.id,
+    chainName: selectedChain.name,
+    nativeSymbol: selectedChain.nativeCurrency.symbol,
+    address,
+    status: "READY_TO_DEPLOY",
+    estimatedGas: estimatedGas.toString(),
+    feePerGasWei: feePerGas?.toString() ?? null,
+    maximumCostWei: maximumCostWei?.toString() ?? null,
+    maximumCostNative: maximumCostWei ? formatEther(maximumCostWei) : null,
+    observedAtBlock: blockNumber.toString(),
+  }, null, 2)}\n`);
 }
 
 async function serveDeployer() {
@@ -362,9 +543,24 @@ async function serveDeployer() {
     client.estimateGas({ to: factoryAddress, data: deploymentData }),
     client.estimateFeesPerGas(),
   ]);
-  const maximumCostWei = fees.maxFeePerGas
-    ? estimatedGas * fees.maxFeePerGas
-    : null;
+  const feePerGas = fees.maxFeePerGas ?? fees.gasPrice ?? null;
+  const maximumCostWei = feePerGas ? estimatedGas * feePerGas : null;
+  const maximumCostDisplay = maximumCostWei
+    ? `${formatEther(maximumCostWei)} ${selectedChain.nativeCurrency.symbol}`
+    : "unavailable";
+  const chainIdHex = `0x${selectedChain.id.toString(16)}`;
+  const explorerUrl = selectedChain.blockExplorers?.default.url;
+  if (!explorerUrl) {
+    throw new Error(`${selectedChain.name} has no configured block explorer`);
+  }
+  const walletRpcUrls = [
+    selectedTarget.publicRpcUrl,
+    ...selectedChain.rpcUrls.default.http,
+  ].filter((value, index, values) => values.indexOf(value) === index);
+  const connectSources = walletRpcUrls
+    .map((value) => new URL(value).origin)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join(" ");
   const port = Number(process.env.SAFEEXIT_DEPLOYER_PORT?.trim() || "4175");
   if (!Number.isSafeInteger(port) || port < 1_024 || port > 65_535) {
     throw new Error("SAFEEXIT_DEPLOYER_PORT must be an integer from 1024 to 65535");
@@ -381,17 +577,20 @@ async function serveDeployer() {
 </head>
 <body>
   <main class="shell">
-    <div class="eyebrow">Operator-only / X Layer mainnet</div>
+    <div class="eyebrow">Operator-only / ${selectedChain.name} mainnet</div>
     <h1>Deploy permit settlement</h1>
     <div class="panel">
       <div class="warning">INTERNALLY REVIEWED, NOT INDEPENDENTLY AUDITED. Deploy only the fixed, verified artifact shown below.</div>
       <div class="grid">
         <div class="label">Expected contract</div><div class="value">${address}</div>
         <div class="label">CREATE2 factory</div><div class="value">${factoryAddress}</div>
-        <div class="label">Chain</div><div class="value">X Layer mainnet (196 / 0xC4)</div>
-        <div class="label">Transaction value</div><div class="value">0 OKB</div>
+        <div class="label">Chain</div><div class="value">${selectedChain.name} (${selectedChain.id} / ${chainIdHex})</div>
+        <div class="label">Transaction value</div><div class="value">0 ${selectedChain.nativeCurrency.symbol}</div>
         <div class="label">Estimated gas</div><div class="value">${estimatedGas.toString()}</div>
-        <div class="label">Estimated max cost</div><div class="value">${maximumCostWei?.toString() ?? "unavailable"} wei</div>
+        <div class="label">Estimated max cost</div><div class="value">${maximumCostDisplay}${maximumCostWei ? ` (${maximumCostWei.toString()} wei)` : ""}</div>
+        <div class="label">Connected account</div><div id="account" class="value">Connect wallet to check</div>
+        <div class="label">Connected balance</div><div id="balance" class="value">Connect wallet to check</div>
+        <div class="label">Deployment transaction</div><div id="transaction" class="value">Not submitted</div>
         <div class="label">Payload hash</div><div class="value">${keccak256(deploymentData)}</div>
       </div>
       <label class="confirm"><input id="risk" type="checkbox"> <span>I understand this deploys internally reviewed code that has not received an independent audit and requires an OKX Wallet confirmation.</span></label>
@@ -406,24 +605,47 @@ async function serveDeployer() {
     const factory = ${JSON.stringify(factoryAddress)};
     const expected = ${JSON.stringify(address)};
     const data = ${JSON.stringify(deploymentData)};
-    const chainId = "0xc4";
+    const chainId = ${JSON.stringify(chainIdHex)};
+    const chainName = ${JSON.stringify(selectedChain.name)};
+    const nativeCurrency = ${JSON.stringify(selectedChain.nativeCurrency)};
+    const rpcUrls = ${JSON.stringify(walletRpcUrls)};
+    const explorerUrl = ${JSON.stringify(explorerUrl)};
+    const maximumCostWei = ${JSON.stringify(maximumCostWei?.toString() ?? null)};
     let provider;
     let account;
+    let balanceSufficient = false;
     const status = document.getElementById("status");
     const deploy = document.getElementById("deploy");
     const risk = document.getElementById("risk");
+    const transactionElement = document.getElementById("transaction");
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     function providerCode(error) {
       return error && typeof error === "object" && "code" in error ? Number(error.code) : undefined;
     }
     async function discoverOkx() {
       if (window.okxwallet) return window.okxwallet;
+      const injectedProviders = Array.isArray(window.ethereum?.providers)
+        ? window.ethereum.providers
+        : [];
+      const injectedOkx = injectedProviders.find((candidate) =>
+        candidate?.isOkxWallet === true || candidate?.isOKExWallet === true
+      );
+      if (injectedOkx) return injectedOkx;
+      if (window.ethereum?.isOkxWallet === true || window.ethereum?.isOKExWallet === true) {
+        return window.ethereum;
+      }
       let announced;
       const listener = (event) => {
         const detail = event.detail;
         const name = String(detail?.info?.name || "").toLowerCase();
-        const rdns = String(detail?.info?.rdns || "").toLowerCase();
-        if (name.includes("okx") || rdns.includes("okx")) announced = detail.provider;
+        const rdnsLabels = String(detail?.info?.rdns || "").toLowerCase().split(".");
+        if (
+          detail?.provider?.isOkxWallet === true ||
+          detail?.provider?.isOKExWallet === true ||
+          name === "okx wallet" ||
+          rdnsLabels.includes("okx") ||
+          rdnsLabels.includes("okex")
+        ) announced = detail.provider;
       };
       window.addEventListener("eip6963:announceProvider", listener);
       window.dispatchEvent(new Event("eip6963:requestProvider"));
@@ -440,28 +662,54 @@ async function serveDeployer() {
         if (providerCode(error) !== 4902) throw error;
         await provider.request({ method: "wallet_addEthereumChain", params: [{
           chainId,
-          chainName: "X Layer mainnet",
-          nativeCurrency: { name: "OKB", symbol: "OKB", decimals: 18 },
-          rpcUrls: ["https://rpc.xlayer.tech", "https://xlayerrpc.okx.com"],
-          blockExplorerUrls: ["https://www.okx.com/web3/explorer/xlayer"],
+          chainName,
+          nativeCurrency,
+          rpcUrls,
+          blockExplorerUrls: [explorerUrl],
         }] });
       }
     }
     function refreshButton() {
-      deploy.disabled = !(provider && account && risk.checked);
+      deploy.disabled = !(provider && account && balanceSufficient && risk.checked);
+    }
+    function formatNativeWei(value) {
+      const unit = 10n ** 18n;
+      const whole = value / unit;
+      const fraction = (value % unit).toString().padStart(18, "0").replace(/0+$/, "").slice(0, 8);
+      return fraction ? whole.toString() + "." + fraction : whole.toString();
+    }
+    async function refreshBalance() {
+      const balance = await provider.request({ method: "eth_getBalance", params: [account, "latest"] });
+      const balanceValue = BigInt(balance);
+      document.getElementById("balance").textContent =
+        formatNativeWei(balanceValue) + " " + nativeCurrency.symbol + " (" + balanceValue.toString() + " wei)";
+      if (maximumCostWei && balanceValue < BigInt(maximumCostWei)) {
+        balanceSufficient = false;
+        throw new Error("Connected account does not have enough native gas for the current estimate");
+      }
+      balanceSufficient = true;
+      refreshButton();
     }
     risk.addEventListener("change", refreshButton);
     document.getElementById("connect").addEventListener("click", async () => {
       try {
         provider = await discoverOkx();
-        if (!provider) throw new Error("OKX Wallet was not injected into this localhost page");
+        if (!provider) {
+          throw new Error(
+            "OKX Wallet was not detected. Enable its site access for this localhost origin, disable conflicting wallet injections for this tab, and refresh.",
+          );
+        }
         const accounts = await provider.request({ method: "eth_requestAccounts" });
         if (!Array.isArray(accounts) || typeof accounts[0] !== "string") throw new Error("No wallet account returned");
         account = accounts[0];
+        document.getElementById("account").textContent = account;
         await ensureChain();
+        await refreshBalance();
         status.textContent = "Connected: " + account;
         refreshButton();
       } catch (error) {
+        balanceSufficient = false;
+        refreshButton();
         status.textContent = error instanceof Error ? error.message : "Wallet connection failed";
       }
     });
@@ -485,13 +733,15 @@ async function serveDeployer() {
         if (typeof hash !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(hash)) {
           throw new Error("OKX Wallet returned an invalid deployment transaction hash");
         }
-        status.textContent = "Submitted: ";
         const link = document.createElement("a");
         link.target = "_blank";
         link.rel = "noreferrer";
-        link.href = "https://www.okx.com/web3/explorer/xlayer/tx/" + hash;
+        const explorerBase = explorerUrl.endsWith("/") ? explorerUrl.slice(0, -1) : explorerUrl;
+        link.href = explorerBase + "/tx/" + hash;
         link.textContent = hash;
-        status.appendChild(link);
+        transactionElement.textContent = "";
+        transactionElement.appendChild(link);
+        status.textContent = "Submitted. Waiting for confirmation.";
         for (let attempt = 0; attempt < 90; attempt += 1) {
           const receipt = await provider.request({ method: "eth_getTransactionReceipt", params: [hash] });
           if (receipt) {
@@ -520,7 +770,7 @@ async function serveDeployer() {
     }
     response.writeHead(200, {
       "Cache-Control": "no-store",
-      "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://rpc.xlayer.tech https://xlayerrpc.okx.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+      "Content-Security-Policy": `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src ${connectSources}; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
       "Content-Type": "text/html; charset=utf-8",
       "Referrer-Policy": "no-referrer",
       "X-Content-Type-Options": "nosniff",
@@ -537,6 +787,8 @@ async function serveDeployer() {
 
 if (command === "payload") {
   await printPayload();
+} else if (command === "estimate") {
+  await printEstimate();
 } else if (command === "serve") {
   await serveDeployer();
 } else if (command === "prepare" || command === "verify") {

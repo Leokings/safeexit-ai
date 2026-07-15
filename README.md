@@ -215,10 +215,12 @@ destination-bound SAFEEXIT authorization; the destination sends one
 
 Permit settlement is asset-agnostic: there is no token or NFT allowlist. Any
 submitted asset may use a route when its capability checks pass and the exact
-chain settlement contract passes onchain identity verification. X Layer's
-deterministic contract address is
-`0x73E8A8d165EC9710aC27f91B0Df02975CC4a48d0`; the route remains disabled until
-that address is deployed and verified.
+chain settlement contract passes onchain identity verification. Ethereum, BNB
+Smart Chain, Polygon, Arbitrum, Optimism, Base, Avalanche, and X Layer use the
+same deterministic contract address:
+`0x73E8A8d165EC9710aC27f91B0Df02975CC4a48d0`. Every chain remains fail-closed
+unless the deployed runtime matches its pinned chain-specific hash and the
+shared immutable template hash.
 
 Authorization signatures remain in browser memory and are never sent to or
 stored by SAFEEXIT. Assets without a verified permit route, native currency,

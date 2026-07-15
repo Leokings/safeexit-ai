@@ -92,11 +92,11 @@ verifies an RPC block read before reporting ready.
 
 Every configured multichain endpoint is checked for HTTPS, expected chain ID,
 and a current block number. These URLs may contain provider credentials and
-must be entered as encrypted server-only Vercel variables. X Layer (chain 196,
-the OKX network) is currently rescue-enabled. The other endpoints are
-configuration-only until their scanner, planner, simulation, and settlement
-adapters are verified; their presence must not be interpreted as execution
-support.
+must be entered as encrypted server-only Vercel variables. Ethereum, BNB Smart
+Chain, Polygon, Arbitrum, Optimism, Base, Avalanche, and X Layer are enabled for
+verified read-only preflight and permit settlement. Every settlement route
+still fails closed unless the exact chain-specific runtime hash verifies at the
+pinned deterministic address.
 
 Live discovery is intentionally partial. Native and OKX-discovered ERC-20
 balances are verified by RPC. NFT discovery, approval discovery, Permit2,
@@ -338,11 +338,13 @@ and receipt-verification core are implemented. Mapping them to the official
 OKX A2A transport and an Agentic Wallet destination adapter remains
 official-docs-required and is not represented as connected.
 
-## X Layer mainnet destination-paid recovery
+## Supported EVM mainnet destination-paid recovery
 
-For an incident created on chain ID `196`, the rescue dashboard scans an
-incident-committed batch of ERC-20, ERC-721, and ERC-1155 assets and ranks
-destination-paid routes. ERC-3009 requires
+For an incident on Ethereum (`1`), BNB Smart Chain (`56`), Polygon (`137`),
+Arbitrum (`42161`), Optimism (`10`), Base (`8453`), Avalanche (`43114`), or X
+Layer (`196`), the rescue dashboard scans an incident-committed batch of
+ERC-20, ERC-721, and ERC-1155 assets and ranks destination-paid routes.
+ERC-3009 requires
 verified type-hash, EIP-712 domain, domain separator, and authorization-state
 reads. ERC-2612 requires a verified EIP-712 domain and nonce read plus the
 verified SAFEEXIT settlement contract. The source signs the token permit and a
@@ -361,13 +363,14 @@ support, a verifiable EIP-712 domain, and the token-specific nonce. The source
 signs both the NFT permit and the SAFEEXIT destination commitment before the
 destination submits one `settleERC4494` call.
 
-The deterministic X Layer settlement address is
+The deterministic settlement address on every supported mainnet is
 `0x73E8A8d165EC9710aC27f91B0Df02975CC4a48d0`. Run
-`npm run contracts:prepare:settlement:xlayer` to reproduce it and
-`npm run contracts:verify:settlement:xlayer` after deployment. Production
-preflight fails closed until code and all domain/type-hash constants verify at
-that exact address. The contract is internally reviewed but must not be
-presented as independently audited.
+`npm run contracts:prepare:settlement:all` to reproduce every manifest and
+`npm run contracts:verify:settlement:all` to verify every deployed runtime.
+Production preflight fails closed until code, immutable template, and all
+domain/type-hash constants verify at that exact address for the selected
+chain. The contract is internally reviewed but must not be presented as
+independently audited.
 
 No server credential, relayer key, or private key is used. The short-lived
 signature remains only in the browser tab. Source-funded transactions are
@@ -393,10 +396,10 @@ permit-only.
 - The normalized provider bridge is connected to SAFEEXIT's hosted API, but the
   operator's OKX runtime still performs marketplace acceptance and encrypted
   delivery. SAFEEXIT does not expose a public unauthenticated webhook.
-- Native OKB remains blocked. `@safeexit/adapters` defines the mandatory proof
-  for EIP-7702 sponsorship and private atomic bundles, but exposes neither as
-  executable until official X Layer integration details and an independent
-  delegate-contract audit are available.
+- Native currency remains blocked on every chain. `@safeexit/adapters` defines
+  the mandatory proof for EIP-7702 sponsorship and private atomic bundles, but
+  exposes neither as executable until official target-chain integration
+  details and an independent delegate-contract audit are available.
 - Production request limits are stored atomically in PostgreSQL and fail closed
   if that shared store is unavailable. The x402 limit is evaluated before the
   payment middleware so a throttled request is not charged first. Vercel
