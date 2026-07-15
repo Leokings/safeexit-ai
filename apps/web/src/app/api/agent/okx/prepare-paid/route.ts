@@ -55,6 +55,9 @@ async function preparePaidRescue(request: NextRequest): Promise<NextResponse> {
       input,
     );
     const job = await service.getJob(deliverable.safeExitJobId);
+    if (!job.incident) {
+      throw new Error("Paid SAFEEXIT job is missing its incident scope");
+    }
     const analysis = await answerAgentJobQuestion(
       job,
       SAFEEXIT_PAID_ANALYSIS_QUESTION,
@@ -62,6 +65,10 @@ async function preparePaidRescue(request: NextRequest): Promise<NextResponse> {
     );
     const response = okxX402SigningDeliverableSchema.parse({
       ...deliverable,
+      dashboardUrl: new URL(
+        `/rescue/${encodeURIComponent(job.incident.id)}`,
+        environment.publicBaseUrl,
+      ).toString(),
       continuation: issuePaidContinuation(environment, {
         requestId: input.requestId,
         safeExitJobId: deliverable.safeExitJobId,

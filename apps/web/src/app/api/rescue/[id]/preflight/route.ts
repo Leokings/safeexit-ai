@@ -919,10 +919,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       scan,
       adapterCandidates: [],
     });
+    const planId = `plan:${incident.id}:mainnet:latest`;
     const planPayload: Omit<RescuePlan, "integrityHash"> = {
-      id: `plan:${incident.id}:mainnet:latest`,
+      id: planId,
       incidentId: generatedPlan.incidentId,
-      version: generatedPlan.version,
+      version: await repository.resolveRescuePlanVersion(incident.id, planId),
       policyVersion: generatedPlan.policyVersion,
       chainId: generatedPlan.chainId,
       sourceAddress: generatedPlan.sourceAddress,

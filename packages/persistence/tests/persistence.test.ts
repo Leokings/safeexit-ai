@@ -277,4 +277,37 @@ describe("repository validation boundary", () => {
     ).rejects.toThrow();
     expect(upsert).toHaveBeenCalledOnce();
   });
+
+  it("reuses a stable workspace plan version or allocates after existing agent plans", async () => {
+    const findUnique = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ incidentId: incident.id, version: 2 });
+    const aggregate = vi.fn().mockResolvedValue({ _max: { version: 1 } });
+    const repository = new PrismaSafeExitRepository({
+      rescuePlan: { findUnique, aggregate },
+    } as never);
+
+    await expect(repository.resolveRescuePlanVersion(
+      incident.id,
+      "plan:incident-1:mainnet:latest",
+    )).resolves.toBe(2);
+    await expect(repository.resolveRescuePlanVersion(
+      incident.id,
+      "plan:incident-1:mainnet:latest",
+    )).resolves.toBe(2);
+    expect(aggregate).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a stable plan ID already owned by another incident", async () => {
+    const repository = new PrismaSafeExitRepository({
+      rescuePlan: {
+        findUnique: vi.fn().mockResolvedValue({ incidentId: "incident-other", version: 1 }),
+      },
+    } as never);
+
+    await expect(repository.resolveRescuePlanVersion(
+      incident.id,
+      "plan:shared",
+    )).rejects.toThrow("different incident");
+  });
 });

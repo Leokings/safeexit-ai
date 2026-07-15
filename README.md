@@ -139,6 +139,8 @@ the buyer can refresh the same immutable plan without another x402 charge.
 SAFEEXIT reruns deterministic simulation against current chain state before
 issuing replacement packages. The continuation cannot change the chain,
 source, destination, asset manifest, plan, or execution policy.
+The same response includes the exact incident dashboard URL for buyers who
+prefer a browser wallet handoff over a local agent runtime.
 
 Buyer agents should call this A2MCP endpoint directly. They should not publish
 an A2A task and wait for marketplace events for deterministic preparation.

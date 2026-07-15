@@ -58,12 +58,21 @@ export async function POST(request: Request): Promise<Response> {
         providerAgentId,
       },
     );
+    const service = getAgentIncidentService({ chainId: scope.chainId });
     const deliverable = await getOkxProviderBridge().refreshPaidSigningDeliverable(
-      getAgentIncidentService({ chainId: scope.chainId }),
+      service,
       input,
     );
+    const job = await service.getJob(deliverable.safeExitJobId);
+    if (!job.incident) {
+      throw new Error("Paid SAFEEXIT job is missing its incident scope");
+    }
     const response = okxX402SigningDeliverableSchema.parse({
       ...deliverable,
+      dashboardUrl: new URL(
+        `/rescue/${encodeURIComponent(job.incident.id)}`,
+        environment.publicBaseUrl,
+      ).toString(),
       continuation: issuePaidContinuation(environment, scope),
     });
     return agentJson(response, 200, {

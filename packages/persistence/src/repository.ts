@@ -105,6 +105,28 @@ export class PrismaSafeExitRepository {
     return mapped.domain;
   }
 
+  async resolveRescuePlanVersion(incidentId: string, planId: string): Promise<number> {
+    const existing = await this.client.rescuePlan.findUnique({
+      where: { id: planId },
+      select: { incidentId: true, version: true },
+    });
+    if (existing) {
+      if (existing.incidentId !== incidentId) {
+        throw new Error("Rescue plan ID belongs to a different incident");
+      }
+      return existing.version;
+    }
+    const latest = await this.client.rescuePlan.aggregate({
+      where: { incidentId },
+      _max: { version: true },
+    });
+    const next = (latest._max.version ?? 0) + 1;
+    if (next > 2_147_483_647) {
+      throw new Error("Rescue plan version exceeds the persistence limit");
+    }
+    return next;
+  }
+
   async saveSimulation(value: unknown): Promise<SimulationResult> {
     const domain = (await import("@safeexit/shared")).simulationResultSchema.parse(value);
     const data = mapSimulation(domain);

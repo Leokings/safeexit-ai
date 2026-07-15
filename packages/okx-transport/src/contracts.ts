@@ -163,6 +163,7 @@ export const okxX402SigningDeliverableSchema = z.strictObject({
   walletContext: walletContextSchema,
   signingPackages: z.array(okxSigningPackageEnvelopeSchema).min(1),
   coverage: signingPackageCoverageSchema,
+  dashboardUrl: z.string().url().optional(),
   continuation: okxX402ContinuationSchema.optional(),
   incidentAnalysis: z.strictObject({
     authority: z.literal("EXPLANATION_ONLY"),
