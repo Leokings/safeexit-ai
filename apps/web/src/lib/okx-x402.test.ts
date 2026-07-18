@@ -35,6 +35,9 @@ describe("OKX x402 configuration", () => {
     expect(createSafeExitX402RouteConfig(configuration).description).toContain(
       "No local daemon or filesystem access is required",
     );
+    expect(createSafeExitX402RouteConfig(configuration).description).toContain(
+      "keep packages in memory",
+    );
   });
 
   it("refuses to expose a paid endpoint with incomplete credentials", () => {

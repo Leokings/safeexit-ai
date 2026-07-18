@@ -34,9 +34,13 @@ describe("Safe Exit service discovery", () => {
       localDaemonRequired: false,
       localFilesystemAccessRequired: false,
       conversationHistoryAccessRequired: false,
+      localArtifactPersistenceRequired: false,
     });
     expect(manifest.security).toMatchObject({
       custody: "NON_CUSTODIAL",
+      signingPackageHandling: "MEMORY_ONLY_BY_DEFAULT",
+      sourceSignaturesPersisted: false,
+      signedAuthorizationsPersisted: false,
       privateCredentialsAccepted: false,
       arbitraryCalldataAccepted: false,
     });
@@ -45,6 +49,16 @@ describe("Safe Exit service discovery", () => {
     expect(
       manifest.buyerAgentInstructions.some((instruction) =>
         instruction.includes("Do not inspect local files"),
+      ),
+    ).toBe(true);
+    expect(
+      manifest.buyerAgentInstructions.some((instruction) =>
+        instruction.includes("Do not create local files or artifacts"),
+      ),
+    ).toBe(true);
+    expect(
+      manifest.buyerAgentInstructions.some((instruction) =>
+        instruction.includes("Never persist source signatures"),
       ),
     ).toBe(true);
   });

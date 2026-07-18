@@ -170,10 +170,14 @@ export function createSafeExitServiceManifest(
       localDaemonRequired: false,
       localFilesystemAccessRequired: false,
       conversationHistoryAccessRequired: false,
+      localArtifactPersistenceRequired: false,
     },
     security: {
       custody: "NON_CUSTODIAL",
       sourceSigning: "USER_CONTROLLED_LOCAL_SIGNER",
+      signingPackageHandling: "MEMORY_ONLY_BY_DEFAULT",
+      sourceSignaturesPersisted: false,
+      signedAuthorizationsPersisted: false,
       privateCredentialsAccepted: false,
       arbitraryCalldataAccepted: false,
       prohibitedInputs: [
@@ -187,6 +191,9 @@ export function createSafeExitServiceManifest(
     buyerAgentInstructions: [
       "Call the hosted HTTPS endpoint directly; do not look for a local Safe Exit process.",
       "Do not inspect local files, IDE conversations, or chat history to use this service.",
+      "Render rescue results directly and keep signing packages in memory by default.",
+      "Do not create local files or artifacts unless the user explicitly requests an export.",
+      "Never persist source signatures, signed authorizations, private credentials, or wallet secrets.",
       "Send only public wallet addresses, explicit asset identifiers, and the exact authorization statement.",
       "Never request or transmit a seed phrase, private key, keystore, or raw wallet credential.",
       "Present the returned source, destination, routes, and simulations before requesting local signatures.",

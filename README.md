@@ -155,7 +155,10 @@ the same Zod validator used by the paid route. Paid responses advertise both
 documents through HTTP `Link` headers. Safe Exit does not require a local
 daemon, filesystem access, IDE conversation access, or chat-history access.
 Buyer agents must call the hosted HTTPS endpoint directly and must never look
-for private keys, seed phrases, keystores, or local Safe Exit processes.
+for private keys, seed phrases, keystores, or local Safe Exit processes. They
+must render the response directly and keep signing packages in memory by
+default. Local artifacts may be created only after an explicit user export
+request; source signatures and signed authorizations must never be persisted.
 
 The paid response includes a 24-hour, payment-bound continuation token for
 `POST /api/agent/okx/refresh-paid`. If its short-lived signing packages expire,

@@ -204,7 +204,10 @@ The manifest and JSON Schema routes are public and free. Every paid-endpoint
 response carries `service-desc` and `describedby` HTTP links to them. A buyer
 agent must use the hosted HTTPS service and must not inspect local files,
 conversation stores, or local agent processes. These discovery routes contain
-no credentials, signatures, or private incident data.
+no credentials, signatures, or private incident data. Buyer agents must render
+the response directly and keep signing packages in memory by default. They may
+create a local artifact only after an explicit user export request and must
+never persist source signatures or signed authorizations.
 
 The request body is:
 
