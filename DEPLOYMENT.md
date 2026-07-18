@@ -202,12 +202,14 @@ task event stream unless a custom incident-response engagement is intended.
 
 The manifest and JSON Schema routes are public and free. Every paid-endpoint
 response carries `service-desc` and `describedby` HTTP links to them. A buyer
-agent must use the hosted HTTPS service and must not inspect local files,
-conversation stores, or local agent processes. These discovery routes contain
-no credentials, signatures, or private incident data. Buyer agents must render
-the response directly and keep signing packages in memory by default. They may
-create a local artifact only after an explicit user export request and must
-never persist source signatures or signed authorizations.
+agent uses the hosted Safe Exit provider through a required caller-managed
+runtime. The runtime may be a local agent daemon or a compatible hosted agent;
+it handles x402 payment, wallet signing, destination settlement, and receipt
+reporting. It must not inspect unrelated local files or conversation stores.
+These discovery routes contain no credentials, signatures, or private incident
+data. Signing packages remain in memory by default. A local artifact requires
+an explicit user export request, and source signatures or signed authorizations
+must never be persisted.
 
 The request body is:
 

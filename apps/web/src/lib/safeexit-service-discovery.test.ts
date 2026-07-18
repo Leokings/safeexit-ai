@@ -20,7 +20,7 @@ function record(value: unknown): Record<string, unknown> {
 }
 
 describe("Safe Exit service discovery", () => {
-  it("publishes hosted runtime and credential boundaries", () => {
+  it("publishes hosted provider and buyer-runtime boundaries", () => {
     const manifest = createSafeExitServiceManifest(origin, observedAt);
 
     expect(manifest.agent).toEqual({ id: "5196", name: "Safe Exit" });
@@ -31,7 +31,11 @@ describe("Safe Exit service discovery", () => {
     });
     expect(manifest.runtimeRequirements).toEqual({
       hostedHttpsService: true,
-      localDaemonRequired: false,
+      providerRuntime: "SAFEEXIT_HOSTED",
+      buyerAgentRuntimeRequired: true,
+      buyerAgentRuntimeOwnership: "CALLER_MANAGED",
+      buyerAgentRuntimeLocations: ["LOCAL_DAEMON", "CALLER_HOSTED"],
+      buyerWalletExecutionRequired: true,
       localFilesystemAccessRequired: false,
       conversationHistoryAccessRequired: false,
       localArtifactPersistenceRequired: false,
@@ -48,7 +52,12 @@ describe("Safe Exit service discovery", () => {
       .toEqual([1, 56, 137, 42_161, 10, 8_453, 43_114, 196]);
     expect(
       manifest.buyerAgentInstructions.some((instruction) =>
-        instruction.includes("Do not inspect local files"),
+        instruction.includes("caller-managed buyer-agent runtime"),
+      ),
+    ).toBe(true);
+    expect(
+      manifest.buyerAgentInstructions.some((instruction) =>
+        instruction.includes("Do not inspect unrelated local files"),
       ),
     ).toBe(true);
     expect(
@@ -107,6 +116,8 @@ describe("Safe Exit service discovery", () => {
     expect(headers.get("X-SafeExit-Service-Manifest")).toBe(
       `${origin}${SAFEEXIT_SERVICE_MANIFEST_PATH}`,
     );
-    expect(headers.get("X-SafeExit-Local-Runtime")).toBe("not-required");
+    expect(headers.get("X-SafeExit-Provider-Runtime")).toBe("hosted");
+    expect(headers.get("X-SafeExit-Buyer-Runtime")).toBe("required");
+    expect(headers.get("X-SafeExit-Local-Runtime")).toBe("buyer-managed");
   });
 });

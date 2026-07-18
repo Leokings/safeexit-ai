@@ -62,7 +62,7 @@ export function createSafeExitX402RouteConfig(
       maxTimeoutSeconds: SAFEEXIT_X402_MAX_TIMEOUT_SECONDS,
     },
     description:
-      "Hosted API: prepare deterministic destination-paid SAFEEXIT rescue signing packages. No local daemon or filesystem access is required; keep packages in memory unless the user requests an export.",
+      "Hosted provider API: prepare deterministic destination-paid SAFEEXIT rescue signing packages. A caller-managed buyer-agent runtime is required for payment, wallet signing, settlement, and receipt reporting; keep packages in memory unless the user requests an export.",
     mimeType: "application/json",
     unpaidResponseBody: () => ({
       contentType: "application/json",

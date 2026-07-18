@@ -71,12 +71,13 @@ The paid endpoint exposes its hosted-service contract through free discovery
 resources at `GET /api/agent/okx/manifest` and
 `GET /api/agent/okx/schema`. The `402 Payment Required` response links to both.
 The schema is derived from `okxX402PrepareRequestSchema`, while the manifest
-states that no local daemon, local filesystem, IDE conversation, or chat
-history is needed. Integrators should use those resources instead of trying to
-discover a local Safe Exit runtime. Buyer agents should render the response
-directly and keep signing packages in memory. They must not create artifacts
-unless the user explicitly requests an export, and must never persist source
-signatures or signed authorizations.
+distinguishes the hosted Safe Exit provider from the required caller-managed
+buyer-agent runtime. The buyer runtime may be a local agent daemon or compatible
+hosted agent and is responsible for x402 payment, wallet signing, settlement,
+and receipt reporting. It should use the discovery resources instead of
+inspecting unrelated local files or conversations. Signing packages remain in
+memory by default; artifacts require an explicit export request, and source
+signatures or signed authorizations must never be persisted.
 
 Buyer integrations must invoke the endpoint directly and use a payment wallet
 that is different from the provider payout address. SAFEEXIT rejects

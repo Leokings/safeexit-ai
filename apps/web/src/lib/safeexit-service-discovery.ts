@@ -75,7 +75,7 @@ export function createSafeExitRequestJsonSchema(
   schema.$id = absoluteUrl(baseUrl, SAFEEXIT_REQUEST_SCHEMA_PATH);
   schema.title = "Safe Exit paid rescue preparation request";
   schema.description =
-    "Request accepted by the hosted Safe Exit x402 API service. No local Safe Exit daemon or filesystem access is required.";
+    "Request accepted by the hosted Safe Exit x402 provider API. A caller-managed buyer-agent runtime, running as a local daemon or compatible hosted agent, is required for payment, wallet signing, settlement, and receipt reporting.";
 
   const properties = asJsonObject(schema.properties);
   const walletContext = asJsonObject(properties.walletContext);
@@ -167,7 +167,11 @@ export function createSafeExitServiceManifest(
     },
     runtimeRequirements: {
       hostedHttpsService: true,
-      localDaemonRequired: false,
+      providerRuntime: "SAFEEXIT_HOSTED",
+      buyerAgentRuntimeRequired: true,
+      buyerAgentRuntimeOwnership: "CALLER_MANAGED",
+      buyerAgentRuntimeLocations: ["LOCAL_DAEMON", "CALLER_HOSTED"],
+      buyerWalletExecutionRequired: true,
       localFilesystemAccessRequired: false,
       conversationHistoryAccessRequired: false,
       localArtifactPersistenceRequired: false,
@@ -189,8 +193,9 @@ export function createSafeExitServiceManifest(
       ],
     },
     buyerAgentInstructions: [
-      "Call the hosted HTTPS endpoint directly; do not look for a local Safe Exit process.",
-      "Do not inspect local files, IDE conversations, or chat history to use this service.",
+      "Use a caller-managed buyer-agent runtime, running as a local daemon or compatible hosted agent, to call the Safe Exit HTTPS API.",
+      "The buyer-agent runtime handles x402 payment, source-wallet signing, destination settlement, and receipt reporting.",
+      "Do not inspect unrelated local files, IDE conversations, or chat history to discover or use Safe Exit.",
       "Render rescue results directly and keep signing packages in memory by default.",
       "Do not create local files or artifacts unless the user explicitly requests an export.",
       "Never persist source signatures, signed authorizations, private credentials, or wallet secrets.",
@@ -228,7 +233,9 @@ export function applySafeExitServiceDiscoveryHeaders(
     existingLinks ? `${existingLinks}, ${discoveryLinks}` : discoveryLinks,
   );
   headers.set("X-SafeExit-Service-Manifest", manifestUrl);
-  headers.set("X-SafeExit-Local-Runtime", "not-required");
+  headers.set("X-SafeExit-Provider-Runtime", "hosted");
+  headers.set("X-SafeExit-Buyer-Runtime", "required");
+  headers.set("X-SafeExit-Local-Runtime", "buyer-managed");
 }
 
 export function safeExitPublicDiscoveryHeaders(

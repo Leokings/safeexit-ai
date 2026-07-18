@@ -33,7 +33,7 @@ describe("OKX x402 configuration", () => {
       price: "$0.10",
     });
     expect(createSafeExitX402RouteConfig(configuration).description).toContain(
-      "No local daemon or filesystem access is required",
+      "caller-managed buyer-agent runtime is required",
     );
     expect(createSafeExitX402RouteConfig(configuration).description).toContain(
       "keep packages in memory",
