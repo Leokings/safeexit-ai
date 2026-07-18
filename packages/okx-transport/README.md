@@ -67,6 +67,14 @@ deterministic grounded output and cannot alter the signing package. This path
 avoids negotiation, event polling, and file delivery. The agent-to-agent path
 remains available for custom incident work.
 
+The paid endpoint exposes its hosted-service contract through free discovery
+resources at `GET /api/agent/okx/manifest` and
+`GET /api/agent/okx/schema`. The `402 Payment Required` response links to both.
+The schema is derived from `okxX402PrepareRequestSchema`, while the manifest
+states that no local daemon, local filesystem, IDE conversation, or chat
+history is needed. Integrators should use those resources instead of trying to
+discover a local Safe Exit runtime.
+
 Buyer integrations must invoke the endpoint directly and use a payment wallet
 that is different from the provider payout address. SAFEEXIT rejects
 self-payment credentials before settlement so an invalid test fails quickly

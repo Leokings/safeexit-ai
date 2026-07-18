@@ -142,6 +142,21 @@ code still writes the response and remains the sole source of executable plan
 data. No negotiation loop, polling worker, or encrypted report file is
 involved.
 
+Buyer agents can inspect the hosted integration contract without paying:
+
+```text
+GET /api/agent/okx/manifest
+GET /api/agent/okx/schema
+```
+
+The manifest declares the remote endpoint, supported chains, execution paths,
+request example, and security boundaries. The JSON Schema is generated from
+the same Zod validator used by the paid route. Paid responses advertise both
+documents through HTTP `Link` headers. Safe Exit does not require a local
+daemon, filesystem access, IDE conversation access, or chat-history access.
+Buyer agents must call the hosted HTTPS endpoint directly and must never look
+for private keys, seed phrases, keystores, or local Safe Exit processes.
+
 The paid response includes a 24-hour, payment-bound continuation token for
 `POST /api/agent/okx/refresh-paid`. If its short-lived signing packages expire,
 the buyer can refresh the same immutable plan without another x402 charge.

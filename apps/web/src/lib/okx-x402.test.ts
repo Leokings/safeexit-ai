@@ -32,6 +32,9 @@ describe("OKX x402 configuration", () => {
       network: "eip155:196",
       price: "$0.10",
     });
+    expect(createSafeExitX402RouteConfig(configuration).description).toContain(
+      "No local daemon or filesystem access is required",
+    );
   });
 
   it("refuses to expose a paid endpoint with incomplete credentials", () => {

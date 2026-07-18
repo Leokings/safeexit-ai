@@ -30,6 +30,7 @@ import {
   inspectX402Payment,
 } from "@/lib/okx-x402-request";
 import { issuePaidContinuation } from "@/lib/paid-continuation";
+import { applySafeExitServiceDiscoveryHeaders } from "@/lib/safeexit-service-discovery";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -184,6 +185,8 @@ function observePaidHandler(
             },
           )
         : await handler(request);
+
+    applySafeExitServiceDiscoveryHeaders(response.headers, request.url);
 
     console.info(
       JSON.stringify({

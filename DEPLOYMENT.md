@@ -171,6 +171,8 @@ The paid direct endpoint is separate:
 
 ```text
 POST /api/agent/okx/prepare-paid
+GET  /api/agent/okx/manifest
+GET  /api/agent/okx/schema
 ```
 
 It is protected by the official OKX x402 Next.js wrapper, charges `$0.10` on
@@ -197,6 +199,12 @@ SAFEEXIT rejects that case with `409 X402_SELF_PAYMENT_UNSUPPORTED` before
 verification or settlement. For the low-latency path, call this A2MCP endpoint
 directly. Do not wrap the request in an A2A task or wait for the marketplace
 task event stream unless a custom incident-response engagement is intended.
+
+The manifest and JSON Schema routes are public and free. Every paid-endpoint
+response carries `service-desc` and `describedby` HTTP links to them. A buyer
+agent must use the hosted HTTPS service and must not inspect local files,
+conversation stores, or local agent processes. These discovery routes contain
+no credentials, signatures, or private incident data.
 
 The request body is:
 
