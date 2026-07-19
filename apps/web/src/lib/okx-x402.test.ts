@@ -8,6 +8,21 @@ import {
   SAFEEXIT_X402_PRICE,
 } from "./okx-x402-config";
 
+const discoveryInput = {
+  example: {
+    schemaVersion: "safeexit-okx-x402-v1",
+    requestId: "safeexit-request-test",
+  },
+  schema: {
+    type: "object",
+    properties: {
+      schemaVersion: { const: "safeexit-okx-x402-v1" },
+      requestId: { type: "string" },
+    },
+    required: ["schemaVersion", "requestId"],
+  },
+};
+
 function configuredEnvironment() {
   return parseDeploymentEnvironment({
     NODE_ENV: "production",
@@ -27,17 +42,33 @@ describe("OKX x402 configuration", () => {
       payTo: "0x4ab2b4be420a82031dc155c0be856ae383e0ba7e",
       price: SAFEEXIT_X402_PRICE,
     });
-    expect(createSafeExitX402RouteConfig(configuration).accepts).toMatchObject({
+    const routeConfig = createSafeExitX402RouteConfig(
+      configuration,
+      discoveryInput,
+    );
+    expect(routeConfig.accepts).toMatchObject({
       scheme: "exact",
       network: "eip155:196",
       price: "$0.10",
     });
-    expect(createSafeExitX402RouteConfig(configuration).description).toContain(
+    expect(routeConfig.description).toContain(
       "caller-managed buyer-agent runtime is required",
     );
-    expect(createSafeExitX402RouteConfig(configuration).description).toContain(
+    expect(routeConfig.description).toContain(
       "keep packages in memory",
     );
+    expect(routeConfig.extensions.bazaar.info.input).toEqual({
+      type: "http",
+      method: "POST",
+      bodyType: "json",
+      body: discoveryInput.example,
+    });
+    expect(
+      routeConfig.extensions.bazaar.schema.properties.input.properties.body,
+    ).toBe(discoveryInput.schema);
+    expect(
+      routeConfig.extensions.bazaar.schema.properties.input.properties.method,
+    ).toEqual({ type: "string", enum: ["POST"] });
   });
 
   it("refuses to expose a paid endpoint with incomplete credentials", () => {

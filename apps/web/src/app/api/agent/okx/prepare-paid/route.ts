@@ -1,4 +1,7 @@
-import { withX402 } from "@okxweb3/x402-next";
+import {
+  withX402FromHTTPServer,
+  x402HTTPResourceServer,
+} from "@okxweb3/x402-next";
 import {
   okxX402PrepareRequestSchema,
   okxX402SigningDeliverableSchema,
@@ -27,10 +30,16 @@ import {
 } from "@/lib/okx-x402";
 import {
   hasX402PaymentHeader,
+  inspectX402PaymentResponse,
   inspectX402Payment,
 } from "@/lib/okx-x402-request";
 import { issuePaidContinuation } from "@/lib/paid-continuation";
-import { applySafeExitServiceDiscoveryHeaders } from "@/lib/safeexit-service-discovery";
+import {
+  applySafeExitServiceDiscoveryHeaders,
+  createSafeExitRequestExample,
+  createSafeExitRequestJsonSchema,
+  SAFEEXIT_PAID_PREPARE_PATH,
+} from "@/lib/safeexit-service-discovery";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -122,15 +131,22 @@ async function describePaidRescue(): Promise<NextResponse> {
 
 function createPaidHandler(
   handler: (request: NextRequest) => Promise<NextResponse>,
+  method: "GET" | "POST",
 ) {
   try {
     const environment = parseDeploymentEnvironment();
     const configuration = getSafeExitX402Configuration(environment);
-    return withX402(
-      handler,
-      createSafeExitX402RouteConfig(configuration),
+    const httpServer = new x402HTTPResourceServer(
       createSafeExitX402ResourceServer(environment),
+      {
+        [`${method} ${SAFEEXIT_PAID_PREPARE_PATH}`]:
+          createSafeExitX402RouteConfig(configuration, {
+            example: createSafeExitRequestExample(),
+            schema: createSafeExitRequestJsonSchema(environment.publicBaseUrl),
+          }),
+      },
     );
+    return withX402FromHTTPServer(handler, httpServer);
   } catch {
     return async (): Promise<NextResponse> =>
       NextResponse.json(
@@ -162,6 +178,30 @@ function rateLimitBeforePayment(
   };
 }
 
+function discoveryChallengeOnly(
+  handler: (request: NextRequest) => Promise<NextResponse>,
+) {
+  return async (request: NextRequest): Promise<NextResponse> => {
+    if (hasX402PaymentHeader(request.headers)) {
+      return NextResponse.json(
+        {
+          code: "X402_POST_REQUIRED",
+          message:
+            "Do not pay the GET discovery probe. Replay the quoted payment as POST with the declared JSON rescue request.",
+        },
+        {
+          status: 405,
+          headers: {
+            Allow: "POST",
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    }
+    return handler(request);
+  };
+}
+
 function observePaidHandler(
   handler: (request: NextRequest) => Promise<NextResponse>,
 ) {
@@ -187,6 +227,10 @@ function observePaidHandler(
         : await handler(request);
 
     applySafeExitServiceDiscoveryHeaders(response.headers, request.url);
+    const paymentResponse =
+      response.status === 402
+        ? inspectX402PaymentResponse(response.headers)
+        : { kind: "NONE" as const };
 
     console.info(
       JSON.stringify({
@@ -195,6 +239,10 @@ function observePaidHandler(
         status: response.status,
         hasPayment: hasX402PaymentHeader(request.headers),
         paymentInspection: payment.kind,
+        paymentResponse: paymentResponse.kind,
+        ...(paymentResponse.kind === "PAYMENT_REQUIRED" && paymentResponse.error
+          ? { paymentError: paymentResponse.error }
+          : {}),
         durationMs: Math.round(performance.now() - startedAt),
       }),
     );
@@ -204,8 +252,14 @@ function observePaidHandler(
 
 // OKX discovers x402 pricing with GET. The paid operation itself remains POST-only.
 export const GET = observePaidHandler(
-  rateLimitBeforePayment(createPaidHandler(describePaidRescue), "paid-discovery"),
+  rateLimitBeforePayment(
+    discoveryChallengeOnly(createPaidHandler(describePaidRescue, "GET")),
+    "paid-discovery",
+  ),
 );
 export const POST = observePaidHandler(
-  rateLimitBeforePayment(createPaidHandler(preparePaidRescue), "paid-prepare"),
+  rateLimitBeforePayment(
+    createPaidHandler(preparePaidRescue, "POST"),
+    "paid-prepare",
+  ),
 );

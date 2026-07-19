@@ -57,6 +57,11 @@ describe("Safe Exit service discovery", () => {
     ).toBe(true);
     expect(
       manifest.buyerAgentInstructions.some((instruction) =>
+        instruction.includes("GET is discovery-only"),
+      ),
+    ).toBe(true);
+    expect(
+      manifest.buyerAgentInstructions.some((instruction) =>
         instruction.includes("Do not inspect unrelated local files"),
       ),
     ).toBe(true);

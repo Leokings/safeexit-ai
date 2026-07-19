@@ -1,10 +1,18 @@
-import { decodePaymentSignatureHeader } from "@okxweb3/x402-core/http";
+import {
+  decodePaymentRequiredHeader,
+  decodePaymentSignatureHeader,
+} from "@okxweb3/x402-core/http";
 
 type PaymentInspection =
   | { kind: "NONE" }
   | { kind: "MALFORMED" }
   | { kind: "DISTINCT_PARTIES"; from: string; to: string }
   | { kind: "SELF_PAYMENT"; address: string };
+
+type PaymentResponseInspection =
+  | { kind: "NONE" }
+  | { kind: "MALFORMED" }
+  | { kind: "PAYMENT_REQUIRED"; error?: string };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null
@@ -38,6 +46,29 @@ export function inspectX402Payment(headers: Headers): PaymentInspection {
       return { kind: "SELF_PAYMENT", address: from };
     }
     return { kind: "DISTINCT_PARTIES", from, to };
+  } catch {
+    return { kind: "MALFORMED" };
+  }
+}
+
+export function inspectX402PaymentResponse(
+  headers: Headers,
+): PaymentResponseInspection {
+  const header = headers.get("payment-required");
+  if (!header) {
+    return { kind: "NONE" };
+  }
+
+  try {
+    const paymentRequired = decodePaymentRequiredHeader(header);
+    const error =
+      typeof paymentRequired.error === "string"
+        ? paymentRequired.error.slice(0, 160)
+        : undefined;
+    return {
+      kind: "PAYMENT_REQUIRED",
+      ...(error ? { error } : {}),
+    };
   } catch {
     return { kind: "MALFORMED" };
   }

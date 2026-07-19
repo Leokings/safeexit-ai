@@ -194,6 +194,7 @@ export function createSafeExitServiceManifest(
     },
     buyerAgentInstructions: [
       "Use a caller-managed buyer-agent runtime, running as a local daemon or compatible hosted agent, to call the Safe Exit HTTPS API.",
+      "Probe and replay the paid preparation endpoint with POST and a JSON body; GET is discovery-only and must never be paid.",
       "The buyer-agent runtime handles x402 payment, source-wallet signing, destination settlement, and receipt reporting.",
       "Do not inspect unrelated local files, IDE conversations, or chat history to discover or use Safe Exit.",
       "Render rescue results directly and keep signing packages in memory by default.",

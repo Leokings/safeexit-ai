@@ -23,10 +23,48 @@ export type SafeExitX402RouteConfig = {
   };
   description: string;
   mimeType: "application/json";
+  extensions: {
+    bazaar: {
+      info: {
+        input: {
+          type: "http";
+          method: "POST";
+          bodyType: "json";
+          body: object;
+        };
+      };
+      schema: {
+        $schema: "https://json-schema.org/draft/2020-12/schema";
+        type: "object";
+        properties: {
+          input: {
+            type: "object";
+            properties: {
+              type: { type: "string"; const: "http" };
+              method: { type: "string"; enum: ["POST"] };
+              bodyType: {
+                type: "string";
+                enum: ["json"];
+              };
+              body: Record<string, unknown>;
+            };
+            required: ["type", "method", "bodyType", "body"];
+            additionalProperties: false;
+          };
+        };
+        required: ["input"];
+      };
+    };
+  };
   unpaidResponseBody: () => {
     contentType: "application/json";
     body: { code: string; message: string };
   };
+};
+
+export type SafeExitX402DiscoveryInput = {
+  example: object;
+  schema: Record<string, unknown>;
 };
 
 export function getSafeExitX402Configuration(
@@ -52,6 +90,7 @@ export function getSafeExitX402Configuration(
 
 export function createSafeExitX402RouteConfig(
   configuration: SafeExitX402Configuration,
+  discoveryInput: SafeExitX402DiscoveryInput,
 ): SafeExitX402RouteConfig {
   return {
     accepts: {
@@ -64,11 +103,42 @@ export function createSafeExitX402RouteConfig(
     description:
       "Hosted provider API: prepare deterministic destination-paid SAFEEXIT rescue signing packages. A caller-managed buyer-agent runtime is required for payment, wallet signing, settlement, and receipt reporting; keep packages in memory unless the user requests an export.",
     mimeType: "application/json",
+    extensions: {
+      bazaar: {
+        info: {
+          input: {
+            type: "http",
+            method: "POST",
+            bodyType: "json",
+            body: discoveryInput.example,
+          },
+        },
+        schema: {
+          $schema: "https://json-schema.org/draft/2020-12/schema",
+          type: "object",
+          properties: {
+            input: {
+              type: "object",
+              properties: {
+                type: { type: "string", const: "http" },
+                method: { type: "string", enum: ["POST"] },
+                bodyType: { type: "string", enum: ["json"] },
+                body: discoveryInput.schema,
+              },
+              required: ["type", "method", "bodyType", "body"],
+              additionalProperties: false,
+            },
+          },
+          required: ["input"],
+        },
+      },
+    },
     unpaidResponseBody: () => ({
       contentType: "application/json",
       body: {
         code: "PAYMENT_REQUIRED",
-        message: "A 0.1 USDT payment is required to prepare this rescue plan and signing package set",
+        message:
+          "A 0.1 USDT payment is required. Replay this resource with POST and the declared JSON rescue request to prepare the plan and signing packages.",
       },
     }),
   };
