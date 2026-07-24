@@ -48,10 +48,23 @@
 | Account switch race | Active account and chain are re-read after switching and again after simulation/before submission. |
 | Secret leakage | Credentials are server-only; schemas reject line breaks; logs redact secret fields, bearer material, and URLs. |
 | API abuse | Strict payload limits, shared fail-closed rate limits, bearer authentication, no-store responses, and x402 throttling before payment handling. |
+| Arbitrary EIP-7702 delegated control | The implementation-under-test has no arbitrary-call entry point. A CREATE2-deployed incident delegate immutably binds chain, source, destination, expiry, plan hash, and rescue nonce and accepts only six structured action kinds. |
+| Delegated initialization front-run | No mutable initialization exists. The signed delegate address commits to constructor arguments and runtime immutables before the source signs an authorization. |
+| One missing asset blocks every rescue | The committed plan is immutable, but the destination may execute strictly ordered action subsets. Each action has isolated replay state so a missing asset can fail without consuming or blocking another action. |
+| Persistent EIP-7702 delegation | A chain-bound clearing authorization is prepared for the next source nonce. Production activation requires a confirmed canonical clear receipt and a private submission policy; a failed type-4 execution does not itself remove delegation. |
+| Local signer credential exposure | The EIP-7702 runtime accepts only an in-process signer interface. Package schemas reject credential fields, authorizations live in one-use `WeakMap` handles, and no source authorization is returned to SAFEEXIT APIs or persistence. |
+| Malicious factory substitution | The buyer runtime requires a separately pinned factory address and runtime hash. It rejects a package even when the server substitutes both its claimed factory and matching claimed hash. |
+| Cleanup skipped after partial failure | Once the destination submits a transaction carrying the delegation authorization, the runtime queues the nonce-consecutive clearing transaction even if receipt polling or a later isolated rescue action fails. |
 
 ## Residual risks
 
 - Recovery cannot be guaranteed when the attacker has the same private key.
+- An attacker holding that key can sign a competing EIP-7702 authorization or
+  invalidate the expected source nonce. The incident-bound delegate prevents
+  its own calls from redirecting assets, but it cannot solve the underlying
+  ownership race. The buyer-local runtime reduces the signing boundary but does
+  not remove this race. The hosted EIP-7702 route therefore remains
+  non-executable.
 - Public RPC simulation capabilities vary by chain; the official public X Layer
   RPC does not currently expose `eth_simulateV1`. The browser uses `eth_call`
   to preflight the exact signed settlement-contract transaction and verifies

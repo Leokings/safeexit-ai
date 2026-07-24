@@ -57,6 +57,12 @@ verifies and settles the `$0.10` payment on X Layer before returning the
 resource. The public request uses `safeexit-okx-x402-v1`; it does not accept a
 provider override, marketplace job ID, source signature, or credential.
 
+Marketplace clients that default to GET may send an initial `GET` probe to the
+same URL. It returns the same x402 challenge, but the challenge's Bazaar input
+declares a JSON `POST` as the paid replay. No wallet or asset parameters belong
+in a GET URL. An unpaid POST returns the challenge before body validation, while
+an invalid paid replay returns structured field issues without settlement.
+
 The bridge derives its internal idempotency scope from `requestId` and the
 configured provider identity, then returns
 `safeexit-okx-x402-deliverable-v2` with an ordered `signingPackages` set for

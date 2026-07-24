@@ -25,7 +25,9 @@ import {
 import {
   evmAddressSchema,
   type RescueAction,
+  type RescuePlan,
   type SimulationResult,
+  type WalletScan,
 } from "@safeexit/shared";
 import {
   encodeFunctionData,
@@ -224,6 +226,31 @@ type ReadyAgentJob = AgentServiceJob & {
   simulation: NonNullable<AgentServiceJob["simulation"]>;
 };
 
+export function explainMissingDestinationPaidPackage(
+  scan: Pick<WalletScan, "assets"> | undefined,
+  plan: Pick<RescuePlan, "actions">,
+  currentBalanceShortfallCount: number,
+): string {
+  const transferActionCount = plan.actions.filter((action) =>
+    action.actionType === "TRANSFER_ERC20" ||
+    action.actionType === "TRANSFER_ERC721" ||
+    action.actionType === "TRANSFER_ERC1155",
+  ).length;
+  const zeroBalanceAssetCount = scan?.assets.filter((asset) =>
+    asset.supportStatus === "SUPPORTED" &&
+    ((asset.assetType === "ERC20" || asset.assetType === "ERC1155") &&
+      BigInt(asset.balance) === 0n),
+  ).length ?? 0;
+
+  if (transferActionCount === 0 && zeroBalanceAssetCount > 0) {
+    return "No transferable balance was detected for the requested supported asset(s) at the scan block. Their destination-paid authorization route may be supported, but there is nothing to rescue from the source wallet yet.";
+  }
+  if (currentBalanceShortfallCount > 0) {
+    return "A supported asset's source balance fell below its planned transfer amount before signing-package generation. Refresh the rescue request and review the new balance before paying again.";
+  }
+  return "No simulated action exposes a verified destination-paid authorization route";
+}
+
 function safeDomainText(value: string, maximum: number): string {
   return value.replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, maximum);
 }
@@ -274,6 +301,7 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
     }
     const permitSettlement = await this.verifiedPermitSettlement(currentBlock);
     const signingPackages: SigningPackage[] = [];
+    let currentBalanceShortfallCount = 0;
     for (const action of job.plan.actions) {
       if (!job.simulation.executableActionIds.includes(action.id)) {
         continue;
@@ -295,6 +323,7 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
           blockNumber: currentBlock,
         });
         if (currentBalance < BigInt(action.parameters.amount)) {
+          currentBalanceShortfallCount += 1;
           continue;
         }
         const capability = await this.detectCapability(
@@ -333,7 +362,13 @@ export class LivePermitSigningPackageBuilder implements SigningPackageBuilderPor
       }
     }
     if (signingPackages.length === 0) {
-      throw new Error("No simulated action exposes a verified destination-paid authorization route");
+      throw new Error(
+        explainMissingDestinationPaidPackage(
+          job.scan,
+          job.plan,
+          currentBalanceShortfallCount,
+        ),
+      );
     }
     return signingPackages;
   }

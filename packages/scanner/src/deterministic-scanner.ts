@@ -160,7 +160,7 @@ export class DeterministicStandardScanner
             context.observedAtBlock,
           );
           const detected = balance > 0n;
-          const item: Asset | undefined = detected
+          const item: Asset | undefined = detected || query.includeZeroBalance
             ? {
                 id: `asset:erc20:${query.tokenAddress}:${context.ownerAddress}`,
                 chainId: context.chainId,

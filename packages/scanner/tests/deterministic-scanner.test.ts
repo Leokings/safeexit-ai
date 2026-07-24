@@ -182,6 +182,37 @@ describe("deterministic wallet scanner", () => {
     expect(reader.getBlockNumber).not.toHaveBeenCalled();
   });
 
+  it("retains an explicitly requested zero-balance ERC-20 as supported evidence", async () => {
+    const reader = createMockReader({
+      getErc20Balance: vi.fn(async () => 0n),
+    });
+
+    const report = await createScanner(reader).scan({
+      incidentId: "incident-2-explicit-zero",
+      chainId: 31_337,
+      address: ownerAddress,
+      manifest: {
+        erc20Assets: [{
+          ...completeManifest.erc20Assets[0]!,
+          includeZeroBalance: true,
+        }],
+      },
+      observedAtBlock: 99n,
+    });
+
+    expect(report.scan.assets).toContainEqual(expect.objectContaining({
+      assetType: "ERC20",
+      contractAddress: erc20Address,
+      supportStatus: "SUPPORTED",
+      balance: "0",
+    }));
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      category: "ERC20_ASSET",
+      status: "SUPPORTED",
+      detected: false,
+    }));
+  });
+
   it("marks failed reads unknown instead of treating them as zero balances", async () => {
     const reader = createMockReader({
       getErc20Balance: vi.fn(async () => {

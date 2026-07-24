@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 
 contract SafeExitTestFeeOnTransferERC2612 is ERC20, ERC20Permit {
     constructor()
@@ -22,5 +23,13 @@ contract SafeExitTestFeeOnTransferERC2612 is ERC20, ERC20Permit {
             return;
         }
         super._update(from, to, value);
+    }
+}
+
+contract SafeExitTestERC1155 is ERC1155 {
+    constructor() ERC1155("safeexit-test-only://{id}") {}
+
+    function faucet(address recipient, uint256 tokenId, uint256 amount) external {
+        _mint(recipient, tokenId, amount, "");
     }
 }

@@ -4,13 +4,15 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./eip7702-rescue": "./src/eip7702-rescue.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@safeexit/shared": "*",
+    "viem": "2.55.0",
     "zod": "4.4.3"
   }
 }

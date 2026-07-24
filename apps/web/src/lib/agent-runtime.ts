@@ -139,6 +139,11 @@ class LiveMainnetAnalyzer implements IncidentAnalyzerPort {
       this.manifest?.erc20TokenAddresses,
       Number.MAX_SAFE_INTEGER,
     ).length;
+    const explicitlyRequestedTokenAddresses = new Set(
+      (this.manifest?.erc20TokenAddresses ?? []).map((address) =>
+        address.toLowerCase(),
+      ),
+    );
     const metadata = await Promise.all(
       selectedCandidates.map(async (candidate) => {
         try {
@@ -170,6 +175,9 @@ class LiveMainnetAnalyzer implements IncidentAnalyzerPort {
               name: safeOnchainMetadata(name, 128, candidate.symbol),
               symbol: safeOnchainMetadata(symbol, 32, candidate.symbol.slice(0, 32)),
               decimals,
+              includeZeroBalance: explicitlyRequestedTokenAddresses.has(
+                candidate.tokenAddress.toLowerCase(),
+              ),
             },
           };
         } catch {
@@ -216,6 +224,7 @@ class LiveMainnetAnalyzer implements IncidentAnalyzerPort {
                 name: safeOnchainMetadata(name, 128, "Unlabelled ERC-20"),
                 symbol: safeOnchainMetadata(symbol, 32, "TOKEN"),
                 decimals,
+                includeZeroBalance: true,
               },
             } as const;
           } catch {

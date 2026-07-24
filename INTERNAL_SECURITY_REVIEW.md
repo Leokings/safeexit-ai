@@ -24,6 +24,13 @@ preserves the reviewed authorization and settlement invariants and is recorded
 separately in `MULTICHAIN_ADAPTER_VERIFICATION.md`; that internal verification
 does not widen this review into an independent audit.
 
+The later EIP-7702 delegate, factory, buyer-local signer, and destination-paid
+runtime implementation are also not approved by this review. Their delegated
+context, strict-package, signer-recovery, partial-action, cleanup-fallback, and
+type-4 serialization tests are useful engineering evidence, but the route
+remains `executable: false` pending the activation gates recorded in
+`DEPLOYMENT.md` and the dedicated scope in `AUDIT_SCOPE.md`.
+
 ## Resolved findings
 
 | ID | Severity | Finding | Resolution |

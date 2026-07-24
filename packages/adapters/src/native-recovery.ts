@@ -4,28 +4,31 @@ export type NativeRecoveryStrategy =
 
 export type NativeRecoveryBoundary = {
   strategy: NativeRecoveryStrategy;
-  status: "OFFICIAL_DOCS_REQUIRED";
+  status: "IMPLEMENTATION_TESTING" | "OFFICIAL_DOCS_REQUIRED";
   executable: false;
+  supportedChainIds: readonly number[];
   requirements: readonly string[];
 };
 
 export const nativeRecoveryBoundaries = [
   {
     strategy: "EIP7702_SPONSORED_EXECUTION",
-    status: "OFFICIAL_DOCS_REQUIRED",
+    status: "IMPLEMENTATION_TESTING",
     executable: false,
+    supportedChainIds: [196],
     requirements: [
-      "Official target-chain support for EIP-7702 set-code transactions",
-      "An audited and bytecode-allowlisted delegate implementation",
-      "An official wallet authorization method that never accepts arbitrary delegate code",
-      "A sponsor path that binds chain, nonce, target, calldata, value, gas, and expiry",
-      "Deterministic simulation plus a tested delegation-revocation procedure",
+      "A bytecode-verified incident-bound delegate deployment on X Layer",
+      "A reviewed local signer or official wallet method that displays the exact delegate and chain",
+      "The destination-paid local type-4 runtime must pass an X Layer no-value canary",
+      "A private submission policy for the delegation, rescue, and clear sequence",
+      "Full type-4 integration testing plus a verified delegation-revocation receipt",
     ],
   },
   {
     strategy: "PRIVATE_ATOMIC_BUNDLE",
     status: "OFFICIAL_DOCS_REQUIRED",
     executable: false,
+    supportedChainIds: [],
     requirements: [
       "An official target-chain private relay endpoint and authentication contract",
       "Documented all-or-nothing ordering for sponsor and rescue transactions",

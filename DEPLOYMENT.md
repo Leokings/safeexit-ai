@@ -170,6 +170,7 @@ POST /api/agent/okx/buyer-report
 The paid direct endpoint is separate:
 
 ```text
+GET  /api/agent/okx/prepare-paid  (x402 probe only; POST is the paid replay)
 POST /api/agent/okx/prepare-paid
 GET  /api/agent/okx/manifest
 GET  /api/agent/okx/schema
@@ -185,11 +186,14 @@ SAFEEXIT_X402_PAY_TO_ADDRESS=0x<provider-owned-payout-wallet>
 
 `OKX_WEB3_API_KEY`, `OKX_WEB3_SECRET_KEY`, and `OKX_WEB3_PASSPHRASE` are reused
 server-side by the official facilitator client. An unpaid request returns
-`402 Payment Required`; after payment, the same request is retried and returns
-the deterministic signing package plus an explanation-only grounded incident
-analysis. DeepSeek can select only an intent and known evidence IDs; the
-scanner, plan, simulation, signing package, fixed destination, and plan hash
-remain deterministic. Readiness reports
+`402 Payment Required`. A generic client may use `GET` only for that initial
+probe: the challenge explicitly declares the required JSON `POST`, and the
+paid replay must use POST. Do not place source, destination, or asset data in a
+GET URL. An invalid POST replay returns structured field issues and does not
+settle payment. A successful replay returns the deterministic signing package
+plus an explanation-only grounded incident analysis. DeepSeek can select only
+an intent and known evidence IDs; the scanner, plan, simulation, signing
+package, fixed destination, and plan hash remain deterministic. Readiness reports
 `paidAgentApi=configured:eip155:196:$0.10` only when this configuration is
 complete.
 
@@ -410,10 +414,32 @@ permit-only.
 - The normalized provider bridge is connected to SAFEEXIT's hosted API, but the
   operator's OKX runtime still performs marketplace acceptance and encrypted
   delivery. SAFEEXIT does not expose a public unauthenticated webhook.
-- Native currency remains blocked on every chain. `@safeexit/adapters` defines
-  the mandatory proof for EIP-7702 sponsorship and private atomic bundles, but
-  exposes neither as executable until official target-chain integration
-  details and an independent delegate-contract audit are available.
+- Native currency remains blocked in every production signing package. The
+  X Layer EIP-7702 implementation-under-test includes an incident-bound
+  CREATE2 delegate, fixed structured actions, destination-only execution,
+  isolated action replay state, a local in-process source signer adapter,
+  destination-paid type-4 submission, and a nonce-consecutive clearing
+  authorization with cleanup fallback. It is still exposed as
+  `executable: false`; no hosted endpoint or browser control activates it.
+- The permissionless X Layer factory was deployed through the canonical CREATE2
+  deployer and independently runtime-verified:
+  - Factory: `0xe35964050279262449e71CBf36c86b6fFb5874e5`
+  - Runtime hash:
+    `0x0641a98eac8a123bb898f848ff3c04fb8a9e7f42647f48c7838a4a6e7fee02cc`
+  - Deployment transaction:
+    `0x7e44b0ccfa0e649376f413a43424597fe619d270a8baefc21560449c62a00676`
+  - Deployment block: `66047688`
+  The buyer-local runtime pins this tuple independently of server-issued
+  signing packages.
+- The complete destination-paid delegate/rescue/clear sequence passed an
+  operator-owned no-value X Layer canary. Live type-4 simulation, raw
+  authorization preservation, canonical clearing, zero final source balance,
+  cleared source code, and unused-gas refund were independently RPC-verified.
+  See [`EIP7702_CANARY_EVIDENCE.md`](./EIP7702_CANARY_EVIDENCE.md).
+- Do not activate that route until private submission behavior is defined, the
+  buyer-local signer and contracts receive an independent security review, and
+  an explicit production activation decision is recorded. The route remains
+  `executable: false`.
 - Production request limits are stored atomically in PostgreSQL and fail closed
   if that shared store is unavailable. The x402 limit is evaluated before the
   payment middleware so a throttled request is not charged first. Vercel

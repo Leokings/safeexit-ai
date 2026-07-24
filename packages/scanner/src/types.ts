@@ -49,6 +49,8 @@ export type Erc20AssetQuery = {
   name: string;
   symbol: string;
   decimals: number;
+  /** Retain explicit user-requested assets even when their verified balance is zero. */
+  includeZeroBalance?: boolean;
 };
 
 export type Erc721AssetQuery = {
@@ -154,4 +156,3 @@ export interface WalletScanner {
   supports(chainId: number): Promise<boolean>;
   scan(request: WalletScanRequest): Promise<DeterministicScanReport>;
 }
-

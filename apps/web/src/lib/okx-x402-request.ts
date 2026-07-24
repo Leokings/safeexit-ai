@@ -14,6 +14,11 @@ type PaymentResponseInspection =
   | { kind: "MALFORMED" }
   | { kind: "PAYMENT_REQUIRED"; error?: string };
 
+export type X402PaymentFailureDetail = {
+  code: "X402_INSUFFICIENT_BALANCE";
+  message: string;
+};
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null
     ? (value as Record<string, unknown>)
@@ -72,4 +77,18 @@ export function inspectX402PaymentResponse(
   } catch {
     return { kind: "MALFORMED" };
   }
+}
+
+export function describeX402PaymentFailure(
+  error: string | undefined,
+): X402PaymentFailureDetail | undefined {
+  if (error !== "insufficient_balance") {
+    return undefined;
+  }
+
+  return {
+    code: "X402_INSUFFICIENT_BALANCE",
+    message:
+      "The buyer payment wallet does not hold enough USD₮0 on X Layer for this 0.1 USD₮0 call. Fund the buyer payment wallet, not the compromised source wallet, then create a fresh quote.",
+  };
 }

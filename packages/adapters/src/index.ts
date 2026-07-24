@@ -29,5 +29,6 @@ export interface PositionAdapter {
 }
 
 export * from "./okx-wallet-api";
+export * from "./eip7702-rescue";
 export * from "./native-recovery";
 export * from "./permit-settlement";

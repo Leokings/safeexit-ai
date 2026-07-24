@@ -4,7 +4,7 @@ import { chainIdSchema, evmAddressSchema } from "@safeexit/shared";
 export {
   buyerExecutionReportSchema,
   type BuyerExecutionReport,
-} from "@safeexit/agent-service";
+} from "@safeexit/agent-service/buyer-report";
 
 const identifierSchema = z.string().min(1).max(256);
 const timestampSchema = z.string().datetime({ offset: true });

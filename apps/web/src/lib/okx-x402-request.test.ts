@@ -9,6 +9,7 @@ import type {
 import { describe, expect, it } from "vitest";
 
 import {
+  describeX402PaymentFailure,
   hasX402PaymentHeader,
   inspectX402Payment,
   inspectX402PaymentResponse,
@@ -119,5 +120,17 @@ describe("OKX x402 response inspection", () => {
   it("marks an invalid response header as malformed", () => {
     const headers = new Headers({ "payment-required": "not-base64-json" });
     expect(inspectX402PaymentResponse(headers)).toEqual({ kind: "MALFORMED" });
+  });
+
+  it("turns an insufficient-balance rejection into an actionable buyer error", () => {
+    expect(describeX402PaymentFailure("insufficient_balance")).toEqual({
+      code: "X402_INSUFFICIENT_BALANCE",
+      message:
+        "The buyer payment wallet does not hold enough USD₮0 on X Layer for this 0.1 USD₮0 call. Fund the buyer payment wallet, not the compromised source wallet, then create a fresh quote.",
+    });
+  });
+
+  it("does not expose a generic message for unknown facilitator errors", () => {
+    expect(describeX402PaymentFailure("invalid_payload")).toBeUndefined();
   });
 });

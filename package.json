@@ -15,6 +15,9 @@
     "contracts:faucet-data:xlayer": "node scripts/contracts/xlayer-mainnet-faucet.mjs",
     "contracts:prepare:xlayer": "npm run contracts:build && node scripts/contracts/xlayer-mainnet-fixtures.mjs prepare",
     "contracts:prepare:settlement:xlayer": "npm run contracts:build && node scripts/contracts/xlayer-permit-settlement.mjs prepare",
+    "contracts:prepare:7702:xlayer": "npm run contracts:build && node scripts/contracts/xlayer-eip7702-factory.mjs prepare",
+    "contracts:canary:7702:xlayer": "npm run contracts:build && node scripts/contracts/xlayer-eip7702-canary-server.mjs",
+    "contracts:serve:7702:xlayer": "npm run contracts:build && node scripts/contracts/xlayer-eip7702-factory.mjs serve",
     "contracts:prepare:settlement:all": "npm run contracts:build && node scripts/contracts/multichain-permit-settlement.mjs prepare",
     "contracts:prepare:settlement:chain": "npm run contracts:build && node scripts/contracts/xlayer-permit-settlement.mjs prepare",
     "contracts:estimate:settlement:all": "npm run contracts:build && node scripts/contracts/multichain-permit-settlement.mjs estimate",
@@ -24,6 +27,7 @@
     "contracts:test": "npm run contracts:build && node --import tsx --test contracts/test/*.ts",
     "contracts:verify:xlayer": "node scripts/contracts/xlayer-mainnet-fixtures.mjs verify",
     "contracts:verify:settlement:xlayer": "node scripts/contracts/xlayer-permit-settlement.mjs verify",
+    "contracts:verify:7702:xlayer": "node scripts/contracts/xlayer-eip7702-factory.mjs verify",
     "contracts:verify:settlement:all": "node scripts/contracts/multichain-permit-settlement.mjs verify",
     "contracts:verify:settlement:chain": "node scripts/contracts/xlayer-permit-settlement.mjs verify",
     "contracts:verify:settlement-v1:xlayer": "node scripts/contracts/xlayer-permit-settlement.mjs verify-v1",
@@ -36,15 +40,22 @@
     "test:watch": "vitest",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
+  "dependencies": {
+    "postcss": "8.5.19",
+    "sharp": "0.35.3"
+  },
   "devDependencies": {
+    "@emnapi/core": "1.11.2",
+    "@emnapi/runtime": "1.11.2",
     "@nomicfoundation/hardhat-viem": "^3.0.9",
-    "@openzeppelin/contracts": "^5.4.0",
+    "@openzeppelin/contracts": "5.4.0",
     "@types/node": "^20.19.0",
     "dotenv": "17.4.2",
+    "esbuild": "^0.28.1",
     "eslint": "^9.39.2",
-    "eslint-config-next": "16.2.10",
-    "hardhat": "^3.9.1",
-    "prisma": "7.8.0",
+    "eslint-config-next": "16.2.11",
+    "hardhat": "^3.11.0",
+    "prisma": "7.9.0",
     "tsx": "^4.20.6",
     "typescript": "5.9.3",
     "vitest": "4.1.10"
@@ -53,10 +64,10 @@
     "node": "24.x"
   },
   "overrides": {
-    "@hono/node-server": "1.19.13",
+    "adm-zip": "0.6.0",
     "next": {
-      "postcss": "8.5.19"
-    },
-    "postcss": "8.5.19"
+      "postcss": "$postcss",
+      "sharp": "$sharp"
+    }
   }
 }

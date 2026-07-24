@@ -5,6 +5,7 @@ import {
 
 export const SAFEEXIT_X402_NETWORK = "eip155:196" as const;
 export const SAFEEXIT_X402_PRICE = "$0.10" as const;
+export const SAFEEXIT_X402_TOKEN_SYMBOL = "USD₮0" as const;
 export const SAFEEXIT_X402_MAX_TIMEOUT_SECONDS = 300;
 
 export type SafeExitX402Configuration = {
@@ -13,7 +14,9 @@ export type SafeExitX402Configuration = {
   price: typeof SAFEEXIT_X402_PRICE;
 };
 
-export type SafeExitX402RouteConfig = {
+type JsonObject = Record<string, unknown>;
+
+export type SafeExitX402PostRouteConfig = {
   accepts: {
     scheme: "exact";
     network: typeof SAFEEXIT_X402_NETWORK;
@@ -30,41 +33,33 @@ export type SafeExitX402RouteConfig = {
           type: "http";
           method: "POST";
           bodyType: "json";
-          body: object;
+          body: JsonObject;
         };
       };
-      schema: {
-        $schema: "https://json-schema.org/draft/2020-12/schema";
-        type: "object";
-        properties: {
-          input: {
-            type: "object";
-            properties: {
-              type: { type: "string"; const: "http" };
-              method: { type: "string"; enum: ["POST"] };
-              bodyType: {
-                type: "string";
-                enum: ["json"];
-              };
-              body: Record<string, unknown>;
-            };
-            required: ["type", "method", "bodyType", "body"];
-            additionalProperties: false;
-          };
-        };
-        required: ["input"];
-      };
+      schema: JsonObject;
     };
   };
   unpaidResponseBody: () => {
     contentType: "application/json";
-    body: { code: string; message: string };
+    body: {
+      code: string;
+      message: string;
+      requiredInput: {
+        method: "POST";
+        contentType: "application/json";
+        requestSchemaUrl?: string;
+        example: JsonObject;
+      };
+      marketplaceTaskGuidance: {
+        mode: "DESIGNATED_X402";
+        attachRequestBodyAtTaskCreation: true;
+        useTaskLinkedPaymentReplay: true;
+        saveResponseAsTaskDeliverable: true;
+        completeOnlyAfterDeliverable: true;
+        standalonePaymentDoesNotCompleteTask: true;
+      };
+    };
   };
-};
-
-export type SafeExitX402DiscoveryInput = {
-  example: object;
-  schema: Record<string, unknown>;
 };
 
 export function getSafeExitX402Configuration(
@@ -88,10 +83,10 @@ export function getSafeExitX402Configuration(
   };
 }
 
-export function createSafeExitX402RouteConfig(
+export function createSafeExitX402PostRouteConfig(
   configuration: SafeExitX402Configuration,
-  discoveryInput: SafeExitX402DiscoveryInput,
-): SafeExitX402RouteConfig {
+  discovery: { schema: JsonObject; example: JsonObject },
+): SafeExitX402PostRouteConfig {
   return {
     accepts: {
       scheme: "exact",
@@ -101,7 +96,7 @@ export function createSafeExitX402RouteConfig(
       maxTimeoutSeconds: SAFEEXIT_X402_MAX_TIMEOUT_SECONDS,
     },
     description:
-      "Hosted provider API: prepare deterministic destination-paid SAFEEXIT rescue signing packages. A caller-managed buyer-agent runtime is required for payment, wallet signing, settlement, and receipt reporting; keep packages in memory unless the user requests an export.",
+      "Prepare a deterministic SAFEEXIT rescue plan and signing package from an explicit rescue request. The source wallet remains non-custodial and signs locally. For an OKX marketplace task, attach the JSON body when creating the designated x402 task and use its task-linked payment, replay, deliverable, and completion flow; do not substitute a standalone x402 payment.",
     mimeType: "application/json",
     extensions: {
       bazaar: {
@@ -110,7 +105,7 @@ export function createSafeExitX402RouteConfig(
             type: "http",
             method: "POST",
             bodyType: "json",
-            body: discoveryInput.example,
+            body: discovery.example,
           },
         },
         schema: {
@@ -122,8 +117,8 @@ export function createSafeExitX402RouteConfig(
               properties: {
                 type: { type: "string", const: "http" },
                 method: { type: "string", enum: ["POST"] },
-                bodyType: { type: "string", enum: ["json"] },
-                body: discoveryInput.schema,
+                bodyType: { type: "string", const: "json" },
+                body: discovery.schema,
               },
               required: ["type", "method", "bodyType", "body"],
               additionalProperties: false,
@@ -138,8 +133,36 @@ export function createSafeExitX402RouteConfig(
       body: {
         code: "PAYMENT_REQUIRED",
         message:
-          "A 0.1 USDT payment is required. Replay this resource with POST and the declared JSON rescue request to prepare the plan and signing packages.",
+          `A 0.1 ${SAFEEXIT_X402_TOKEN_SYMBOL} payment is required to prepare this rescue request. Use POST with the JSON input below; an initial GET probe is supported only to obtain this payment challenge.`,
+        requiredInput: {
+          method: "POST",
+          contentType: "application/json",
+          ...(typeof discovery.schema.$id === "string"
+            ? { requestSchemaUrl: discovery.schema.$id }
+            : {}),
+          example: discovery.example,
+        },
+        marketplaceTaskGuidance: {
+          mode: "DESIGNATED_X402",
+          attachRequestBodyAtTaskCreation: true,
+          useTaskLinkedPaymentReplay: true,
+          saveResponseAsTaskDeliverable: true,
+          completeOnlyAfterDeliverable: true,
+          standalonePaymentDoesNotCompleteTask: true,
+        },
       },
     }),
+  };
+}
+
+export function createSafeExitX402PrepareRouteConfigs(
+  path: string,
+  configuration: SafeExitX402Configuration,
+  discovery: { schema: JsonObject; example: JsonObject },
+): Record<string, SafeExitX402PostRouteConfig> {
+  const config = createSafeExitX402PostRouteConfig(configuration, discovery);
+  return {
+    [`GET ${path}`]: config,
+    [`POST ${path}`]: config,
   };
 }

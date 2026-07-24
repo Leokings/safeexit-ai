@@ -54,6 +54,27 @@ Primary implementation locations:
 - `packages/security/src/`
 - `packages/persistence/src/`
 
+### EIP-7702 activation review
+
+The following implementation-under-test is not part of the currently enabled
+production route, but must be reviewed before any EIP-7702 activation:
+
+- `contracts/src/SafeExit7702RescueDelegate.sol`
+- `contracts/src/SafeExit7702RescueDelegateFactory.sol`
+- `contracts/test/SafeExit7702RescueDelegate.ts`
+- `packages/adapters/src/eip7702-rescue.ts`
+- `packages/adapters/tests/eip7702-rescue.test.ts`
+- `packages/agent-service/src/eip7702-signing-package.ts`
+- `packages/buyer-runtime/src/eip7702-runtime.ts`
+- `packages/buyer-runtime/src/eip7702-viem.ts`
+- `packages/buyer-runtime/tests/eip7702-runtime.test.ts`
+
+That review must include CREATE2 configuration commitments, immutable runtime
+verification, delegated execution context, storage-slot isolation, destination
+authorization, per-action replay handling, token postconditions, type-4
+transaction sponsorship, local-account isolation, source-nonce races, cleanup
+after partial failure, private submission, and confirmed delegation clearing.
+
 ## Required security properties
 
 1. SAFEEXIT never requests, receives, stores, logs, or transmits a source
@@ -78,8 +99,10 @@ Primary implementation locations:
   destination wallet.
 - Distinguishing the legitimate owner from an attacker when both possess the
   same source private key.
-- Native-currency rescue, EIP-7702 delegates, private bundles, Permit2, ERC-1155
-  settlement, protocol claims, and protocol withdrawals.
+- Production activation of native-currency rescue, EIP-7702 delegates, private
+  bundles, Permit2, ERC-1155 permit settlement, protocol claims, and protocol
+  withdrawals. The EIP-7702 implementation files listed above are available
+  for pre-activation review but remain outside the enabled production surface.
 - Economic guarantees, asset valuation, and universal token compatibility.
 
 ## Reproduction

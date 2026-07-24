@@ -142,6 +142,13 @@ code still writes the response and remains the sole source of executable plan
 data. No negotiation loop, polling worker, or encrypted report file is
 involved.
 
+Generic marketplace clients may make an initial `GET` probe to the same URL.
+That probe returns the same standard `402 Payment Required` challenge, which
+declares `POST` and the required JSON body in its Bazaar input metadata. Wallet
+addresses and assets must never be put into a GET URL. An unpaid POST receives
+the challenge before body validation; an invalid paid replay receives structured
+field issues and is not settled.
+
 Buyer agents can inspect the hosted integration contract without paying:
 
 ```text
@@ -250,10 +257,26 @@ verified destination-paid adapter exists. The mainnet route is best effort and
 has received an internal engineering review but not an independent audit. No
 monetary-value ceiling is imposed on a route that passes all execution gates.
 
-Native-currency recovery remains non-executable. The adapter package records
-fail-closed requirements for an audited EIP-7702 sponsor or an official target-chain
-private atomic relay, including bytecode allowlisting, signed target/value/gas
-bounds, pinned simulation, no public-mempool fallback, and revocation handling.
+Native-currency recovery remains non-executable in the website and hosted agent
+API. The first X Layer EIP-7702 implementation layer now includes a
+permissionless CREATE2 factory, an incident-specific delegate, deterministic
+plan hashing, a local source-authorization adapter, destination-paid type-4
+submission, isolated per-action execution, and mandatory clearing. The local
+runtime receives an already constructed signer object in the buyer's process;
+it has no private-key input or network signer endpoint and never returns
+authorizations to SAFEEXIT. The delegate has no arbitrary-call function: it
+supports only committed native, ERC-20, ERC-721, and ERC-1155 transfers plus
+ERC-20 and NFT operator revocations. Its immutable configuration fixes the
+source, destination, chain, deadline, plan hash, and rescue nonce; only the
+destination may execute it.
+
+The deployed factory, live type-4 simulation, no-value X Layer canary, and
+canonical clearing receipt are now verified. The public evidence is recorded in
+[`EIP7702_CANARY_EVIDENCE.md`](./EIP7702_CANARY_EVIDENCE.md). Private submission
+for the rescue race, independent security review, and an explicit activation
+decision remain incomplete. Until every gate is met, `@safeexit/adapters`
+reports the route as `IMPLEMENTATION_TESTING` with `executable: false`, and the
+website/API do not issue EIP-7702 signing packages.
 
 One injected wallet exposes one active account at a time. The browser flow is
 therefore sequential: activate the source and sign, keep the tab open, switch
