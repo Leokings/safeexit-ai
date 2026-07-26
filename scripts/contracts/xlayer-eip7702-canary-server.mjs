@@ -36,7 +36,7 @@ const page = `<!doctype html>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>SAFEEXIT EIP-7702 No-Value Canary</title>
   <style>
-    :root{color-scheme:dark;font-family:Arial,sans-serif;background:#070908;color:#f4f7f5}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#070908}.shell{width:min(900px,calc(100% - 32px));margin:42px auto}.eyebrow{font:12px monospace;color:#71d9aa;text-transform:uppercase}.panel{margin-top:18px;border:1px solid #29332f;background:#0d1110;padding:24px}.warning{border-left:3px solid #ff8f70;background:#17100e;padding:14px;color:#ffd8ce}.grid{display:grid;grid-template-columns:190px 1fr;gap:12px;margin:24px 0;font-size:14px}.label{color:#8d9a94}.value{font-family:monospace;overflow-wrap:anywhere}.actions{display:flex;gap:12px;flex-wrap:wrap}button{min-height:44px;border:1px solid #4f655c;background:#121815;color:#fff;padding:0 18px;font-weight:700;cursor:pointer}button.primary{background:#dfffee;color:#05100b;border-color:#dfffee}button:disabled{opacity:.45;cursor:not-allowed}.confirm{display:flex;align-items:flex-start;gap:10px;margin:22px 0;color:#c5cec9;font-size:14px}.status{margin-top:18px;min-height:22px;font-family:monospace;color:#9ddfbe}.transactions{margin-top:18px;border-top:1px solid #29332f;padding-top:14px}.transaction{font:12px monospace;margin:8px 0;overflow-wrap:anywhere}a{color:#9ddfbe}@media(max-width:620px){.shell{margin:24px auto}.panel{padding:18px}.grid{grid-template-columns:1fr}.label{margin-top:8px}}
+    :root{color-scheme:dark;font-family:Arial,sans-serif;background:#070908;color:#f4f7f5}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#070908}.shell{width:min(900px,calc(100% - 32px));margin:42px auto}.eyebrow{font:12px monospace;color:#71d9aa;text-transform:uppercase}.panel{margin-top:18px;border:1px solid #29332f;background:#0d1110;padding:24px}.warning{border-left:3px solid #ff8f70;background:#17100e;padding:14px;color:#ffd8ce}.grid{display:grid;grid-template-columns:190px 1fr;gap:12px;margin:24px 0;font-size:14px}.label{color:#8d9a94}.value{font-family:monospace;overflow-wrap:anywhere}input[type=text]{width:100%;min-height:42px;border:1px solid #4f655c;background:#080b0a;color:#fff;padding:8px 10px;font:13px monospace}.actions{display:flex;gap:12px;flex-wrap:wrap}button{min-height:44px;border:1px solid #4f655c;background:#121815;color:#fff;padding:0 18px;font-weight:700;cursor:pointer}button.primary{background:#dfffee;color:#05100b;border-color:#dfffee}button:disabled{opacity:.45;cursor:not-allowed}.confirm{display:flex;align-items:flex-start;gap:10px;margin:22px 0;color:#c5cec9;font-size:14px}.status{margin-top:18px;min-height:22px;font-family:monospace;color:#9ddfbe}.transactions{margin-top:18px;border-top:1px solid #29332f;padding-top:14px}.transaction{font:12px monospace;margin:8px 0;overflow-wrap:anywhere}a{color:#9ddfbe}@media(max-width:620px){.shell{margin:24px auto}.panel{padding:18px}.grid{grid-template-columns:1fr}.label{margin-top:8px}}
   </style>
 </head>
 <body>
@@ -47,7 +47,7 @@ const page = `<!doctype html>
       <div class="warning">Step 1 is read-only. Connect the intended source account and inspect the capabilities that OKX Wallet actually advertises on X Layer. This step does not sign an authorization, send a transaction, or move assets.</div>
       <div class="grid">
         <div class="label">Source capability account</div><div id="probe-account" class="value">Not connected</div>
-        <div class="label">Reported capabilities</div><div id="probe-capabilities" class="value">Not checked</div>
+        <div class="label">Shareable capability evidence</div><div id="probe-capabilities" class="value">Not checked</div>
         <div class="label">SafeExit conclusion</div><div id="probe-route" class="value">NOT CHECKED</div>
       </div>
       <div class="actions">
@@ -57,8 +57,9 @@ const page = `<!doctype html>
       <div id="probe-status" class="status">No wallet request has been made.</div>
     </div>
     <div class="panel">
-      <div class="warning">This creates fresh empty source and destination signers in memory and performs one fixed zero-allowance revocation on a TEST ONLY token. The connected OKX wallet funds a capped gas budget; the local destination signer submits genuine type-4 transactions and returns unused OKB. Do not close or refresh this tab after execution starts.</div>
+      <div class="warning">Use a fresh empty source wallet created only for this canary. Its private key is entered only in the SafeExit Source Signer extension, never on this page. The signing popup opens before any gas is funded. After signing, the page creates a separate local destination signer, the connected OKX wallet funds a capped gas budget, and unused OKB is returned. Do not close or refresh this tab after execution starts.</div>
       <div class="grid">
+        <div class="label">Fresh source address</div><div><input id="canary-source" type="text" autocomplete="off" spellcheck="false" placeholder="0x..."></div>
         <div class="label">OKX funding wallet</div><div id="funding" class="value">Not connected</div>
         <div class="label">Ephemeral destination signer</div><div id="destination" class="value">Not generated</div>
         <div class="label">Temporary gas budget</div><div id="gas" class="value">Not calculated</div>
@@ -72,8 +73,8 @@ const page = `<!doctype html>
       <label class="confirm"><input id="confirm" type="checkbox"> <span>I confirm this is the fixed no-value X Layer canary. My connected OKX wallet may temporarily fund the displayed capped gas budget, and unused OKB will be returned after execution.</span></label>
       <div class="actions">
         <button id="connect">Connect OKX funding wallet</button>
-        <button id="prepare" disabled>Prepare ephemeral canary</button>
-        <button id="execute" class="primary" disabled>Fund gas, execute and clear</button>
+        <button id="prepare" disabled>Prepare canary package</button>
+        <button id="execute" class="primary" disabled>Sign source, fund gas, execute and clear</button>
       </div>
       <div id="status" class="status">Waiting for operator.</div>
       <div id="transactions" class="transactions"></div>

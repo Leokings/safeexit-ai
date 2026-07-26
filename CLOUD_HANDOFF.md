@@ -18,31 +18,24 @@ This checkpoint contains the current production SAFEEXIT codebase, including:
   enter server APIs, logs, prompts, or persistence.
 - The destination address must remain explicitly committed in every signing
   package.
-- EIP-7702 is still an implementation/canary route. Do not expose it as a
-  production-ready recovery route until its capability checks, no-value
-  canary, replay protections, and destination-paid execution path are verified.
-- Do not activate an EIP-7702 route merely because a wallet displays an upgrade
-  prompt.
+- X Layer V2 EIP-7702 is internally verified and active for strict package-bound
+  actions. It is public-mempool, best effort, and not independently audited.
+- The Source Signer must verify the pinned factory and predicted delegate
+  through both configured official X Layer RPCs. Never activate a route merely
+  because a wallet displays an upgrade prompt.
 
 ## Latest local verification
 
-- Focused payment, discovery, scanner, settlement, buyer-runtime, and EIP-7702
-  verification passed: 11 files and 56 tests.
-- Buyer-runtime TypeScript typecheck passed.
-- The X Layer EIP-7702 canary server bundled successfully.
-- `git diff --check` passed.
-- A focused ESLint invocation timed out and produced no result.
-- No full test suite was run for this handoff.
-
-## Next work
-
-1. Continue the read-only EIP-5792 capability probe against the connected wallet.
-2. Run only the fixed, zero-value X Layer mainnet canary flow.
-3. Record the wallet/RPC capability evidence without retaining signatures.
-4. Keep `executable: false` unless every deterministic activation condition
-   passes.
-5. Run focused tests for files changed during the cloud task, then use CI for
-   the broader suite.
+- A V2 X Layer mainnet rescue and canonical clearing completed; public evidence
+  is recorded in `EIP7702_CANARY_EVIDENCE.md`.
+- The 2026-07-26 internal follow-up fixed factory-prediction verification,
+  complete-plan selection, funding caps, canonical clearing postconditions,
+  production origin scope, and result reporting.
+- Final repository CI passed on 2026-07-26: Prisma validation and generation,
+  lint, every TypeScript workspace, 44 Vitest files with 347 tests, all 23
+  Solidity tests, and the production Next.js build.
+- The production dependency scan (`npm audit --omit=dev`) reports zero
+  vulnerabilities.
 
 ## Working constraints
 

@@ -2,7 +2,7 @@
 
 ## Protected assets
 
-- Source-wallet assets and short-lived EIP-712 authorizations.
+- Source-wallet assets and short-lived EIP-712/EIP-7702 authorizations.
 - The integrity of the safe destination, chain, asset, amount, and token ID.
 - OKX API credentials, the agent bearer key, RPC credentials, and database URL.
 - x402 payments and the provider payout address.
@@ -22,12 +22,15 @@
 1. User input enters strict Zod schemas and never becomes arbitrary calldata.
 2. Server-side RPC reads produce a block-pinned scan, deterministic plan, and
    simulation result.
-3. The browser or buyer-local runtime receives only allowlisted EIP-712 signing
-   requests and constructs calls from code-owned ABIs.
-4. The source wallet signs locally. Signatures never cross into SAFEEXIT APIs,
-   logs, or persistence.
-5. The destination wallet must match the committed address and chain, reports
-   the exact settlement-contract call, and pays gas.
+3. The browser or buyer-local runtime receives only allowlisted EIP-712 or
+   EIP-7702 signing requests and constructs calls from code-owned ABIs.
+4. Permit signatures remain local to the browser. For X Layer EIP-7702, the
+   raw source key is entered only in the Source Signer popup; the extension
+   returns only the bounded delegation-and-clearing pair to the originating
+   page and never sends the key to an API, log, prompt, or storage.
+5. Permit settlement requires the committed destination wallet. EIP-7702 uses
+   a fresh capped temporary payer funded by the destination; the immutable
+   delegate forces all asset transfers to that destination.
 6. SAFEEXIT accepts only receipt metadata back from the buyer runtime and
    independently checks successful receipts for the committed transfer event,
    chain-specific confirmation depth, canonical block hash, and final asset state.
@@ -48,13 +51,14 @@
 | Account switch race | Active account and chain are re-read after switching and again after simulation/before submission. |
 | Secret leakage | Credentials are server-only; schemas reject line breaks; logs redact secret fields, bearer material, and URLs. |
 | API abuse | Strict payload limits, shared fail-closed rate limits, bearer authentication, no-store responses, and x402 throttling before payment handling. |
-| Arbitrary EIP-7702 delegated control | The implementation-under-test has no arbitrary-call entry point. A CREATE2-deployed incident delegate immutably binds chain, source, destination, expiry, plan hash, and rescue nonce and accepts only six structured action kinds. |
+| Arbitrary EIP-7702 delegated control | The enabled X Layer V2 delegate has no arbitrary-call entry point. A CREATE2-deployed incident delegate immutably binds chain, source, destination, expiry, plan hash, and rescue nonce and accepts only six structured action kinds. |
 | Delegated initialization front-run | No mutable initialization exists. The signed delegate address commits to constructor arguments and runtime immutables before the source signs an authorization. |
 | One missing asset blocks every rescue | The committed plan is immutable, but the destination may execute strictly ordered action subsets. Each action has isolated replay state so a missing asset can fail without consuming or blocking another action. |
-| Persistent EIP-7702 delegation | A chain-bound clearing authorization is prepared for the next source nonce. Production activation requires a confirmed canonical clear receipt and a private submission policy; a failed type-4 execution does not itself remove delegation. |
-| Local signer credential exposure | The EIP-7702 runtime accepts only an in-process signer interface. Package schemas reject credential fields, authorizations live in one-use `WeakMap` handles, and no source authorization is returned to SAFEEXIT APIs or persistence. |
-| Malicious factory substitution | The buyer runtime requires a separately pinned factory address and runtime hash. It rejects a package even when the server substitutes both its claimed factory and matching claimed hash. |
-| Cleanup skipped after partial failure | Once the destination submits a transaction carrying the delegation authorization, the runtime queues the nonce-consecutive clearing transaction even if receipt polling or a later isolated rescue action fails. |
+| Persistent EIP-7702 delegation | A chain-bound clearing authorization is prepared for the next source nonce. The runtime submits clearing after any known delegation submission and accepts success only after canonical source code is empty and the nonce advanced. A failed rescue call does not itself remove delegation. |
+| Local signer credential exposure | The EIP-7702 runtime accepts only an in-process signer interface. The Source Signer accepts one raw key only in its popup, signs exactly the package-bound delegation and clearing sequence, disposes WDK, and zeroes the owned mutable buffer. Package schemas reject credential fields; no key enters the page, APIs, logs, or persistence. |
+| Malicious factory substitution | The buyer runtime pins the V2 factory address and runtime hash. Before showing a signing review, the extension independently checks factory bytecode and the predicted incident delegate through both pinned official X Layer RPC endpoints. |
+| Cleanup skipped after partial failure | Once the temporary payer submits a transaction carrying the delegation authorization, the runtime queues the nonce-consecutive clearing transaction even if receipt polling or a later isolated rescue action fails. |
+| Temporary payer abuse | A fresh random payer must have nonce zero, no code, and zero balance. Funding is bounded between fixed minimum and maximum caps, the payer cannot redirect committed assets, and unused gas is returned to the destination. |
 
 ## Residual risks
 
@@ -63,8 +67,8 @@
   invalidate the expected source nonce. The incident-bound delegate prevents
   its own calls from redirecting assets, but it cannot solve the underlying
   ownership race. The buyer-local runtime reduces the signing boundary but does
-  not remove this race. The hosted EIP-7702 route therefore remains
-  non-executable.
+  not remove this race. The active route is best effort and uses the public X
+  Layer mempool.
 - Public RPC simulation capabilities vary by chain; the official public X Layer
   RPC does not currently expose `eth_simulateV1`. The browser uses `eth_call`
   to preflight the exact signed settlement-contract transaction and verifies
@@ -72,7 +76,8 @@
   simulation provider and fails closed when one is unavailable.
 - A malicious token may violate ERC semantics or emit deceptive events. Support
   is best effort and restricted to capability-verified routes.
-- Source signatures exist briefly in browser memory and remain exposed to a
+- Source authorizations exist briefly in browser memory. The EIP-7702 source
+  key also exists briefly in the extension popup and remains exposed to a
   compromised browser, operating system, or extension.
 - The production CSP still permits inline scripts for Next.js compatibility.
   This increases the importance of dependency control and avoiding all unsafe

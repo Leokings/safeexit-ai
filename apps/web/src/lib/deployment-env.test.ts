@@ -20,6 +20,32 @@ describe("deployment environment", () => {
     expect(config.x402Mode).toBe("DISABLED");
   });
 
+  it("treats empty pulled environment placeholders as not configured", () => {
+    const config = parseDeploymentEnvironment({
+      NODE_ENV: "development",
+      SAFEEXIT_AGENT_MODE: "",
+      SAFEEXIT_AGENT_API_KEY: "",
+      OKX_WEB3_API_KEY: "",
+      OKX_WEB3_SECRET_KEY: "",
+      OKX_WEB3_PASSPHRASE: "",
+      XLAYER_MAINNET_RPC_URL: "",
+      VERCEL_GIT_COMMIT_SHA: "",
+    });
+
+    expect(config.agentMode).toBe("DISABLED");
+    expect(config.agentApiKey).toBeUndefined();
+    expect(config.okxWeb3ApiKey).toBeUndefined();
+    expect(config.xLayerMainnetRpcUrl).toBeUndefined();
+    expect(config.deploymentId).toBeUndefined();
+
+    expect(() =>
+      parseDeploymentEnvironment({
+        NODE_ENV: "development",
+        OKX_WEB3_API_KEY: "\n",
+      }),
+    ).toThrow();
+  });
+
   it("requires a sufficiently long server-side agent key", () => {
     expect(() =>
       parseDeploymentEnvironment({

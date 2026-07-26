@@ -14,8 +14,9 @@ interface INftOperatorApproval {
 /**
  * @notice Incident-bound execution code for an EIP-7702 delegated source EOA.
  * @dev The source authorizes this deployed code address through an EIP-7702
- * authorization. Every executable field is committed by PLAN_HASH and the
- * immutable destination is the only caller allowed to execute the plan.
+ * authorization. Every executable field is committed by PLAN_HASH, and every
+ * transfer is forced to the immutable destination. Any account may pay gas to
+ * execute that fixed plan without gaining authority to redirect assets.
  */
 contract SafeExit7702RescueDelegate {
     using SafeERC20 for IERC20;
@@ -54,7 +55,6 @@ contract SafeExit7702RescueDelegate {
     bytes32 public immutable STATE_SLOT;
 
     error WrongExecutionContext(address actual, address expected);
-    error CallerMustBeDestination(address caller, address destination);
     error WrongChain(uint256 actual, uint256 expected);
     error RescueExpired(uint256 deadline);
     error InvalidConfiguration();
@@ -121,7 +121,7 @@ contract SafeExit7702RescueDelegate {
         RESCUE_NONCE = rescueNonce;
         STATE_SLOT = keccak256(
             abi.encode(
-                "safeexit.eip7702.rescue-state.v1",
+                "safeexit.eip7702.rescue-state.v2",
                 expectedChainId,
                 source,
                 destination,
@@ -140,13 +140,6 @@ contract SafeExit7702RescueDelegate {
         _;
     }
 
-    modifier onlyDestination() {
-        if (msg.sender != DESTINATION) {
-            revert CallerMustBeDestination(msg.sender, DESTINATION);
-        }
-        _;
-    }
-
     /**
      * @notice Executes a strictly ordered subset of a committed rescue plan.
      * @dev Calling one index at a time lets a failed or already-stolen asset
@@ -155,7 +148,7 @@ contract SafeExit7702RescueDelegate {
     function execute(
         RescueAction[] calldata plan,
         uint256[] calldata indexes
-    ) external onlyDelegatedSource onlyDestination {
+    ) external onlyDelegatedSource {
         if (block.chainid != CHAIN_ID) revert WrongChain(block.chainid, CHAIN_ID);
         if (block.timestamp > DEADLINE) revert RescueExpired(DEADLINE);
 

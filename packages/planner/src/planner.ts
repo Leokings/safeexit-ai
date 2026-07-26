@@ -70,6 +70,76 @@ function priorityFor(action: RescueAction): ActionPriority {
   };
 }
 
+function stableActionKey(action: RescueAction): string {
+  const normalizeAddress = (value: string): string => value.toLowerCase();
+
+  switch (action.actionType) {
+    case "TRANSFER_NATIVE":
+      return [
+        action.actionType,
+        normalizeAddress(action.parameters.recipient),
+        action.parameters.maximumAmount,
+        action.parameters.amountStrategy,
+      ].join(":");
+    case "TRANSFER_ERC20":
+      return [
+        action.actionType,
+        normalizeAddress(action.parameters.tokenAddress),
+        normalizeAddress(action.parameters.recipient),
+        action.parameters.amount,
+      ].join(":");
+    case "TRANSFER_ERC721":
+      return [
+        action.actionType,
+        normalizeAddress(action.parameters.collectionAddress),
+        normalizeAddress(action.parameters.recipient),
+        action.parameters.tokenId,
+      ].join(":");
+    case "TRANSFER_ERC1155":
+      return [
+        action.actionType,
+        normalizeAddress(action.parameters.collectionAddress),
+        normalizeAddress(action.parameters.recipient),
+        action.parameters.tokenId,
+        action.parameters.amount,
+      ].join(":");
+    case "REVOKE_ERC20_APPROVAL":
+      return [
+        action.actionType,
+        normalizeAddress(action.parameters.tokenAddress),
+        normalizeAddress(action.parameters.spenderAddress),
+      ].join(":");
+    case "REVOKE_NFT_OPERATOR":
+      return [
+        action.actionType,
+        action.parameters.standard,
+        normalizeAddress(action.parameters.collectionAddress),
+        normalizeAddress(action.parameters.operatorAddress),
+      ].join(":");
+    case "CLAIM_SUPPORTED_AIRDROP":
+      return [
+        action.actionType,
+        action.parameters.adapterId,
+        normalizeAddress(action.parameters.contractAddress),
+        action.parameters.claimReference,
+      ].join(":");
+    case "WITHDRAW_SUPPORTED_POSITION":
+      return [
+        action.actionType,
+        action.parameters.adapterId,
+        normalizeAddress(action.parameters.contractAddress),
+        action.parameters.positionId,
+      ].join(":");
+    case "CUSTOM_SUPPORTED_ADAPTER":
+      return [
+        action.actionType,
+        action.parameters.adapterId,
+        normalizeAddress(action.parameters.contractAddress),
+        action.parameters.operationId,
+      ].join(":");
+  }
+}
+
 function compareActions(
   left: RescueAction,
   right: RescueAction,
@@ -82,6 +152,7 @@ function compareActions(
     rightPriority.risk - leftPriority.risk ||
     rightPriority.value - leftPriority.value ||
     rightPriority.type - leftPriority.type ||
+    stableActionKey(left).localeCompare(stableActionKey(right)) ||
     left.id.localeCompare(right.id)
   );
 }

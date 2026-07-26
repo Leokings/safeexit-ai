@@ -101,7 +101,7 @@ contract SafeExit7702RescueDelegateFactory {
     ) private view returns (bytes32) {
         return keccak256(
             abi.encode(
-                "safeexit.eip7702.delegate.v1",
+                "safeexit.eip7702.delegate.v2",
                 block.chainid,
                 source,
                 destination,

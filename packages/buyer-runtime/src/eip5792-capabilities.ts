@@ -17,6 +17,25 @@ export type Eip5792CapabilityAssessment = Readonly<{
   reason: string;
 }>;
 
+export type Eip5792CapabilityEvidence = Readonly<{
+  schemaVersion: "safeexit-eip5792-capability-evidence-v1";
+  walletAddress: `0x${string}`;
+  checkedChainIdHex: string;
+  checkedAt: string;
+  method: "wallet_getCapabilities";
+  readOnly: true;
+  assessment: Eip5792CapabilityAssessment;
+  advertisedCapabilities: unknown;
+  retainedSensitiveMaterial: Readonly<{
+    signature: false;
+    authorization: false;
+    rawTransaction: false;
+    privateKey: false;
+    seedPhrase: false;
+    mnemonic: false;
+  }>;
+}>;
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -44,9 +63,43 @@ function capabilityStatus(
     : undefined;
 }
 
+function isSensitiveEvidenceKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return [
+    "signature",
+    "authorization",
+    "rawtransaction",
+    "signedtransaction",
+    "privatekey",
+    "seed",
+    "seedphrase",
+    "mnemonic",
+  ].some((fragment) => normalized.includes(fragment));
+}
+
+export function sanitizeEip5792CapabilityEvidence(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeEip5792CapabilityEvidence(entry));
+  }
+
+  const source = record(value);
+  if (!source) {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(source).map(([key, entry]) => [
+      key,
+      isSensitiveEvidenceKey(key)
+        ? "[REDACTED]"
+        : sanitizeEip5792CapabilityEvidence(entry),
+    ]),
+  );
+}
+
 export function assessEip5792Capabilities(
   value: unknown,
-  chainIdHex = XLAYER_MAINNET_HEX_CHAIN_ID,
+  chainIdHex: string = XLAYER_MAINNET_HEX_CHAIN_ID,
 ): Eip5792CapabilityAssessment {
   const capabilitiesByChain = record(value);
   const normalizedChainId = chainIdHex.toLowerCase();
@@ -134,5 +187,39 @@ export function assessEip5792Capabilities(
     reason:
       "The wallet returned an X Layer capability record without a supported " +
       "atomic-call status or a verified SafeExit destination-paid route.",
+  };
+}
+
+export function createEip5792CapabilityEvidence(input: Readonly<{
+  walletAddress: `0x${string}`;
+  capabilities: unknown;
+  checkedChainIdHex?: string;
+  checkedAt?: string;
+}>): Eip5792CapabilityEvidence {
+  const checkedChainIdHex =
+    input.checkedChainIdHex ?? XLAYER_MAINNET_HEX_CHAIN_ID;
+
+  return {
+    schemaVersion: "safeexit-eip5792-capability-evidence-v1",
+    walletAddress: input.walletAddress,
+    checkedChainIdHex,
+    checkedAt: input.checkedAt ?? new Date().toISOString(),
+    method: "wallet_getCapabilities",
+    readOnly: true,
+    assessment: assessEip5792Capabilities(
+      input.capabilities,
+      checkedChainIdHex,
+    ),
+    advertisedCapabilities: sanitizeEip5792CapabilityEvidence(
+      input.capabilities,
+    ),
+    retainedSensitiveMaterial: {
+      signature: false,
+      authorization: false,
+      rawTransaction: false,
+      privateKey: false,
+      seedPhrase: false,
+      mnemonic: false,
+    },
   };
 }

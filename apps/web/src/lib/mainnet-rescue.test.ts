@@ -4,6 +4,7 @@ import {
   getConfiguredPermitSettlementAddress,
   getConfiguredPermitSettlementRuntimeHash,
 } from "@safeexit/adapters";
+import { XLAYER_SAFEEXIT_EIP7702_FACTORY_V2 } from "@safeexit/buyer-runtime";
 import { computePlanIntegrityHash } from "@safeexit/planner";
 import {
   evmAddressSchema,
@@ -11,9 +12,13 @@ import {
 } from "@safeexit/shared";
 
 import {
+  eip7702RouteKey,
   gaslessRouteKey,
   mainnetPreflightResponseSchema,
+  requireReviewedEip7702Route,
 } from "./mainnet-rescue";
+import { EIP7702_SIMULATION_PROVIDER_ID } from "./eip7702-constants";
+import { assembleEip7702LocalSigningPackageFromPlan } from "./live-eip7702-signing-package-builder";
 
 const source = evmAddressSchema.parse("0x1111111111111111111111111111111111111111");
 const destination = evmAddressSchema.parse("0x2222222222222222222222222222222222222222");
@@ -126,6 +131,45 @@ function permitRoute(response: ReturnType<typeof validPreflightResponse>) {
   return route;
 }
 
+function validEip7702PreflightResponse() {
+  const response = validPreflightResponse();
+  const simulation = {
+    ...response.simulations[0]!,
+    providerId: EIP7702_SIMULATION_PROVIDER_ID,
+  };
+  const signingPackage = assembleEip7702LocalSigningPackageFromPlan({
+    context: {
+      jobId: "web:incident:test",
+      incidentId: response.plan.incidentId,
+      plan: response.plan,
+      simulation: {
+        status: "SUCCEEDED",
+        providerId: EIP7702_SIMULATION_PROVIDER_ID,
+        results: [simulation],
+        executableActionIds: [response.plan.actions[0]!.id],
+        excludedActionIds: [],
+      },
+    },
+    factory: XLAYER_SAFEEXIT_EIP7702_FACTORY_V2,
+    delegateAddress: "0x5555555555555555555555555555555555555555",
+    sourceNonce: 0,
+    rescueNonce: `0x${"66".repeat(32)}`,
+    now: new Date(observedAt),
+  });
+  return mainnetPreflightResponseSchema.parse({
+    ...response,
+    simulations: [simulation],
+    gaslessActions: [],
+    eip7702Route: {
+      executionPath: "SAFEEXIT_EIP7702",
+      authorizationStandard: "EIP7702",
+      capabilityStatus: "VERIFIED",
+      signingPackage,
+    },
+    blockedActions: [],
+  });
+}
+
 describe("mainnet rescue settlement adapters", () => {
   const deployments = [
     [1, "0x1183e94093ad7baf0606bef1755bd56930c1eec1d7a9db4102eac03663bb54cd"],
@@ -193,5 +237,62 @@ describe("mainnet rescue settlement adapters", () => {
   it("keeps volatile action evidence out of the executable review fingerprint", () => {
     const first = permitRoute(validPreflightResponse());
     expect(gaslessRouteKey({ ...first, actionId: "action:other" })).toBe(gaslessRouteKey(first));
+  });
+
+  it("accepts a fully committed EIP-7702 route", () => {
+    expect(
+      mainnetPreflightResponseSchema.safeParse(validEip7702PreflightResponse()).success,
+    ).toBe(true);
+  });
+
+  it.each([
+    ["destination", (value: ReturnType<typeof validEip7702PreflightResponse>) => {
+      value.eip7702Route!.signingPackage.destinationAddress = replacementAddress;
+    }],
+    ["delegated amount", (value: ReturnType<typeof validEip7702PreflightResponse>) => {
+      value.eip7702Route!.signingPackage.actions[0]!.amount = "1";
+    }],
+    ["simulation result", (value: ReturnType<typeof validEip7702PreflightResponse>) => {
+      value.eip7702Route!.signingPackage.simulation.resultIds[0] = "simulation:other";
+    }],
+  ])("rejects a tampered EIP-7702 %s commitment", (_name, mutate) => {
+    const response = validEip7702PreflightResponse();
+    mutate(response);
+    expect(mainnetPreflightResponseSchema.safeParse(response).success).toBe(false);
+  });
+
+  it("keeps fresh authorization entropy and action evidence out of the EIP-7702 review fingerprint", () => {
+    const route = validEip7702PreflightResponse().eip7702Route!;
+    const refreshed = {
+      ...route,
+      signingPackage: {
+        ...route.signingPackage,
+        packageId: "eip7702-package:fresh",
+        rescueNonce: `0x${"77".repeat(32)}`,
+        delegateAddress: evmAddressSchema.parse(
+          "0x7777777777777777777777777777777777777777",
+        ),
+        actionIds: ["action:fresh-evidence"],
+      },
+    };
+    const reviewedKey = eip7702RouteKey(route);
+    expect(eip7702RouteKey(refreshed)).toBe(reviewedKey);
+    expect(requireReviewedEip7702Route(refreshed, reviewedKey)).toBe(refreshed);
+  });
+
+  it("rejects a changed EIP-7702 executable batch commitment", () => {
+    const route = validEip7702PreflightResponse().eip7702Route!;
+    const reviewedKey = eip7702RouteKey(route);
+    const changed = {
+      ...route,
+      signingPackage: {
+        ...route.signingPackage,
+        delegatePlanHash: `0x${"88".repeat(32)}` as const,
+      },
+    };
+
+    expect(() => requireReviewedEip7702Route(changed, reviewedKey)).toThrow(
+      "The selected recovery route changed during fresh preflight",
+    );
   });
 });

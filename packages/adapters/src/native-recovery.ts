@@ -4,24 +4,30 @@ export type NativeRecoveryStrategy =
 
 export type NativeRecoveryBoundary = {
   strategy: NativeRecoveryStrategy;
-  status: "IMPLEMENTATION_TESTING" | "OFFICIAL_DOCS_REQUIRED";
-  executable: false;
+  status: "INTERNALLY_VERIFIED" | "OFFICIAL_DOCS_REQUIRED";
+  executable: boolean;
   supportedChainIds: readonly number[];
   requirements: readonly string[];
+  residualRisks: readonly string[];
 };
 
 export const nativeRecoveryBoundaries = [
   {
     strategy: "EIP7702_SPONSORED_EXECUTION",
-    status: "IMPLEMENTATION_TESTING",
-    executable: false,
+    status: "INTERNALLY_VERIFIED",
+    executable: true,
     supportedChainIds: [196],
     requirements: [
-      "A bytecode-verified incident-bound delegate deployment on X Layer",
-      "A reviewed local signer or official wallet method that displays the exact delegate and chain",
-      "The destination-paid local type-4 runtime must pass an X Layer no-value canary",
-      "A private submission policy for the delegation, rescue, and clear sequence",
-      "Full type-4 integration testing plus a verified delegation-revocation receipt",
+      "The package must use the bytecode-pinned SafeExit V2 factory on X Layer",
+      "The local signer must verify the factory prediction through both official X Layer RPC endpoints",
+      "The source must sign one delegation and one clearing authorization locally",
+      "A fresh capped temporary payer funded by the destination must submit the type-4 sequence",
+      "Every action must pass fresh deterministic simulation and clearing must be observed canonically",
+    ],
+    residualRisks: [
+      "The current route uses the public X Layer mempool and is not a private bundle",
+      "The source key remains compromised after rescue and the wallet must not be reused",
+      "The V2 route has internal review and mainnet evidence but no independent external audit",
     ],
   },
   {
@@ -35,6 +41,9 @@ export const nativeRecoveryBoundaries = [
       "A strict prohibition on public-mempool fallback",
       "Pinned-state bundle simulation and inclusion-status monitoring",
       "A sponsor policy that cannot choose arbitrary source targets or calldata",
+    ],
+    residualRisks: [
+      "No official X Layer private atomic bundle adapter is configured",
     ],
   },
 ] as const satisfies readonly NativeRecoveryBoundary[];

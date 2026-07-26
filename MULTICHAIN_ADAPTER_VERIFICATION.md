@@ -68,9 +68,11 @@ The current destination-paid routes are:
 - ERC-4494 permit plus atomic NFT transfer.
 
 Settlement routes additionally require the destination wallet to report the
-verified SAFEEXIT permit settlement contract for the selected chain. Native
-currency, ERC-1155 assets, non-permit tokens, protocol claims, protocol
-withdrawals, EIP-7702, and private bundles remain non-executable.
+verified SAFEEXIT permit settlement contract for the selected chain. On the
+seven non-X Layer mainnets, native currency, ERC-1155 assets, non-permit
+tokens, protocol claims, protocol withdrawals, EIP-7702, and private bundles
+remain non-executable. X Layer V2 EIP-7702 is a separately reviewed adapter
+and is not evidence supplied by this multichain permit-settlement verification.
 
 ## Boundaries
 

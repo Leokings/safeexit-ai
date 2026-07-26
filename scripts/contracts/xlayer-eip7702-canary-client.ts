@@ -11,19 +11,22 @@ import {
 import type { Eip1193Provider } from "@safeexit/buyer-runtime/eip1193";
 import {
   assessEip5792Capabilities,
+  createEip5792CapabilityEvidence,
   XLAYER_MAINNET_HEX_CHAIN_ID,
 } from "@safeexit/buyer-runtime/eip5792-capabilities";
 import {
   LocalEip7702RescueRuntime,
-  XLAYER_SAFEEXIT_EIP7702_FACTORY_V1,
+  XLAYER_SAFEEXIT_EIP7702_FACTORY_V2,
   type Eip7702DestinationTransportPort,
   type Eip7702LocalSimulation,
   type Eip7702LocalTransactionRequest,
   type Eip7702PackageInspection,
 } from "@safeexit/buyer-runtime/eip7702-runtime";
 import {
+  requestEip7702SourceSignerFromExtension,
+} from "@safeexit/buyer-runtime/eip7702-extension-bridge";
+import {
   ViemLocalEip7702DestinationTransport,
-  ViemLocalEip7702SourceSigner,
 } from "@safeexit/buyer-runtime/eip7702-viem";
 import type { DestinationReceipt } from "@safeexit/buyer-runtime/schemas";
 import {
@@ -95,6 +98,14 @@ function checkbox(id: string): HTMLInputElement {
   const value = element(id);
   if (!(value instanceof HTMLInputElement) || value.type !== "checkbox") {
     throw new Error(`Canary element is not a checkbox: ${id}`);
+  }
+  return value;
+}
+
+function textInput(id: string): HTMLInputElement {
+  const value = element(id);
+  if (!(value instanceof HTMLInputElement) || value.type !== "text") {
+    throw new Error(`Canary element is not a text input: ${id}`);
   }
   return value;
 }
@@ -484,23 +495,30 @@ async function buildFreshCanaryPackage(
       publicClient.getCode({ address: sourceAddress }),
       publicClient.getBalance({ address: sourceAddress }),
       publicClient.getCode({
-        address: XLAYER_SAFEEXIT_EIP7702_FACTORY_V1.address,
+        address: XLAYER_SAFEEXIT_EIP7702_FACTORY_V2.address,
       }),
       publicClient.getCode({ address: TEST_TOKEN }),
       publicClient.getBlockNumber(),
     ]);
-  if (
-    (sourceCodeValue ?? EMPTY_CODE) !== EMPTY_CODE ||
-    sourceBalance !== 0n ||
-    sourceNonce !== 0
-  ) {
-    throw new Error("Generated canary source is not a fresh empty EOA");
+  const sourceStateFailures = [
+    (sourceCodeValue ?? EMPTY_CODE) !== EMPTY_CODE
+      ? "account code is present"
+      : undefined,
+    sourceBalance !== 0n
+      ? `native balance is ${formatEther(sourceBalance)} OKB`
+      : undefined,
+    sourceNonce !== 0 ? `transaction nonce is ${sourceNonce}` : undefined,
+  ].filter((value): value is string => Boolean(value));
+  if (sourceStateFailures.length > 0) {
+    throw new Error(
+      `The no-value canary requires a fresh empty source; ${sourceStateFailures.join(", ")}. Do not fund the source because the destination pays gas.`,
+    );
   }
   if (
     !factoryCode ||
     factoryCode === EMPTY_CODE ||
     keccak256(factoryCode).toLowerCase() !==
-      XLAYER_SAFEEXIT_EIP7702_FACTORY_V1.runtimeHash.toLowerCase()
+      XLAYER_SAFEEXIT_EIP7702_FACTORY_V2.runtimeHash.toLowerCase()
   ) {
     throw new Error("Pinned EIP-7702 factory bytecode verification failed");
   }
@@ -508,7 +526,7 @@ async function buildFreshCanaryPackage(
     throw new Error("The fixed no-value canary token is not deployed");
   }
   const delegateAddress = await publicClient.readContract({
-    address: XLAYER_SAFEEXIT_EIP7702_FACTORY_V1.address,
+    address: XLAYER_SAFEEXIT_EIP7702_FACTORY_V2.address,
     abi: eip7702RescueDelegateFactoryAbi,
     functionName: "predictDelegate",
     args: [
@@ -537,8 +555,8 @@ async function buildFreshCanaryPackage(
     deadline,
     sourceNonce,
     rescueNonce,
-    factoryAddress: XLAYER_SAFEEXIT_EIP7702_FACTORY_V1.address,
-    factoryRuntimeHash: XLAYER_SAFEEXIT_EIP7702_FACTORY_V1.runtimeHash,
+    factoryAddress: XLAYER_SAFEEXIT_EIP7702_FACTORY_V2.address,
+    factoryRuntimeHash: XLAYER_SAFEEXIT_EIP7702_FACTORY_V2.runtimeHash,
     delegateAddress,
     actionIds: ["canary-revoke-zero-allowance"],
     actions: [
@@ -574,13 +592,14 @@ const connectButton = button("connect");
 const prepareButton = button("prepare");
 const executeButton = button("execute");
 const confirmation = checkbox("confirm");
+const sourceInput = textInput("canary-source");
 const probeConnectButton = button("probe-connect");
 const probeCheckButton = button("probe-check");
 let provider: Eip1193Provider | undefined;
 let fundingAddress: `0x${string}` | undefined;
 let probeProvider: Eip1193Provider | undefined;
 let probeAddress: `0x${string}` | undefined;
-let sourceAccount: ReturnType<typeof privateKeyToAccount> | undefined;
+let sourceAddress: `0x${string}` | undefined;
 let localDestinationAccount: ReturnType<typeof privateKeyToAccount> | undefined;
 let signingPackage: Eip7702LocalSigningPackage | undefined;
 let gasBudget = 0n;
@@ -588,17 +607,33 @@ let destinationTransport: FundedLocalCanaryDestinationTransport | undefined;
 
 function refreshButtons(): void {
   probeCheckButton.disabled = !probeProvider || !probeAddress;
-  prepareButton.disabled = !provider || !fundingAddress;
+  prepareButton.disabled =
+    !provider ||
+    !fundingAddress ||
+    !isAddress(sourceInput.value.trim());
   executeButton.disabled =
     !signingPackage ||
     !destinationTransport ||
-    !sourceAccount ||
+    !sourceAddress ||
     !localDestinationAccount ||
     gasBudget === 0n ||
     !confirmation.checked;
 }
 
 confirmation.addEventListener("change", refreshButtons);
+sourceInput.addEventListener("input", () => {
+  sourceAddress = undefined;
+  signingPackage = undefined;
+  destinationTransport = undefined;
+  localDestinationAccount = undefined;
+  gasBudget = 0n;
+  setText("source", "Not prepared");
+  setText("destination", "Not generated");
+  setText("delegate", "Not predicted");
+  setText("expiry", "Not prepared");
+  setText("gas", "Not calculated");
+  refreshButtons();
+});
 
 probeConnectButton.addEventListener("click", async () => {
   probeConnectButton.disabled = true;
@@ -652,9 +687,13 @@ probeCheckButton.addEventListener("click", async () => {
       params: [probeAddress, [XLAYER_MAINNET_HEX_CHAIN_ID]],
     });
     const assessment = assessEip5792Capabilities(capabilityValue);
+    const evidence = createEip5792CapabilityEvidence({
+      walletAddress: probeAddress,
+      capabilities: capabilityValue,
+    });
     setText(
       "probe-capabilities",
-      JSON.stringify(capabilityValue).slice(0, 2_000),
+      JSON.stringify(evidence, null, 2).slice(0, 4_000),
     );
     setText(
       "probe-route",
@@ -708,15 +747,18 @@ prepareButton.addEventListener("click", async () => {
   const activeProvider = provider;
   const activeFundingAddress = fundingAddress;
   prepareButton.disabled = true;
+  sourceInput.disabled = true;
   try {
+    const enteredSource = sourceInput.value.trim();
+    if (!isAddress(enteredSource)) {
+      throw new Error("Enter the fresh source wallet address used by the extension.");
+    }
     status(
-      "Generating ephemeral source and local destination signers, then verifying fixed canary scope.",
+      "Generating the local destination signer and verifying the fixed canary scope.",
     );
-    const generatedSourceAccount = privateKeyToAccount(generatePrivateKey());
     const generatedDestinationAccount = privateKeyToAccount(generatePrivateKey());
-    sourceAccount = generatedSourceAccount;
+    sourceAddress = getAddress(enteredSource);
     localDestinationAccount = generatedDestinationAccount;
-    const sourceAddress = getAddress(generatedSourceAccount.address);
     const destinationAddress = getAddress(generatedDestinationAccount.address);
     const publicClient = createPublicClient({
       chain: xLayerMainnet,
@@ -770,10 +812,10 @@ prepareButton.addEventListener("click", async () => {
     setText("action", `Revoke zero allowance on ${TEST_TOKEN}`);
     setText("expiry", prepared.expiresAt);
     status(
-      "Canary package ready. Both ephemeral keys exist only in this tab's memory; unused gas will be returned.",
+      "Canary package ready. The source key will be entered only in the SafeExit extension; the local destination key exists only in this tab.",
     );
   } catch (error) {
-    sourceAccount = undefined;
+    sourceAddress = undefined;
     localDestinationAccount = undefined;
     signingPackage = undefined;
     destinationTransport = undefined;
@@ -782,6 +824,7 @@ prepareButton.addEventListener("click", async () => {
     setText("gas", "Not calculated");
     status(errorMessage(error));
   } finally {
+    sourceInput.disabled = false;
     prepareButton.disabled = false;
     refreshButtons();
   }
@@ -789,7 +832,7 @@ prepareButton.addEventListener("click", async () => {
 
 executeButton.addEventListener("click", async () => {
   if (
-    !sourceAccount ||
+    !sourceAddress ||
     !localDestinationAccount ||
     !signingPackage ||
     !destinationTransport ||
@@ -797,7 +840,7 @@ executeButton.addEventListener("click", async () => {
   ) {
     return;
   }
-  const activeSourceAccount = sourceAccount;
+  const activeSourceAddress = sourceAddress;
   const activeLocalDestinationAccount = localDestinationAccount;
   let activeSigningPackage = signingPackage;
   const activeDestinationTransport = destinationTransport;
@@ -805,6 +848,7 @@ executeButton.addEventListener("click", async () => {
   executeButton.disabled = true;
   connectButton.disabled = true;
   prepareButton.disabled = true;
+  sourceInput.disabled = true;
   let fundingConfirmed = false;
   let executionError: unknown;
   let refundError: unknown;
@@ -827,19 +871,27 @@ executeButton.addEventListener("click", async () => {
     element("transactions").textContent = "";
     setText("simulation", "PENDING");
     setText("result", "PENDING");
-    await activeDestinationTransport.fundGasBudget(activeGasBudget);
-    fundingConfirmed = true;
     const refreshed = await buildFreshCanaryPackage(
-      getAddress(activeSourceAccount.address),
+      activeSourceAddress,
       getAddress(activeLocalDestinationAccount.address),
     );
     activeSigningPackage = refreshed.signingPackage;
     signingPackage = refreshed.signingPackage;
     setText("delegate", refreshed.delegateAddress);
     setText("expiry", refreshed.expiresAt);
-    status("Gas funded. Fresh package committed; starting delegate deployment.");
+    status(
+      "Fresh package committed. Review and sign it in the SafeExit Source Signer extension. No gas has been funded yet.",
+    );
+    const extensionSigner = await requestEip7702SourceSignerFromExtension({
+      signingPackageValue: activeSigningPackage,
+    });
+    status(
+      "Source authorizations verified locally. Funding the capped destination gas budget.",
+    );
+    await activeDestinationTransport.fundGasBudget(activeGasBudget);
+    fundingConfirmed = true;
     const runtime = new LocalEip7702RescueRuntime({
-      trustedFactory: XLAYER_SAFEEXIT_EIP7702_FACTORY_V1,
+      trustedFactory: XLAYER_SAFEEXIT_EIP7702_FACTORY_V2,
     });
     const confirmationValue = {
       schemaVersion: "safeexit-buyer-confirmation-v1",
@@ -856,10 +908,10 @@ executeButton.addEventListener("click", async () => {
       confirmationValue,
       activeDestinationTransport,
     );
-    status("Delegate verified. Signing delegation and clearing authorizations locally.");
+    status("Delegate verified. Simulating the signed authorization package.");
     const authorized = await runtime.authorize(
       provisioned,
-      new ViemLocalEip7702SourceSigner(activeSourceAccount),
+      extensionSigner,
     );
     const result = await runtime.execute(authorized);
     completedEvidence = await activeDestinationTransport.finalEvidence(
@@ -911,6 +963,7 @@ executeButton.addEventListener("click", async () => {
     setText("result", `FAILED: ${errorMessage(error)}`);
     status(errorMessage(error));
   } finally {
+    sourceInput.disabled = false;
     connectButton.disabled = false;
     prepareButton.disabled = false;
     refreshButtons();

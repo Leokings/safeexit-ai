@@ -50,6 +50,10 @@ const deploymentEnvironmentSchema = z.strictObject({
 
 export type DeploymentEnvironment = z.infer<typeof deploymentEnvironmentSchema>;
 
+function configured(value: string | undefined): string | undefined {
+  return value === "" ? undefined : value;
+}
+
 export function getDeploymentRpcUrl(
   config: DeploymentEnvironment,
   chainId: number,
@@ -79,40 +83,44 @@ export function getDeploymentRpcUrl(
 export function parseDeploymentEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
 ): DeploymentEnvironment {
-  const nodeEnv = environment.NODE_ENV ?? "development";
+  const nodeEnv = configured(environment.NODE_ENV) ?? "development";
   const production = nodeEnv === "production";
   return deploymentEnvironmentSchema.parse({
     nodeEnv,
     publicBaseUrl:
-      environment.SAFEEXIT_PUBLIC_BASE_URL ??
+      configured(environment.SAFEEXIT_PUBLIC_BASE_URL) ??
       (production ? "https://safeexit.invalid" : "http://localhost:3000"),
-    agentMode: environment.SAFEEXIT_AGENT_MODE ?? "DISABLED",
+    agentMode: configured(environment.SAFEEXIT_AGENT_MODE) ?? "DISABLED",
     agentStore:
-      environment.SAFEEXIT_AGENT_STORE ?? (production ? "DATABASE" : "MEMORY"),
-    aiMode: environment.SAFEEXIT_AI_MODE ?? "DETERMINISTIC",
-    aiModel: environment.SAFEEXIT_AI_MODEL,
+      configured(environment.SAFEEXIT_AGENT_STORE) ??
+      (production ? "DATABASE" : "MEMORY"),
+    aiMode: configured(environment.SAFEEXIT_AI_MODE) ?? "DETERMINISTIC",
+    aiModel: configured(environment.SAFEEXIT_AI_MODEL),
     aiMaxEstimatedInputTokens:
-      environment.SAFEEXIT_AI_MAX_ESTIMATED_INPUT_TOKENS ?? "12000",
-    aiMaxOutputTokens: environment.SAFEEXIT_AI_MAX_OUTPUT_TOKENS ?? "256",
-    aiTimeoutMs: environment.SAFEEXIT_AI_TIMEOUT_MS ?? "8000",
-    agentApiKey: environment.SAFEEXIT_AGENT_API_KEY,
-    cronSecret: environment.CRON_SECRET,
-    okxProviderAgentId: environment.SAFEEXIT_OKX_PROVIDER_AGENT_ID,
-    okxWeb3ApiKey: environment.OKX_WEB3_API_KEY,
-    okxWeb3SecretKey: environment.OKX_WEB3_SECRET_KEY,
-    okxWeb3Passphrase: environment.OKX_WEB3_PASSPHRASE,
-    x402Mode: environment.SAFEEXIT_X402_MODE ?? "DISABLED",
-    x402PayToAddress: environment.SAFEEXIT_X402_PAY_TO_ADDRESS,
-    ethereumMainnetRpcUrl: environment.ETHEREUM_MAINNET_RPC_URL,
-    bnbMainnetRpcUrl: environment.BNB_MAINNET_RPC_URL,
-    polygonMainnetRpcUrl: environment.POLYGON_MAINNET_RPC_URL,
-    arbitrumMainnetRpcUrl: environment.ARBITRUM_MAINNET_RPC_URL,
-    optimismMainnetRpcUrl: environment.OPTIMISM_MAINNET_RPC_URL,
-    baseMainnetRpcUrl: environment.BASE_MAINNET_RPC_URL,
-    avalancheMainnetRpcUrl: environment.AVALANCHE_MAINNET_RPC_URL,
+      configured(environment.SAFEEXIT_AI_MAX_ESTIMATED_INPUT_TOKENS) ?? "12000",
+    aiMaxOutputTokens:
+      configured(environment.SAFEEXIT_AI_MAX_OUTPUT_TOKENS) ?? "256",
+    aiTimeoutMs: configured(environment.SAFEEXIT_AI_TIMEOUT_MS) ?? "8000",
+    agentApiKey: configured(environment.SAFEEXIT_AGENT_API_KEY),
+    cronSecret: configured(environment.CRON_SECRET),
+    okxProviderAgentId: configured(environment.SAFEEXIT_OKX_PROVIDER_AGENT_ID),
+    okxWeb3ApiKey: configured(environment.OKX_WEB3_API_KEY),
+    okxWeb3SecretKey: configured(environment.OKX_WEB3_SECRET_KEY),
+    okxWeb3Passphrase: configured(environment.OKX_WEB3_PASSPHRASE),
+    x402Mode: configured(environment.SAFEEXIT_X402_MODE) ?? "DISABLED",
+    x402PayToAddress: configured(environment.SAFEEXIT_X402_PAY_TO_ADDRESS),
+    ethereumMainnetRpcUrl: configured(environment.ETHEREUM_MAINNET_RPC_URL),
+    bnbMainnetRpcUrl: configured(environment.BNB_MAINNET_RPC_URL),
+    polygonMainnetRpcUrl: configured(environment.POLYGON_MAINNET_RPC_URL),
+    arbitrumMainnetRpcUrl: configured(environment.ARBITRUM_MAINNET_RPC_URL),
+    optimismMainnetRpcUrl: configured(environment.OPTIMISM_MAINNET_RPC_URL),
+    baseMainnetRpcUrl: configured(environment.BASE_MAINNET_RPC_URL),
+    avalancheMainnetRpcUrl: configured(environment.AVALANCHE_MAINNET_RPC_URL),
     xLayerMainnetRpcUrl:
-      environment.XLAYER_MAINNET_RPC_URL ?? environment.OKX_XLAYER_MAINNET_RPC_URL,
+      configured(environment.XLAYER_MAINNET_RPC_URL) ??
+      configured(environment.OKX_XLAYER_MAINNET_RPC_URL),
     deploymentId:
-      environment.VERCEL_GIT_COMMIT_SHA ?? environment.SAFEEXIT_DEPLOYMENT_ID,
+      configured(environment.VERCEL_GIT_COMMIT_SHA) ??
+      configured(environment.SAFEEXIT_DEPLOYMENT_ID),
   });
 }

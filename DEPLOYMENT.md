@@ -1,9 +1,11 @@
 # SAFEEXIT Deployment
 
 This repository is ready to host the optional web dashboard and the
-provider-neutral agent job API. The hosted service exposes a narrowly scoped X
-Layer mainnet destination-paid recovery path described below. Native OKB and
-assets without a verified permit route remain non-executable.
+provider-neutral agent job API. The hosted service exposes the destination-paid
+permit routes and the strict X Layer V2 EIP-7702 route described below. Native
+currency and assets without a verified adapter remain non-executable; X Layer
+EIP-7702 packages are the explicit exception when every deterministic gate
+passes.
 
 The codebase also contains an opt-in `LIVE_READONLY` mode. It uses the official
 OKX Wallet API to discover X Layer ERC-20 candidates, re-verifies balances with
@@ -393,8 +395,7 @@ independently audited.
 No server credential, relayer key, or private key is used. The short-lived
 signature remains only in the browser tab. Source-funded transactions are
 disabled in this flow. This is a real-money mainnet path with an internal
-engineering review, not an independent audit; use remains best effort and
-permit-only.
+engineering review, not an independent audit; use remains best effort.
 
 ## Current production limitations
 
@@ -414,32 +415,28 @@ permit-only.
 - The normalized provider bridge is connected to SAFEEXIT's hosted API, but the
   operator's OKX runtime still performs marketplace acceptance and encrypted
   delivery. SAFEEXIT does not expose a public unauthenticated webhook.
-- Native currency remains blocked in every production signing package. The
-  X Layer EIP-7702 implementation-under-test includes an incident-bound
-  CREATE2 delegate, fixed structured actions, destination-only execution,
-  isolated action replay state, a local in-process source signer adapter,
-  destination-paid type-4 submission, and a nonce-consecutive clearing
-  authorization with cleanup fallback. It is still exposed as
-  `executable: false`; no hosted endpoint or browser control activates it.
-- The permissionless X Layer factory was deployed through the canonical CREATE2
-  deployer and independently runtime-verified:
-  - Factory: `0xe35964050279262449e71CBf36c86b6fFb5874e5`
+- X Layer production signing packages may include the internally verified V2
+  EIP-7702 route. It uses an incident-bound CREATE2 delegate, fixed structured
+  actions, immutable recipient enforcement, isolated action replay state, a
+  local Source Signer extension, a fresh capped temporary payer funded by the
+  destination, and nonce-consecutive clearing.
+- The permissionless X Layer V2 factory is bytecode-pinned:
+  - Factory: `0x115C0340040C68bDc68E1890DA984575E49814e5`
   - Runtime hash:
-    `0x0641a98eac8a123bb898f848ff3c04fb8a9e7f42647f48c7838a4a6e7fee02cc`
+    `0x0f8beb374fbb87b0a1100b2c25dd649d897a76da1563e8b6cd885a24ac34dc7f`
   - Deployment transaction:
-    `0x7e44b0ccfa0e649376f413a43424597fe619d270a8baefc21560449c62a00676`
-  - Deployment block: `66047688`
+    `0x5c0cb9bd876b8c86236b60098e30268242d5ffef4ba4ae924f8051a29eb2a154`
   The buyer-local runtime pins this tuple independently of server-issued
-  signing packages.
+  signing packages, and the Source Signer verifies its predicted delegate
+  through both pinned official X Layer RPCs.
 - The complete destination-paid delegate/rescue/clear sequence passed an
   operator-owned no-value X Layer canary. Live type-4 simulation, raw
   authorization preservation, canonical clearing, zero final source balance,
   cleared source code, and unused-gas refund were independently RPC-verified.
   See [`EIP7702_CANARY_EVIDENCE.md`](./EIP7702_CANARY_EVIDENCE.md).
-- Do not activate that route until private submission behavior is defined, the
-  buyer-local signer and contracts receive an independent security review, and
-  an explicit production activation decision is recorded. The route remains
-  `executable: false`.
+- The EIP-7702 route is public-mempool, X Layer-only, and internally reviewed,
+  not independently audited. It remains best effort and does not make the
+  compromised source safe to reuse.
 - Production request limits are stored atomically in PostgreSQL and fail closed
   if that shared store is unavailable. The x402 limit is evaluated before the
   payment middleware so a throttled request is not charged first. Vercel

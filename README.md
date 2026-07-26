@@ -250,33 +250,35 @@ same deterministic contract address:
 unless the deployed runtime matches its pinned chain-specific hash and the
 shared immutable template hash.
 
-Authorization signatures remain in browser memory and are never sent to or
-stored by SAFEEXIT. Assets without a verified permit route, native currency,
-ERC-1155 assets, approvals, airdrops, and positions stay blocked until a
-verified destination-paid adapter exists. The mainnet route is best effort and
-has received an internal engineering review but not an independent audit. No
-monetary-value ceiling is imposed on a route that passes all execution gates.
+Permit authorizations remain in browser memory and are never sent to or stored
+by the SAFEEXIT server. Assets without a verified permit route remain blocked
+on chains without another verified destination-paid adapter. The mainnet
+routes are best effort and have received internal engineering review but not
+an independent audit. No monetary-value ceiling is imposed on a route that
+passes every execution gate.
 
-Native-currency recovery remains non-executable in the website and hosted agent
-API. The first X Layer EIP-7702 implementation layer now includes a
-permissionless CREATE2 factory, an incident-specific delegate, deterministic
-plan hashing, a local source-authorization adapter, destination-paid type-4
-submission, isolated per-action execution, and mandatory clearing. The local
-runtime receives an already constructed signer object in the buyer's process;
-it has no private-key input or network signer endpoint and never returns
-authorizations to SAFEEXIT. The delegate has no arbitrary-call function: it
-supports only committed native, ERC-20, ERC-721, and ERC-1155 transfers plus
-ERC-20 and NFT operator revocations. Its immutable configuration fixes the
-source, destination, chain, deadline, plan hash, and rescue nonce; only the
-destination may execute it.
+X Layer additionally supports an internally verified EIP-7702 route. It uses a
+bytecode-pinned permissionless CREATE2 factory, an incident-specific delegate,
+deterministic plan hashing, a local source-authorization extension, a fresh
+capped temporary payer funded by the destination, isolated per-action
+execution, and mandatory clearing. The website runtime receives an already
+constructed one-use signer object; the source key is entered only inside the
+separately installed Source Signer popup and is never sent to the page or
+server. The delegate has no arbitrary-call function. It supports only committed
+native, ERC-20, ERC-721, and ERC-1155 transfers plus ERC-20 and NFT operator
+revocations.
 
-The deployed factory, live type-4 simulation, no-value X Layer canary, and
-canonical clearing receipt are now verified. The public evidence is recorded in
-[`EIP7702_CANARY_EVIDENCE.md`](./EIP7702_CANARY_EVIDENCE.md). Private submission
-for the rescue race, independent security review, and an explicit activation
-decision remain incomplete. Until every gate is met, `@safeexit/adapters`
-reports the route as `IMPLEMENTATION_TESTING` with `executable: false`, and the
-website/API do not issue EIP-7702 signing packages.
+The delegate's immutable configuration fixes the source, destination, chain,
+deadline, plan hash, and rescue nonce. Any caller may pay to execute the fixed
+plan, but every transfer is forced to the immutable destination and no caller
+can substitute calldata or a recipient. The X Layer V2 factory, exact type-4
+simulation, mainnet rescue transactions, canonical receipts, and zero-address
+clearing were verified. Evidence is recorded in
+[`EIP7702_CANARY_EVIDENCE.md`](./EIP7702_CANARY_EVIDENCE.md).
+
+This EIP-7702 route currently uses the public X Layer mempool. It is not a
+private bundle, does not neutralize the leaked source key, and has not received
+an independent external audit. The compromised source must never be reused.
 
 One injected wallet exposes one active account at a time. The browser flow is
 therefore sequential: activate the source and sign, keep the tab open, switch

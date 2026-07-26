@@ -9,6 +9,7 @@ import {
   PERMIT_SETTLEMENT_VERSION,
   permitSettlementAbi,
 } from "@safeexit/adapters";
+import { XLAYER_SAFEEXIT_EIP7702_FACTORY_V2 } from "@safeexit/buyer-runtime";
 import {
   createDedicatedPublicClient,
   getRescueMainnetChainConfig,
@@ -46,11 +47,14 @@ import {
 } from "@/lib/deployment-env";
 import { hasNonEmptyEvmRevertData } from "@/lib/evm-revert-data";
 import { rateLimitPublicRequest } from "@/lib/agent-http";
+import { EIP7702_SIMULATION_PROVIDER_ID } from "@/lib/eip7702-constants";
+import { LiveEip7702SigningPackageBuilder } from "@/lib/live-eip7702-signing-package-builder";
 import {
   eip712DomainSchema,
   mainnetPreflightRequestSchema,
   mainnetPreflightResponseSchema,
   type Eip712Domain,
+  type Eip7702RescueRoute,
   type GaslessRescueAction,
 } from "@/lib/mainnet-rescue";
 
@@ -945,7 +949,10 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     });
     await repository.saveRescuePlan(plan);
     const provider = new LocalSimulationProvider({
-      id: `${chainConfig.id}-rpc-preflight-v1`,
+      id:
+        incident.chainId === XLAYER_SAFEEXIT_EIP7702_FACTORY_V2.chainId
+          ? EIP7702_SIMULATION_PROVIDER_ID
+          : `${chainConfig.id}-rpc-preflight-v1`,
       kind: "PRODUCTION_RPC",
       client: new ViemLocalSimulationClient(`${chainConfig.id}-preflight-client`, client),
       ttlMs: 300_000,
@@ -1070,11 +1077,49 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       }
       return routes;
     });
-    const gaslessActionIds = new Set(gaslessActions.map((action) => action.actionId));
+    let eip7702Route: Eip7702RescueRoute | undefined;
+    let eip7702UnavailableReason: string | undefined;
+    if (incident.chainId === XLAYER_SAFEEXIT_EIP7702_FACTORY_V2.chainId) {
+      try {
+        const signingPackage = await new LiveEip7702SigningPackageBuilder(
+          chainConfig,
+          rpcUrl,
+          XLAYER_SAFEEXIT_EIP7702_FACTORY_V2,
+        ).buildFromPlan({
+          jobId: `web:${incident.id}`,
+          incidentId: incident.id,
+          plan,
+          simulation: {
+            status: simulation.status,
+            providerId: simulation.providerId,
+            results: [...simulation.results],
+            executableActionIds: simulation.executableActions.map((action) => action.id),
+            excludedActionIds: simulation.excludedActions.map((action) => action.actionId),
+          },
+        });
+        eip7702Route = {
+          executionPath: "SAFEEXIT_EIP7702" as const,
+          authorizationStandard: "EIP7702" as const,
+          capabilityStatus: "VERIFIED" as const,
+          signingPackage,
+        };
+      } catch {
+        eip7702UnavailableReason =
+          "A verified EIP-7702 package is unavailable for the current source state and rescue plan.";
+      }
+    }
+    const recoverableActionIds = new Set([
+      ...gaslessActions.map((action) => action.actionId),
+      ...(eip7702Route?.signingPackage.actionIds ?? []),
+    ]);
+    const simulationsByActionId = new Map(
+      simulation.results.map((result) => [result.actionId, result]),
+    );
     const blockedActions = plan.actions.flatMap((action) => {
-      if (gaslessActionIds.has(action.id)) {
+      if (recoverableActionIds.has(action.id)) {
         return [];
       }
+      const failedSimulation = simulationsByActionId.get(action.id);
       const tokenMetadata =
         action.actionType === "TRANSFER_ERC20"
           ? metadataByToken.get(action.parameters.tokenAddress.toLowerCase())
@@ -1097,7 +1142,14 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       return [{
         actionId: action.id,
         reason:
-          action.actionType === "TRANSFER_NATIVE"
+          failedSimulation?.status !== "SUCCEEDED"
+            ? `Current-state simulation did not succeed (${failedSimulation?.status ?? "UNKNOWN"}): ${
+                failedSimulation?.failureReason ?? "No deterministic provider reason was returned"
+              }.`.slice(0, 500)
+          : incident.chainId === XLAYER_SAFEEXIT_EIP7702_FACTORY_V2.chainId &&
+              eip7702UnavailableReason
+            ? eip7702UnavailableReason
+          : action.actionType === "TRANSFER_NATIVE"
             ? "Native rescue requires a verified sponsored EIP-7702 or private atomic bundle path."
             : action.actionType === "TRANSFER_ERC721" && nftMetadataEntry &&
                 "erc4494Permit" in nftMetadataEntry && nftMetadataEntry.erc4494Permit
@@ -1125,6 +1177,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         simulations: simulation.results,
         sourceFundedExecutionDisabled: true,
         gaslessActions,
+        ...(eip7702Route ? { eip7702Route } : {}),
+        ...(eip7702UnavailableReason ? { eip7702UnavailableReason } : {}),
         blockedActions,
       }),
       200,

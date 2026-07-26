@@ -3,6 +3,7 @@
 ## Status
 
 - Review date: 2026-07-15
+- EIP-7702 follow-up review: 2026-07-26
 - Baseline: `cea127495a692dab372186a3b6239e00bfa9787f`
 - Reviewer: OpenAI Codex, also involved in implementation
 - Classification: internal engineering review, not an independent audit or a
@@ -24,12 +25,13 @@ preserves the reviewed authorization and settlement invariants and is recorded
 separately in `MULTICHAIN_ADAPTER_VERIFICATION.md`; that internal verification
 does not widen this review into an independent audit.
 
-The later EIP-7702 delegate, factory, buyer-local signer, and destination-paid
-runtime implementation are also not approved by this review. Their delegated
-context, strict-package, signer-recovery, partial-action, cleanup-fallback, and
-type-4 serialization tests are useful engineering evidence, but the route
-remains `executable: false` pending the activation gates recorded in
-`DEPLOYMENT.md` and the dedicated scope in `AUDIT_SCOPE.md`.
+The later X Layer V2 EIP-7702 delegate, factory, buyer runtime, temporary payer,
+Source Signer extension, and hosted execution path received a follow-up
+internal review on 2026-07-26. The review includes delegated context,
+strict-package commitments, source recovery, partial-action isolation,
+cleanup fallback, type-4 serialization, production manifest scope, and
+mainnet execution evidence. It remains an internal review, not an independent
+audit.
 
 ## Resolved findings
 
@@ -47,6 +49,13 @@ remains `executable: false` pending the activation gates recorded in
 | SE-10 | Medium | The browser preflight parser accepted signing-domain and settlement fields without independently tying every route to the plan, successful simulation, and chain-pinned settlement deployment. | The response boundary now verifies plan integrity and exact scan, action, simulation, source, destination, asset, amount/token ID, domain, and configured deployment commitments. Permit builders independently reject unconfigured settlement contracts before signing. |
 | SE-11 | Medium | A first successful receipt could complete a rescue without a chain-specific confirmation hold or proof that its block remained canonical. | Browser and buyer-runtime settlement now wait for explicit per-chain confirmation thresholds. The hosted verifier checks confirmation depth and canonical block hash before evidence checks and rechecks the same canonical anchor after final asset-state reads. Reorged or under-confirmed receipts remain pending. |
 | SE-12 | Low | Production readiness silently skipped missing mainnet RPC variables even though all eight chains were advertised as enabled. | Production readiness now requires and probes dedicated HTTPS RPCs for every advertised rescue mainnet, including chain identity and deterministic EVM reads. |
+| SE-13 | High | The Source Signer pinned factory metadata but did not independently prove that the requested delegate address was produced by that factory. A compromised allowed page could obtain an authorization for unrelated delegate code and bypass the normal runtime. | Before staging a review, the extension now checks the pinned V2 factory bytecode and `predictDelegate` result through both exact official X Layer RPC endpoints. Any mismatch or unavailable quorum fails closed. |
+| SE-14 | Medium | The signing-package schema allowed more committed actions than execution indexes. The official builder selected every action, but another producer could create additional authorized actions outside the runtime's displayed execution selection. | Schema validation now requires action IDs, simulations, actions, and execution indexes to have equal length and requires indexes to cover the complete plan in order. |
+| SE-15 | Medium | A receipt provider failure during clearing could be reported as uncleared even when canonical source code and nonce proved clearing succeeded. That false negative could encourage a dangerous retry. | Clearing now treats canonical empty source code plus the nonce-consecutive advance as authoritative after any receipt error and fails only when that postcondition is absent. |
+| SE-16 | Medium | `fundGasBudget` relied on its caller to pass the calculated cap. Direct use could fund a temporary payer outside the intended minimum/maximum policy. | The funding method now independently rejects values outside the fixed `0.0001` to `0.005` native-unit budget before touching a provider. |
+| SE-17 | Medium | The production extension manifest included localhost origins, unnecessarily widening the signing surface. | Production now matches only `https://safeexit.xyz`; localhost exists only in an explicit development manifest and build command. |
+| SE-18 | Low | Refund failure could overwrite a successful rescue result, and hashes attached to an execution exception were all labeled failed even when some transfers may have confirmed. | Rescue results are recorded before refund warnings, and uncertain submitted hashes are displayed as unresolved rather than falsely failed. |
+| SE-19 | Low | The obsolete V1 factory remained exported beside V2 and stale documentation described the active route as disabled or destination-only. | The V1 trust constant was removed from public runtime exports, and deployment, scope, threat-model, extension, and evidence documents now describe the fixed-recipient temporary-payer V2 route. |
 
 ## Verification performed
 
@@ -56,16 +65,30 @@ remains `executable: false` pending the activation gates recorded in
   destination substitution, false transfer evidence, simulation failure,
   unpinned deployments, cross-chain signing domains, stale plan/simulation
   commitments, receipt reorgs, insufficient confirmations, and log leakage.
-- Seventeen Solidity tests covering v1 reproducibility plus v2 replay,
-  destination binding, expiry, amount substitution, pre-consumed permits,
-  stale nonces, fee-on-transfer rejection, allowance revocation, and atomic
-  rollback, and one shared-deployment mixed ERC-2612/ERC-4494 rescue.
+- Twenty-three Solidity tests covering the V2 EIP-7702 delegate, factory
+  idempotency, partial-action isolation, clearing prerequisites, v1
+  reproducibility, and v2 permit-settlement replay, destination binding,
+  expiry, amount substitution, pre-consumed permits, stale nonces,
+  fee-on-transfer rejection, allowance revocation, atomic rollback, and a
+  shared-deployment mixed ERC-2612/ERC-4494 rescue.
 - Full lint, TypeScript, Vitest, Prisma, and Next.js production build through
   `npm run ci`.
 - `npm audit --omit=dev`, registry signature verification, secret-pattern scan,
   and dependency inventory.
 - Read-only X Layer RPC capability probe. No live source signature or asset
   transfer was produced during this review.
+- Focused EIP-7702 verification on 2026-07-26: 25 Source Signer tests, 24
+  buyer-runtime tests, 9 adapter tests, 36 hosted-web commitment tests, and 6
+  Solidity V2 tests passed. Relevant TypeScript workspaces and the production
+  extension bundle also passed.
+- Final repository CI on 2026-07-26 passed Prisma validation and generation,
+  lint, every TypeScript workspace, 44 Vitest files with 347 tests, all 23
+  Solidity tests, and the production Next.js build.
+- Onchain V2 evidence includes temporary-payer funding, delegate deployment,
+  two delegated rescue actions, zero-address clearing, gas refund, empty final
+  source code, zero selected source-token balances, and destination balance
+  increases. Transaction hashes are recorded in
+  `EIP7702_CANARY_EVIDENCE.md`.
 
 ## Accepted and open risk
 
@@ -80,10 +103,20 @@ remains `executable: false` pending the activation gates recorded in
 3. The production CSP includes `'unsafe-inline'` for Next.js compatibility.
    There is no unsafe HTML rendering in the reviewed tree, but browser-side
    signature memory makes future XSS regressions high impact.
-4. Native OKB, ERC-1155 settlement, protocol claims, withdrawals, EIP-7702, and
-   private bundles remain blocked and were not approved by this review.
+4. X Layer V2 EIP-7702 is internally verified and enabled for committed native,
+   ERC-20, ERC-721, ERC-1155, ERC-20 approval-revocation, and NFT
+   operator-revocation actions. EIP-7702 on other chains, protocol claims,
+   withdrawals, Permit2, and private bundles remain blocked.
 5. A malicious or severely non-standard asset contract can violate expected
    token semantics. SAFEEXIT is best effort, not universal recovery.
+6. The EIP-7702 path uses the public X Layer mempool. An attacker holding the
+   same source key can race, replace, or invalidate the source authorization.
+7. WDK is beta, the source key exists briefly inside the local extension popup,
+   and JavaScript cannot guarantee immediate erasure of engine-managed strings.
+8. `npm audit --omit=dev` reports zero production vulnerabilities. The full
+   development dependency tree still inherits `brace-expansion` advisories
+   through ESLint/minimatch; the available automatic remediation requires an
+   ESLint major upgrade and is tracked as tooling-only release maintenance.
 
 ## Release recommendation
 

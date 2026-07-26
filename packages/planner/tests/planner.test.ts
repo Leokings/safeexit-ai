@@ -357,6 +357,51 @@ describe("DeterministicRescuePlanner", () => {
     expect(plan.actions[1]?.evidenceIds).toContain("asset-low-value");
   });
 
+  it("keeps equal-priority asset order stable when scan evidence IDs change", () => {
+    const firstScan = planScan(
+      makeScan({
+        assets: [
+          { ...erc20Asset, id: "evidence:z", contractAddress: tokenAddress },
+          {
+            ...erc20Asset,
+            id: "evidence:a",
+            contractAddress: secondTokenAddress,
+          },
+        ],
+      }),
+    );
+    const laterScan = planScan(
+      makeScan({
+        assets: [
+          {
+            ...erc20Asset,
+            id: "evidence:y",
+            contractAddress: secondTokenAddress,
+            observedAtBlock: "101",
+          },
+          {
+            ...erc20Asset,
+            id: "evidence:b",
+            contractAddress: tokenAddress,
+            observedAtBlock: "101",
+          },
+        ],
+      }),
+    );
+    const orderedContracts = (plan: RescuePlan) =>
+      plan.actions.flatMap((action) =>
+        action.actionType === "TRANSFER_ERC20"
+          ? [action.parameters.tokenAddress.toLowerCase()]
+          : [],
+      );
+
+    expect(orderedContracts(firstScan)).toEqual([
+      tokenAddress.toLowerCase(),
+      secondTokenAddress.toLowerCase(),
+    ]);
+    expect(orderedContracts(laterScan)).toEqual(orderedContracts(firstScan));
+  });
+
   it("omits unsupported assets and marks the plan partial", () => {
     const unsupportedAsset = {
       ...erc20Asset,

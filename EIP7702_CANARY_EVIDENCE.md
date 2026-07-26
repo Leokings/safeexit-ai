@@ -1,11 +1,43 @@
-# X Layer EIP-7702 No-Value Canary Evidence
+# X Layer EIP-7702 Canary and V2 Rescue Evidence
 
-Date: 2026-07-23
+Last updated: 2026-07-26
 
-Status: completed on X Layer mainnet with a fixed no-value action. The hosted
-EIP-7702 route remains `IMPLEMENTATION_TESTING` and `executable: false`.
+Status: the no-value canary and a V2 multi-asset rescue completed on X Layer
+mainnet. The hosted route is internally verified and executable on chain `196`.
+It is best effort, public-mempool, and not independently audited.
 
-## Scope
+## V2 mainnet rescue
+
+- Chain: X Layer (`196`, `0xc4`)
+- Pinned V2 factory: `0x115C0340040C68bDc68E1890DA984575E49814e5`
+- Factory runtime hash:
+  `0x0f8beb374fbb87b0a1100b2c25dd649d897a76da1563e8b6cd885a24ac34dc7f`
+- Factory deployment:
+  `0x5c0cb9bd876b8c86236b60098e30268242d5ffef4ba4ae924f8051a29eb2a154`
+- Source: `0x7aa9c21c5ece65e3eb64d8f17765882fe01b85a9`
+- Fixed destination and funding wallet:
+  `0xa2ccc58eee90df48565afb6f60d472ab70c237cf`
+
+| Stage | Transaction |
+| --- | --- |
+| Temporary payer funding | `0x30345863c725bd41544c251d1d4d9afa711c2d3c7d1d333ae43d9fa436471e4c` |
+| Incident delegate deployment | `0x16b1d7b8a4a51204aaf426e95250a3f6b65208bea6f14bcef0d99ff38f470d2c` |
+| Delegated rescue action 1 | `0x994388784988abe6031c7a5d37d51d2179eaeb1889326df1cb9ce901c4fb5463` |
+| Delegated rescue action 2 | `0xff6361a6cdec1ec7b28b87ca55382588fb57d14f142ec28ea0b58e7c0fbed645` |
+| Zero-address delegation clearing | `0xcff539f8551a8da208abfad0893250f695184b0db5db90daecefceadacd710b9` |
+| Unused gas refund | `0x360714d8bbfe45ed4eea50546ef9615624d67809c83ca66c8a7000616e550321` |
+
+Post-execution reads verified that the source code was `0x`, both selected
+source token balances were zero, and the destination received `966253` and
+`843094` base units respectively. The temporary payer retained only the
+bounded fee-reserve dust after refund.
+
+The source key was entered only in the local Source Signer extension. The
+extension signed the exact X Layer delegation and nonce-consecutive clearing
+authorization, then disposed its WDK signer and zeroed the owned key buffer.
+The page and server did not receive the source key.
+
+## Historical V1 no-value canary
 
 - Chain: X Layer (`196`, `0xc4`)
 - Factory: `0xe35964050279262449e71CBf36c86b6fFb5874e5`
@@ -63,7 +95,7 @@ still verifies the receipt against the canonical block, refreshes the receipt,
 and checks the exact raw authorization list. Regression tests cover delayed
 confirmation and transient incomplete authorization reads.
 
-## Activation Decision
+## Activation decision
 
 This canary proves the fixed X Layer mechanism can:
 
@@ -74,7 +106,26 @@ This canary proves the fixed X Layer mechanism can:
 5. Prove the source is empty and undelegated.
 6. Return unused gas.
 
+Together with the V2 rescue, this proves the implemented X Layer flow can fund
+a fresh capped payer, deploy a fixed-recipient delegate, execute committed
+asset actions, clear delegation, and refund unused gas.
+
 It does not prove private submission behavior against an active attacker,
-support for arbitrary assets, or production incident operations. Production
-activation therefore remains blocked pending the private-submission policy,
-independent security review, and an explicit route activation decision.
+universal token compatibility, or safety against a leaked source key racing
+the rescue. The current route is therefore active only as an internally
+verified, best-effort X Layer adapter. Private relay integration and an
+independent external audit remain future hardening work.
+
+## Read-Only Wallet Capability Evidence
+
+The canary page now records a typed
+`safeexit-eip5792-capability-evidence-v1` document from
+`wallet_getCapabilities`. The document includes the checked wallet, chain,
+timestamp, fail-closed assessment, and sanitized advertised capabilities.
+
+Capability evidence is display-only. Unexpected signature, authorization,
+raw-transaction, private-key, seed, or mnemonic-like fields are replaced with
+`[REDACTED]` before display or copying. The evidence explicitly records that no
+signature, authorization, raw transaction, private key, seed phrase, or
+mnemonic is retained. Producing this evidence never changes whether the
+separately verified V2 route is executable.

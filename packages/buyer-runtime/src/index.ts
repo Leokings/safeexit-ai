@@ -1,5 +1,7 @@
 export * from "./eip1193";
 export * from "./eip5792-capabilities";
+export * from "./eip7702-extension-bridge";
+export * from "./eip7702-funded-payer";
 export * from "./eip7702-runtime";
 export * from "./eip7702-viem";
 export * from "./ports";

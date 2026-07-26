@@ -311,7 +311,7 @@ export function StartRescueForm() {
               I confirm that I am authorised to control and sign for this wallet.
             </span>
             <span id="authorization-detail" className="mt-1 block text-xs font-semibold leading-5 text-muted">
-              SAFEEXIT will never request a seed phrase, private key, keystore, or raw credential.
+              The SafeExit website never requests a seed phrase, private key, keystore, or raw credential. For X Layer delegated rescue, only the separately installed Source Signer popup may request the raw source key for one local signing session.
             </span>
           </span>
         </label>

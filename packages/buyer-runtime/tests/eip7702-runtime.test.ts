@@ -15,7 +15,7 @@ import {
   Eip7702RuntimeError,
   LocalEip7702RescueRuntime,
   ViemLocalEip7702SourceSigner,
-  XLAYER_SAFEEXIT_EIP7702_FACTORY_V1,
+  XLAYER_SAFEEXIT_EIP7702_FACTORY_V2,
   eip7702LocalSigningPackageSchema,
   type DestinationReceipt,
   type Eip7702DestinationTransportPort,
@@ -173,11 +173,16 @@ class MockDestinationTransport implements Eip7702DestinationTransportPort {
   failSimulationIndexes = new Set<number>();
   revertIndexes = new Set<number>();
   clearSucceeds = true;
+  clearReceiptFailsAfterClearing = false;
   throwOnFirstRescueReceipt = false;
   private rescueCount = 0;
 
+  constructor(
+    private readonly payerAddress = destinationAccount.address,
+  ) {}
+
   async getAddress(): Promise<`0x${string}`> {
-    return destinationAccount.address;
+    return getAddress(this.payerAddress);
   }
 
   async getChainId(): Promise<number> {
@@ -251,7 +256,10 @@ class MockDestinationTransport implements Eip7702DestinationTransportPort {
     if (hash === rescueHashOne && this.throwOnFirstRescueReceipt) {
       throw new Error("mock receipt polling failure");
     }
-    if (hash === clearHash && !this.clearSucceeds) {
+    if (
+      hash === clearHash &&
+      (!this.clearSucceeds || this.clearReceiptFailsAfterClearing)
+    ) {
       return confirmedReceipt(hash, "FAILED");
     }
     const request = this.requests.find((candidate, index) => {
@@ -284,11 +292,11 @@ async function authorizedRuntime(
 
 describe("local destination-paid EIP-7702 runtime", () => {
   it("pins the independently verified X Layer factory", () => {
-    expect(XLAYER_SAFEEXIT_EIP7702_FACTORY_V1).toEqual({
+    expect(XLAYER_SAFEEXIT_EIP7702_FACTORY_V2).toEqual({
       chainId: 196,
-      address: getAddress("0xe35964050279262449e71CBf36c86b6fFb5874e5"),
+      address: getAddress("0x115C0340040C68bDc68E1890DA984575E49814e5"),
       runtimeHash:
-        "0x0641a98eac8a123bb898f848ff3c04fb8a9e7f42647f48c7838a4a6e7fee02cc",
+        "0x0f8beb374fbb87b0a1100b2c25dd649d897a76da1563e8b6cd885a24ac34dc7f",
     });
   });
 
@@ -307,23 +315,33 @@ describe("local destination-paid EIP-7702 runtime", () => {
       actions: signingPackage.actions.map((action, index) =>
         index === 0 ? { ...action, amount: "1" } : action),
     }).success).toBe(false);
+    expect(eip7702LocalSigningPackageSchema.safeParse({
+      ...signingPackage,
+      executionIndexes: [0],
+      simulation: {
+        ...signingPackage.simulation,
+        resultIds: [signingPackage.simulation.resultIds[0]],
+      },
+    }).success).toBe(false);
   });
 
-  it("deploys, rescues each action, and clears while the destination pays", async () => {
-    const transport = new MockDestinationTransport();
+  it("deploys, rescues each action, and clears through a separate gas payer", async () => {
+    const transport = new MockDestinationTransport(otherAccount.address);
     const { runtime, authorized } = await authorizedRuntime(transport);
     const result = await runtime.execute(authorized);
 
     expect(result).toMatchObject({
       status: "COMPLETED",
       sourcePaidGas: false,
+      destinationAddress: destinationAccount.address,
+      payerAddress: otherAccount.address,
       deploymentHashes: [deploymentHash],
       rescueTransactionHashes: [rescueHashOne, rescueHashTwo],
       clearTransactionHash: clearHash,
     });
     expect(transport.requests).toHaveLength(3);
     expect(transport.requests.every(
-      (request) => request.from.toLowerCase() === destinationAccount.address.toLowerCase(),
+      (request) => request.from.toLowerCase() === otherAccount.address.toLowerCase(),
     )).toBe(true);
     expect(transport.requests[0]?.authorizationList).toHaveLength(1);
     expect(transport.requests[1]?.authorizationList).toBeUndefined();
@@ -378,6 +396,18 @@ describe("local destination-paid EIP-7702 runtime", () => {
       "RESCUE_ACTION",
       "CLEAR_DELEGATION",
     ]);
+    expect(transport.sourceCode).toBe("0x");
+    expect(transport.sourceNonce).toBe(9);
+  });
+
+  it("accepts canonical clearing even when the receipt provider reports failure", async () => {
+    const transport = new MockDestinationTransport();
+    transport.clearReceiptFailsAfterClearing = true;
+    const { runtime, authorized } = await authorizedRuntime(transport);
+
+    const result = await runtime.execute(authorized);
+
+    expect(result.clearTransactionHash).toBe(clearHash);
     expect(transport.sourceCode).toBe("0x");
     expect(transport.sourceNonce).toBe(9);
   });

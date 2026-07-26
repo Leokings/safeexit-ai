@@ -10,12 +10,15 @@ import {
 } from "@safeexit/chain/config";
 import {
   createWalletClient,
+  custom,
   encodeFunctionData,
   getAddress,
   http,
   keccak256,
   zeroAddress,
+  type Address,
   type AuthorizationRequest,
+  type EIP1193Provider,
   type Hex,
   type LocalAccount,
   type SignedAuthorization,
@@ -99,6 +102,130 @@ async function wait(milliseconds: number): Promise<void> {
   });
 }
 
+export type Eip1193DestinationProvider = Pick<EIP1193Provider, "request">;
+
+type DestinationTransactionRequest = {
+  to: Address;
+  value: bigint;
+  data: Hex;
+  authorizationList?: readonly SignedAuthorization[];
+};
+
+type DestinationTransactionSender = (
+  request: DestinationTransactionRequest,
+) => Promise<Hex>;
+
+function validatedProductionRpcUrl(rpcUrl: string): string {
+  const url = new URL(rpcUrl);
+  if (url.protocol !== "https:") {
+    throw new Error("The production EIP-7702 transport requires an HTTPS RPC URL");
+  }
+  return url.toString();
+}
+
+function createLocalDestinationSender(
+  chain: ChainAdapterConfig,
+  rpcUrl: string,
+  account: LocalAccount,
+): DestinationTransactionSender {
+  const walletClient = createWalletClient({
+    account,
+    chain: chain.chain,
+    transport: http(validatedProductionRpcUrl(rpcUrl), {
+      retryCount: 2,
+      timeout: 10_000,
+    }),
+  });
+  return async (request) => {
+    if (request.authorizationList) {
+      return walletClient.sendTransaction({
+        account,
+        chain: chain.chain,
+        type: "eip7702",
+        to: request.to,
+        value: request.value,
+        data: request.data,
+        authorizationList: request.authorizationList,
+      });
+    }
+    return walletClient.sendTransaction({
+      account,
+      chain: chain.chain,
+      to: request.to,
+      value: request.value,
+      data: request.data,
+    });
+  };
+}
+
+async function assertInjectedDestination(
+  provider: Eip1193DestinationProvider,
+  expectedAddress: Address,
+  expectedChainId: number,
+): Promise<void> {
+  const [chainIdValue, accountValues] = await Promise.all([
+    provider.request({ method: "eth_chainId" }),
+    provider.request({ method: "eth_accounts" }),
+  ]);
+  const chainId =
+    typeof chainIdValue === "string" && /^0x[0-9a-f]+$/i.test(chainIdValue)
+      ? Number(BigInt(chainIdValue))
+      : Number.NaN;
+  if (chainId !== expectedChainId) {
+    throw new Eip7702RuntimeError(
+      "CHAIN_MISMATCH",
+      `The connected destination wallet must use chain ${expectedChainId}`,
+    );
+  }
+  const activeAddress =
+    Array.isArray(accountValues) && typeof accountValues[0] === "string"
+      ? getAddress(accountValues[0])
+      : undefined;
+  if (!activeAddress || activeAddress.toLowerCase() !== expectedAddress.toLowerCase()) {
+    throw new Eip7702RuntimeError(
+      "DESTINATION_MISMATCH",
+      "The active wallet account is not the reviewed safe destination",
+    );
+  }
+}
+
+function createInjectedDestinationSender(
+  chain: ChainAdapterConfig,
+  provider: Eip1193DestinationProvider,
+  expectedAddress: Address,
+): DestinationTransactionSender {
+  const walletClient = createWalletClient({
+    account: expectedAddress,
+    chain: chain.chain,
+    transport: custom(provider as EIP1193Provider),
+  });
+  return async (request) => {
+    await assertInjectedDestination(
+      provider,
+      expectedAddress,
+      chain.chain.id,
+    );
+    if (request.authorizationList) {
+      return walletClient.sendTransaction({
+        account: expectedAddress,
+        chain: chain.chain,
+        type: "eip7702",
+        to: request.to,
+        value: request.value,
+        data: request.data,
+        authorizationList: request.authorizationList,
+      });
+    }
+    return walletClient.sendTransaction({
+      account: expectedAddress,
+      chain: chain.chain,
+      to: request.to,
+      value: request.value,
+      data: request.data,
+    });
+  };
+}
+
 /**
  * Wraps a signer that already exists in the buyer's local process. SafeExit
  * never accepts the account, its private key, or its resulting authorizations
@@ -126,10 +253,9 @@ implements Eip7702SourceAuthorizationSignerPort {
   }
 }
 
-export class ViemLocalEip7702DestinationTransport
+abstract class ViemEip7702DestinationTransport
 implements Eip7702DestinationTransportPort {
   private readonly publicClient: ReturnType<typeof createDedicatedPublicClient>;
-  private readonly walletClient: ReturnType<typeof createWalletClient>;
   private readonly submittedAuthorizations = new Map<
     Hex,
     readonly SignedAuthorization[]
@@ -138,35 +264,67 @@ implements Eip7702DestinationTransportPort {
   constructor(
     private readonly chain: ChainAdapterConfig,
     rpcUrl: string,
-    private readonly account: LocalAccount,
+    private readonly payerAddress: Address,
+    private readonly sendDestinationTransaction: DestinationTransactionSender,
     private readonly clock: () => Date = () => new Date(),
   ) {
     if (chain.chain.id !== 196) {
-      throw new Error("The local EIP-7702 transport is enabled only for X Layer");
+      throw new Error("The EIP-7702 destination transport is enabled only for X Layer");
     }
-    const url = new URL(rpcUrl);
-    if (url.protocol !== "https:") {
-      throw new Error("The production EIP-7702 transport requires an HTTPS RPC URL");
-    }
-    this.publicClient = createDedicatedPublicClient(chain, url.toString());
-    this.walletClient = createWalletClient({
-      account,
-      chain: chain.chain,
-      transport: http(url.toString(), { retryCount: 2, timeout: 10_000 }),
-    });
+    this.publicClient = createDedicatedPublicClient(
+      chain,
+      validatedProductionRpcUrl(rpcUrl),
+    );
   }
 
   async getAddress(): Promise<`0x${string}`> {
-    return getAddress(this.account.address);
+    return this.payerAddress;
   }
 
   async getChainId(): Promise<number> {
     return this.chain.chain.id;
   }
 
+  private assertPackageScope(
+    signingPackage: Eip7702LocalSigningPackage,
+  ): void {
+    if (
+      signingPackage.chainId !== this.chain.chain.id
+    ) {
+      throw new Eip7702RuntimeError(
+        "CHAIN_MISMATCH",
+        "The EIP-7702 package does not match this gas-payer transport",
+      );
+    }
+  }
+
+  private assertTransactionScope(
+    request: Eip7702LocalTransactionRequest,
+  ): void {
+    if (request.chainId !== this.chain.chain.id) {
+      throw new Eip7702RuntimeError(
+        "CHAIN_MISMATCH",
+        "The EIP-7702 request does not match the destination chain",
+      );
+    }
+    if (request.from.toLowerCase() !== this.payerAddress.toLowerCase()) {
+      throw new Eip7702RuntimeError(
+        "DESTINATION_MISMATCH",
+        "The EIP-7702 request payer is not the active local gas account",
+      );
+    }
+    if (request.value !== 0n) {
+      throw new Eip7702RuntimeError(
+        "SUBMISSION_FAILED",
+        "SafeExit EIP-7702 requests cannot transfer destination wallet value",
+      );
+    }
+  }
+
   async inspect(
     signingPackage: Eip7702LocalSigningPackage,
   ): Promise<Eip7702PackageInspection> {
+    this.assertPackageScope(signingPackage);
     const sourceAddress = getAddress(signingPackage.sourceAddress);
     const factoryAddress = getAddress(signingPackage.factoryAddress);
     const delegateAddress = getAddress(signingPackage.delegateAddress);
@@ -256,9 +414,8 @@ implements Eip7702DestinationTransportPort {
   async deployDelegate(
     signingPackage: Eip7702LocalSigningPackage,
   ): Promise<Hex> {
-    return this.walletClient.sendTransaction({
-      account: this.account,
-      chain: this.chain.chain,
+    this.assertPackageScope(signingPackage);
+    return this.sendDestinationTransaction({
       to: getAddress(signingPackage.factoryAddress),
       value: 0n,
       data: encodeFunctionData({
@@ -278,6 +435,7 @@ implements Eip7702DestinationTransportPort {
   async simulate(
     request: Eip7702LocalTransactionRequest,
   ): Promise<Eip7702LocalSimulation> {
+    this.assertTransactionScope(request);
     const simulatedAt = this.clock().toISOString();
     try {
       await this.publicClient.call({
@@ -305,11 +463,9 @@ implements Eip7702DestinationTransportPort {
   }
 
   async submit(request: Eip7702LocalTransactionRequest): Promise<Hex> {
+    this.assertTransactionScope(request);
     if (request.authorizationList) {
-      const hash = await this.walletClient.sendTransaction({
-        account: this.account,
-        chain: this.chain.chain,
-        type: "eip7702",
+      const hash = await this.sendDestinationTransaction({
         to: getAddress(request.to),
         value: request.value,
         data: request.data,
@@ -318,9 +474,7 @@ implements Eip7702DestinationTransportPort {
       this.submittedAuthorizations.set(hash, [...request.authorizationList]);
       return hash;
     }
-    return this.walletClient.sendTransaction({
-      account: this.account,
-      chain: this.chain.chain,
+    return this.sendDestinationTransaction({
       to: getAddress(request.to),
       value: request.value,
       data: request.data,
@@ -446,5 +600,43 @@ implements Eip7702DestinationTransportPort {
         ? {}
         : { failureReason: "EIP-7702 destination-paid transaction reverted" }),
     });
+  }
+}
+
+export class ViemLocalEip7702DestinationTransport
+extends ViemEip7702DestinationTransport {
+  constructor(
+    chain: ChainAdapterConfig,
+    rpcUrl: string,
+    account: LocalAccount,
+    clock: () => Date = () => new Date(),
+  ) {
+    super(
+      chain,
+      rpcUrl,
+      getAddress(account.address),
+      createLocalDestinationSender(chain, rpcUrl, account),
+      clock,
+    );
+  }
+}
+
+export class ViemInjectedEip7702DestinationTransport
+extends ViemEip7702DestinationTransport {
+  constructor(
+    chain: ChainAdapterConfig,
+    rpcUrl: string,
+    provider: Eip1193DestinationProvider,
+    expectedDestinationAddress: `0x${string}`,
+    clock: () => Date = () => new Date(),
+  ) {
+    const destinationAddress = getAddress(expectedDestinationAddress);
+    super(
+      chain,
+      rpcUrl,
+      destinationAddress,
+      createInjectedDestinationSender(chain, provider, destinationAddress),
+      clock,
+    );
   }
 }

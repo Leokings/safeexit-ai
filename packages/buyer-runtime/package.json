@@ -7,7 +7,9 @@
     ".": "./src/index.ts",
     "./eip1193": "./src/eip1193.ts",
     "./eip5792-capabilities": "./src/eip5792-capabilities.ts",
+    "./eip7702-extension-bridge": "./src/eip7702-extension-bridge.ts",
     "./eip7702-runtime": "./src/eip7702-runtime.ts",
+    "./eip7702-trust": "./src/eip7702-trust.ts",
     "./eip7702-viem": "./src/eip7702-viem.ts",
     "./schemas": "./src/schemas.ts"
   },

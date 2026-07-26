@@ -18,6 +18,10 @@ import { recoverAuthorizationAddress } from "viem/utils";
 
 import type { DestinationReceipt } from "./schemas";
 import { buyerConfirmationSchema, destinationReceiptSchema } from "./schemas";
+import type { TrustedEip7702Factory } from "./eip7702-trust";
+
+export { XLAYER_SAFEEXIT_EIP7702_FACTORY_V2 } from "./eip7702-trust";
+export type { TrustedEip7702Factory } from "./eip7702-trust";
 
 const EMPTY_CODE = "0x";
 const MAXIMUM_PACKAGE_WINDOW_MS = 15 * 60 * 1_000;
@@ -107,6 +111,7 @@ export interface Eip7702DestinationTransportPort {
 type ProvisionedState = {
   signingPackage: Eip7702LocalSigningPackage;
   destination: Eip7702DestinationTransportPort;
+  payerAddress: `0x${string}`;
   deploymentHashes: readonly Hex[];
 };
 
@@ -121,6 +126,7 @@ export type ProvisionedEip7702Handle = Readonly<{
     chainId: 196;
     sourceAddress: `0x${string}`;
     destinationAddress: `0x${string}`;
+    payerAddress: `0x${string}`;
     delegateAddress: `0x${string}`;
     expiresAt: string;
     deploymentHashes: readonly Hex[];
@@ -145,6 +151,7 @@ export type Eip7702ExecutionResult = {
   chainId: 196;
   sourceAddress: `0x${string}`;
   destinationAddress: `0x${string}`;
+  payerAddress: `0x${string}`;
   status: "COMPLETED" | "PARTIAL" | "FAILED";
   sourcePaidGas: false;
   deploymentHashes: readonly Hex[];
@@ -153,20 +160,6 @@ export type Eip7702ExecutionResult = {
   outcomes: readonly Eip7702ActionOutcome[];
   completedAt: string;
 };
-
-export type TrustedEip7702Factory = Readonly<{
-  chainId: 196;
-  address: `0x${string}`;
-  runtimeHash: Hex;
-}>;
-
-export const XLAYER_SAFEEXIT_EIP7702_FACTORY_V1 =
-  Object.freeze<TrustedEip7702Factory>({
-    chainId: 196,
-    address: getAddress("0xe35964050279262449e71CBf36c86b6fFb5874e5"),
-    runtimeHash:
-      "0x0641a98eac8a123bb898f848ff3c04fb8a9e7f42647f48c7838a4a6e7fee02cc",
-  });
 
 export type LocalEip7702RuntimeOptions = {
   trustedFactory: TrustedEip7702Factory;
@@ -237,23 +230,24 @@ function validateConfirmation(
   }
 }
 
-async function assertDestination(
+async function assertPayer(
   signingPackage: Eip7702LocalSigningPackage,
   destination: Eip7702DestinationTransportPort,
-): Promise<void> {
-  const address = getAddress(await destination.getAddress());
-  if (!sameAddress(address, signingPackage.destinationAddress)) {
-    throw new Eip7702RuntimeError(
-      "DESTINATION_MISMATCH",
-      "The local gas-paying account does not match the committed destination",
-    );
-  }
+): Promise<`0x${string}`> {
   if (await destination.getChainId() !== signingPackage.chainId) {
     throw new Eip7702RuntimeError(
       "CHAIN_MISMATCH",
       "The local gas-paying account is connected to the wrong chain",
     );
   }
+  const address = getAddress(await destination.getAddress());
+  if (sameAddress(address, signingPackage.sourceAddress)) {
+    throw new Eip7702RuntimeError(
+      "DESTINATION_MISMATCH",
+      "The compromised source cannot also be the local gas-paying account",
+    );
+  }
+  return address;
 }
 
 function assertDelegateState(
@@ -318,6 +312,16 @@ function assertInitialSourceState(
       "The source already has delegated code; SafeExit will not replace unknown delegation",
     );
   }
+}
+
+function sourceIsCanonicallyCleared(
+  signingPackage: Eip7702LocalSigningPackage,
+  inspection: Eip7702PackageInspection,
+): boolean {
+  return (
+    inspection.sourceCode === EMPTY_CODE &&
+    inspection.sourceNonce >= signingPackage.sourceNonce + 2
+  );
 }
 
 function receiptForHash(
@@ -408,7 +412,7 @@ export class LocalEip7702RescueRuntime {
     assertFresh(signingPackage, this.clock());
     assertTrustedFactory(signingPackage, this.trustedFactory);
     validateConfirmation(signingPackage, confirmationValue);
-    await assertDestination(signingPackage, destination);
+    const payerAddress = await assertPayer(signingPackage, destination);
 
     let inspection = await destination.inspect(signingPackage);
     assertInitialSourceState(signingPackage, inspection);
@@ -449,6 +453,7 @@ export class LocalEip7702RescueRuntime {
       chainId: signingPackage.chainId,
       sourceAddress: getAddress(signingPackage.sourceAddress),
       destinationAddress: getAddress(signingPackage.destinationAddress),
+      payerAddress,
       delegateAddress: getAddress(signingPackage.delegateAddress),
       expiresAt: signingPackage.expiresAt,
       deploymentHashes: Object.freeze([...deploymentHashes]),
@@ -457,6 +462,7 @@ export class LocalEip7702RescueRuntime {
     provisionedStates.set(handle, {
       signingPackage,
       destination,
+      payerAddress,
       deploymentHashes,
     });
     return handle;
@@ -473,9 +479,15 @@ export class LocalEip7702RescueRuntime {
         "The provisioned package is unavailable, consumed, or was serialized",
       );
     }
-    const { signingPackage, destination } = state;
+    const { signingPackage, destination, payerAddress } = state;
     assertFresh(signingPackage, this.clock());
-    await assertDestination(signingPackage, destination);
+    const currentPayerAddress = await assertPayer(signingPackage, destination);
+    if (!sameAddress(currentPayerAddress, payerAddress)) {
+      throw new Eip7702RuntimeError(
+        "DESTINATION_MISMATCH",
+        "The local gas-paying account changed after package provisioning",
+      );
+    }
     const inspection = await destination.inspect(signingPackage);
     assertInitialSourceState(signingPackage, inspection);
     assertDelegateState(signingPackage, inspection);
@@ -532,9 +544,16 @@ export class LocalEip7702RescueRuntime {
       delegation,
       revocation,
       deploymentHashes,
+      payerAddress,
     } = state;
     assertFresh(signingPackage, this.clock());
-    await assertDestination(signingPackage, destination);
+    const currentPayerAddress = await assertPayer(signingPackage, destination);
+    if (!sameAddress(currentPayerAddress, payerAddress)) {
+      throw new Eip7702RuntimeError(
+        "DESTINATION_MISMATCH",
+        "The local gas-paying account changed before rescue execution",
+      );
+    }
     const initialInspection = await destination.inspect(signingPackage);
     assertInitialSourceState(signingPackage, initialInspection);
     assertDelegateState(signingPackage, initialInspection);
@@ -552,7 +571,7 @@ export class LocalEip7702RescueRuntime {
         const request: Eip7702LocalTransactionRequest = {
           purpose: "RESCUE_ACTION",
           chainId: signingPackage.chainId,
-          from: getAddress(signingPackage.destinationAddress),
+          from: payerAddress,
           to: getAddress(signingPackage.sourceAddress),
           value: 0n,
           data: encodeEip7702ExecutionCall(actions, [index]),
@@ -615,48 +634,91 @@ export class LocalEip7702RescueRuntime {
         const clearRequest: Eip7702LocalTransactionRequest = {
           purpose: "CLEAR_DELEGATION",
           chainId: signingPackage.chainId,
-          from: getAddress(signingPackage.destinationAddress),
+          from: payerAddress,
           to: getAddress(signingPackage.sourceAddress),
           value: 0n,
           data: "0x",
           authorizationList: [revocation],
         };
         clearTransactionHash = await destination.submit(clearRequest);
-        const clearReceipt = receiptForHash(
-          await destination.waitForReceipt(clearTransactionHash),
-          clearTransactionHash,
-        );
-        if (clearReceipt.status !== "CONFIRMED") {
-          throw new Error(clearReceipt.failureReason);
+        let clearFailure: unknown;
+        try {
+          const clearReceipt = receiptForHash(
+            await destination.waitForReceipt(clearTransactionHash),
+            clearTransactionHash,
+          );
+          if (clearReceipt.status !== "CONFIRMED") {
+            clearFailure = new Error(clearReceipt.failureReason);
+          }
+        } catch (error) {
+          clearFailure = error;
         }
         const clearedInspection = await destination.inspect(signingPackage);
-        if (
-          clearedInspection.sourceCode !== EMPTY_CODE ||
-          clearedInspection.sourceNonce < signingPackage.sourceNonce + 2
-        ) {
+        if (!sourceIsCanonicallyCleared(signingPackage, clearedInspection)) {
+          if (clearFailure) throw clearFailure;
           throw new Error("The source delegation was not canonically cleared");
         }
       } catch (error) {
-        const clearingFailure =
-          error instanceof Error ? error.message : "Delegation clearing failed";
-        const rescueFailure =
-          rescueError instanceof Error ? rescueError.message : undefined;
-        throw new Eip7702RuntimeError(
-          "DELEGATION_NOT_CLEARED",
-          rescueFailure
-            ? `${clearingFailure}; preceding rescue failure: ${rescueFailure}`
-            : clearingFailure,
-          [
-            ...rescueHashes,
-            ...(clearTransactionHash ? [clearTransactionHash] : []),
-          ],
-        );
+        let clearedDespiteReceiptFailure = false;
+        try {
+          const clearedInspection = await destination.inspect(signingPackage);
+          clearedDespiteReceiptFailure = sourceIsCanonicallyCleared(
+            signingPackage,
+            clearedInspection,
+          );
+        } catch {
+          // The original clearing failure remains authoritative.
+        }
+        if (!clearedDespiteReceiptFailure) {
+          const clearingFailure =
+            error instanceof Error ? error.message : "Delegation clearing failed";
+          const rescueFailure =
+            rescueError instanceof Error ? rescueError.message : undefined;
+          throw new Eip7702RuntimeError(
+            "DELEGATION_NOT_CLEARED",
+            rescueFailure
+              ? `${clearingFailure}; preceding rescue failure: ${rescueFailure}`
+              : clearingFailure,
+            [
+              ...rescueHashes,
+              ...(clearTransactionHash ? [clearTransactionHash] : []),
+            ],
+          );
+        }
       }
     }
     if (rescueError) {
       throw rescueError;
     }
 
+    return this.executionResult({
+      signingPackage,
+      payerAddress,
+      deploymentHashes,
+      rescueHashes,
+      ...(clearTransactionHash ? { clearTransactionHash } : {}),
+      outcomes,
+    });
+  }
+
+  private executionResult(
+    input: {
+      signingPackage: Eip7702LocalSigningPackage;
+      payerAddress: `0x${string}`;
+      deploymentHashes: readonly Hex[];
+      rescueHashes: readonly Hex[];
+      clearTransactionHash?: Hex;
+      outcomes: readonly Eip7702ActionOutcome[];
+    },
+  ): Eip7702ExecutionResult {
+    const {
+      signingPackage,
+      payerAddress,
+      deploymentHashes,
+      rescueHashes,
+      clearTransactionHash,
+      outcomes,
+    } = input;
     const completed = outcomes.filter((outcome) => outcome.status === "COMPLETED").length;
     const status = completed === outcomes.length && completed > 0
       ? "COMPLETED"
@@ -669,6 +731,7 @@ export class LocalEip7702RescueRuntime {
       chainId: signingPackage.chainId,
       sourceAddress: getAddress(signingPackage.sourceAddress),
       destinationAddress: getAddress(signingPackage.destinationAddress),
+      payerAddress,
       status,
       sourcePaidGas: false,
       deploymentHashes,

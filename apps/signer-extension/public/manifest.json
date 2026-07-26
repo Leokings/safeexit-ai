@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "127",
+  "name": "SafeExit Source Signer",
+  "version": "0.1.0",
+  "description": "Reviews chain-bound EIP-7702 rescue authorizations for SafeExit.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "SafeExit Source Signer"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["https://safeexit.xyz/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "host_permissions": [
+    "https://safeexit.xyz/*",
+    "https://rpc.xlayer.tech/*",
+    "https://xlayerrpc.okx.com/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src https://rpc.xlayer.tech https://xlayerrpc.okx.com"
+  }
+}

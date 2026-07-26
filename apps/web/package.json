@@ -16,6 +16,7 @@
     "@safeexit/adapters": "*",
     "@safeexit/agent-service": "*",
     "@safeexit/ai": "*",
+    "@safeexit/buyer-runtime": "*",
     "@safeexit/chain": "*",
     "@safeexit/execution": "*",
     "@safeexit/okx-transport": "*",

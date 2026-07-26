@@ -49,7 +49,7 @@ const create2Deployer = getAddress(
 const expectedCreate2DeployerRuntime =
   "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe03601600081602082378035828234f58015156039578182fd5b8082525050506014600cf3";
 const deploymentSalt = keccak256(
-  stringToHex("SafeExit X Layer EIP-7702 rescue factory v1"),
+  stringToHex("SafeExit X Layer EIP-7702 rescue factory v2"),
 );
 
 function rpcUrl() {
@@ -111,9 +111,9 @@ async function serveDeploymentPage({
 <body>
   <main class="shell">
     <div class="eyebrow">Operator-only / X Layer mainnet</div>
-    <h1>Deploy EIP-7702 rescue factory</h1>
+    <h1>Deploy EIP-7702 rescue factory V2</h1>
     <div class="panel">
-      <div class="warning">IMPLEMENTATION TESTING. This deploys the fixed permissionless factory only. It does not activate EIP-7702 rescue on the public website.</div>
+      <div class="warning">IMPLEMENTATION TESTING. This deploys the fixed-recipient, temporary-payer V2 factory only. It has no owner, custody, upgrade, or fee role; moves no user assets; and does not activate EIP-7702 rescue on the public website.</div>
       <div class="grid">
         <div class="label">Expected factory</div><div class="value">${expectedAddress}</div>
         <div class="label">CREATE2 deployer</div><div class="value">${create2Deployer}</div>
@@ -126,10 +126,10 @@ async function serveDeploymentPage({
         <div class="label">Buffered max cost</div><div id="cost" class="value">${bufferedMaximumCostWei.toString()} wei</div>
         <div class="label">Deployment transaction</div><div id="transaction" class="value">Not submitted</div>
       </div>
-      <label class="confirm"><input id="risk" type="checkbox"> <span>I confirm this wallet may submit the fixed zero-value X Layer factory deployment and pay its gas.</span></label>
+      <label class="confirm"><input id="risk" type="checkbox"> <span>I confirm this wallet may submit the fixed zero-value X Layer V2 factory deployment and pay its gas.</span></label>
       <div class="actions">
         <button id="connect">Connect OKX Wallet</button>
-        <button id="deploy" class="primary" disabled>Deploy fixed factory</button>
+        <button id="deploy" class="primary" disabled>Deploy fixed V2 factory</button>
       </div>
       <div id="status" class="status">Waiting for operator.</div>
     </div>

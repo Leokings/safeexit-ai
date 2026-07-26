@@ -65,9 +65,11 @@
   },
   "overrides": {
     "adm-zip": "0.6.0",
+    "find-my-way": "9.7.0",
     "next": {
       "postcss": "$postcss",
       "sharp": "$sharp"
-    }
+    },
+    "valibot": "1.4.2"
   }
 }

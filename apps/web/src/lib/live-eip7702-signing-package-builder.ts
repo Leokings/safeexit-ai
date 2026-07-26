@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
 import {
+  type AgentSimulationReport,
   eip7702LocalSigningPackageSchema,
   type AgentServiceJob,
   type Eip7702LocalSigningPackage,
@@ -19,6 +20,7 @@ import { verifyPlanIntegrity } from "@safeexit/planner";
 import {
   evmAddressSchema,
   type RescueAction,
+  type RescuePlan,
   type SimulationResult,
 } from "@safeexit/shared";
 import {
@@ -28,10 +30,21 @@ import {
   type Hex,
 } from "viem";
 
+import { EIP7702_SIMULATION_PROVIDER_ID } from "./eip7702-constants";
+
+export { EIP7702_SIMULATION_PROVIDER_ID } from "./eip7702-constants";
+
 export type ReadyEip7702AgentJob = AgentServiceJob & {
   incident: NonNullable<AgentServiceJob["incident"]>;
   plan: NonNullable<AgentServiceJob["plan"]>;
   simulation: NonNullable<AgentServiceJob["simulation"]>;
+};
+
+export type ReadyEip7702PlanContext = {
+  jobId: string;
+  incidentId: string;
+  plan: RescuePlan;
+  simulation: AgentSimulationReport;
 };
 
 export type Eip7702FactoryConfiguration = {
@@ -44,21 +57,18 @@ type SelectedAction = {
   simulation: SimulationResult;
 };
 
-export const EIP7702_SIMULATION_PROVIDER_ID =
-  "safeexit-xlayer-eip7702-state-simulation-v1";
-
 function eligibleActions(
-  job: ReadyEip7702AgentJob,
+  context: ReadyEip7702PlanContext,
   now: Date,
 ): readonly SelectedAction[] {
-  if (job.simulation.providerId !== EIP7702_SIMULATION_PROVIDER_ID) {
+  if (context.simulation.providerId !== EIP7702_SIMULATION_PROVIDER_ID) {
     return [];
   }
-  const executable = new Set(job.simulation.executableActionIds);
+  const executable = new Set(context.simulation.executableActionIds);
   const simulations = new Map(
-    job.simulation.results.map((result) => [result.actionId, result]),
+    context.simulation.results.map((result) => [result.actionId, result]),
   );
-  return job.plan.actions.flatMap((action) => {
+  return context.plan.actions.flatMap((action) => {
     const simulation = simulations.get(action.id);
     const adapterSupported =
       action.actionType === "TRANSFER_NATIVE" ||
@@ -70,11 +80,16 @@ function eligibleActions(
     return adapterSupported &&
       executable.has(action.id) &&
       action.supportStatus === "SUPPORTED" &&
-      action.simulationStatus === "PASSED" &&
       simulation?.status === "SUCCEEDED" &&
       simulation.providerId === EIP7702_SIMULATION_PROVIDER_ID &&
       Date.parse(simulation.expiresAt) > now.getTime()
-      ? [{ action, simulation }]
+      ? [{
+          action: {
+            ...action,
+            simulationStatus: "PASSED",
+          } as RescueAction,
+          simulation,
+        }]
       : [];
   });
 }
@@ -99,45 +114,45 @@ function packageExpiry(
   return new Date(Math.floor(expiry / 1_000) * 1_000);
 }
 
-export function assembleEip7702LocalSigningPackage(input: {
-  job: ReadyEip7702AgentJob;
+export function assembleEip7702LocalSigningPackageFromPlan(input: {
+  context: ReadyEip7702PlanContext;
   factory: Eip7702FactoryConfiguration;
   delegateAddress: Address;
   sourceNonce: number;
   rescueNonce: Hex;
   now: Date;
 }): Eip7702LocalSigningPackage {
-  const { job, now } = input;
-  if (!verifyPlanIntegrity(job.plan)) {
+  const { context, now } = input;
+  if (!verifyPlanIntegrity(context.plan)) {
     throw new Error("Rescue plan integrity verification failed");
   }
-  if (!(EIP7702_RESCUE_CHAIN_IDS as readonly number[]).includes(job.plan.chainId)) {
-    throw new Error(`EIP-7702 package generation is disabled on chain ${job.plan.chainId}`);
+  if (!(EIP7702_RESCUE_CHAIN_IDS as readonly number[]).includes(context.plan.chainId)) {
+    throw new Error(`EIP-7702 package generation is disabled on chain ${context.plan.chainId}`);
   }
-  const selected = eligibleActions(job, now);
+  const selected = eligibleActions(context, now);
   if (selected.length === 0) {
     throw new Error("No supported, freshly simulated EIP-7702 rescue action is available");
   }
   const actions = toEip7702RescueActions(
     selected.map(({ action }) => action),
-    job.plan.sourceAddress,
-    job.plan.destinationAddress,
+    context.plan.sourceAddress,
+    context.plan.destinationAddress,
   );
   const expiresAt = packageExpiry(selected, now);
 
   return eip7702LocalSigningPackageSchema.parse({
     schemaVersion: "safeexit-eip7702-signing-package-v1",
     packageId: `eip7702-package:${randomUUID()}`,
-    jobId: job.id,
-    incidentId: job.incident.id,
-    planId: job.plan.id,
-    planHash: job.plan.integrityHash,
+    jobId: context.jobId,
+    incidentId: context.incidentId,
+    planId: context.plan.id,
+    planHash: context.plan.integrityHash,
     delegatePlanHash: hashEip7702RescuePlan(actions),
     route: "EIP7702_DELEGATED_RESCUE",
-    chainId: job.plan.chainId,
-    sourceAddress: job.plan.sourceAddress,
-    destinationAddress: job.plan.destinationAddress,
-    observedAtBlock: job.plan.observedAtBlock,
+    chainId: context.plan.chainId,
+    sourceAddress: context.plan.sourceAddress,
+    destinationAddress: context.plan.destinationAddress,
+    observedAtBlock: context.plan.observedAtBlock,
     expiresAt: expiresAt.toISOString(),
     deadline: Math.floor(expiresAt.getTime() / 1_000),
     sourceNonce: input.sourceNonce,
@@ -154,7 +169,7 @@ export function assembleEip7702LocalSigningPackage(input: {
     executionIndexes: actions.map((_, index) => index),
     simulation: {
       resultIds: selected.map(({ simulation }) => simulation.id),
-      providerId: job.simulation.providerId,
+      providerId: context.simulation.providerId,
       status: "SUCCEEDED",
       expiresAt: new Date(Math.min(
         ...selected.map(({ simulation }) => Date.parse(simulation.expiresAt)),
@@ -169,6 +184,29 @@ export function assembleEip7702LocalSigningPackage(input: {
       postAuthorizationSimulationRequired: true,
       delegationClearRequired: true,
     },
+  });
+}
+
+export function assembleEip7702LocalSigningPackage(input: {
+  job: ReadyEip7702AgentJob;
+  factory: Eip7702FactoryConfiguration;
+  delegateAddress: Address;
+  sourceNonce: number;
+  rescueNonce: Hex;
+  now: Date;
+}): Eip7702LocalSigningPackage {
+  return assembleEip7702LocalSigningPackageFromPlan({
+    context: {
+      jobId: input.job.id,
+      incidentId: input.job.incident.id,
+      plan: input.job.plan,
+      simulation: input.job.simulation,
+    },
+    factory: input.factory,
+    delegateAddress: input.delegateAddress,
+    sourceNonce: input.sourceNonce,
+    rescueNonce: input.rescueNonce,
+    now: input.now,
   });
 }
 
@@ -195,7 +233,21 @@ export class LiveEip7702SigningPackageBuilder {
     if (job.plan.chainId !== this.chain.chain.id) {
       throw new Error("EIP-7702 signing-package chain is not configured");
     }
-    const sourceAddress = getAddress(job.plan.sourceAddress);
+    return this.buildFromPlan({
+      jobId: job.id,
+      incidentId: job.incident.id,
+      plan: job.plan,
+      simulation: job.simulation,
+    });
+  }
+
+  async buildFromPlan(
+    context: ReadyEip7702PlanContext,
+  ): Promise<Eip7702LocalSigningPackage> {
+    if (context.plan.chainId !== this.chain.chain.id) {
+      throw new Error("EIP-7702 signing-package chain is not configured");
+    }
+    const sourceAddress = getAddress(context.plan.sourceAddress);
     const factoryCode = await this.client.getCode({
       address: this.factory.address,
     });
@@ -216,14 +268,14 @@ export class LiveEip7702SigningPackageBuilder {
     });
     const rescueNonce = `0x${randomBytes(32).toString("hex")}` as Hex;
     const now = this.clock();
-    const selected = eligibleActions(job, now);
+    const selected = eligibleActions(context, now);
     if (selected.length === 0) {
       throw new Error("No supported, freshly simulated EIP-7702 rescue action is available");
     }
     const actions = toEip7702RescueActions(
       selected.map(({ action }) => action),
-      job.plan.sourceAddress,
-      job.plan.destinationAddress,
+      context.plan.sourceAddress,
+      context.plan.destinationAddress,
     );
     const deadline = Math.floor(packageExpiry(selected, now).getTime() / 1_000);
     const delegatePlanHash = hashEip7702RescuePlan(actions);
@@ -233,14 +285,14 @@ export class LiveEip7702SigningPackageBuilder {
       functionName: "predictDelegate",
       args: [
         sourceAddress,
-        getAddress(job.plan.destinationAddress),
+        getAddress(context.plan.destinationAddress),
         BigInt(deadline),
         delegatePlanHash,
         rescueNonce,
       ],
     });
-    return assembleEip7702LocalSigningPackage({
-      job,
+    return assembleEip7702LocalSigningPackageFromPlan({
+      context,
       factory: this.factory,
       delegateAddress,
       sourceNonce,

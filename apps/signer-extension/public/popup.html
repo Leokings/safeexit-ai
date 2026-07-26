@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SafeExit Source Signer</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="brand">SAFEEXIT</span>
+        <span class="state" id="state">CHECKING</span>
+      </header>
+
+      <section class="intro" aria-labelledby="title">
+        <p class="eyebrow">SOURCE SIGNER / ONE SESSION</p>
+        <h1 id="title">EIP-7702 authorization</h1>
+        <p id="summary">Checking for a staged rescue package.</p>
+      </section>
+
+      <section id="package" class="package" hidden>
+        <dl>
+          <div>
+            <dt>Network</dt>
+            <dd>X Layer</dd>
+          </div>
+          <div>
+            <dt>Source signs</dt>
+            <dd id="source">-</dd>
+          </div>
+          <div>
+            <dt>Destination receives</dt>
+            <dd id="destination">-</dd>
+          </div>
+          <div>
+            <dt>Delegate</dt>
+            <dd id="delegate">-</dd>
+          </div>
+          <div>
+            <dt>Factory</dt>
+            <dd id="factory">-</dd>
+          </div>
+          <div>
+            <dt>Plan hash</dt>
+            <dd id="plan-hash">-</dd>
+          </div>
+          <div>
+            <dt>Authorization nonces</dt>
+            <dd id="nonces">-</dd>
+          </div>
+          <div>
+            <dt>Expires</dt>
+            <dd id="expires">-</dd>
+          </div>
+        </dl>
+
+        <div class="actions">
+          <p class="eyebrow">COMMITTED ACTIONS</p>
+          <ol id="actions"></ol>
+        </div>
+
+        <form id="sign-form" autocomplete="off">
+          <label class="check-row">
+            <input id="authorized" type="checkbox" />
+            <span>I am authorised to sign for the displayed source wallet.</span>
+          </label>
+
+          <label for="destination-confirmation">
+            Destination suffix <strong id="destination-suffix"></strong>
+          </label>
+          <input
+            id="destination-confirmation"
+            type="text"
+            inputmode="text"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            maxlength="6"
+          />
+
+          <label for="private-key">Source private key</label>
+          <input
+            id="private-key"
+            type="password"
+            inputmode="text"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            data-lpignore="true"
+            maxlength="66"
+          />
+
+          <p class="key-note">
+            Extension session only. Never sent to the page, SafeExit server, or
+            storage.
+          </p>
+
+          <button id="sign" type="submit">
+            Sign delegation and clearing
+          </button>
+          <button id="cancel" class="secondary" type="button">
+            Discard staged package
+          </button>
+        </form>
+      </section>
+
+      <p class="notice" id="notice">
+        No authorization has been requested.
+      </p>
+    </main>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

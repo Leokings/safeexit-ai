@@ -12,7 +12,11 @@ import {
   vi,
 } from "vitest";
 
-import { ViemLocalEip7702DestinationTransport } from "../src";
+import {
+  type Eip1193DestinationProvider,
+  ViemInjectedEip7702DestinationTransport,
+  ViemLocalEip7702DestinationTransport,
+} from "../src";
 
 const destinationAccount = privateKeyToAccount(
   "0x59c6995e998f97a5a0044976f7d7f9f57f8f149ca2a5c6bede10b1b2b9f2d9b8",
@@ -142,5 +146,135 @@ describe("ViemLocalEip7702DestinationTransport", () => {
 
     await rejection;
     expect(getTransaction).toHaveBeenCalledTimes(5);
+  });
+});
+
+function injectedProvider(input: {
+  address?: string;
+  chainId?: string;
+}) {
+  const request = vi.fn(async (args: { method: string; params?: unknown }) => {
+    switch (args.method) {
+      case "eth_chainId":
+        return input.chainId ?? "0xc4";
+      case "eth_accounts":
+        return [input.address ?? destinationAccount.address];
+      case "eth_sendTransaction":
+        return transactionHash;
+      default:
+        throw new Error(`Unexpected provider request: ${args.method}`);
+    }
+  });
+  return {
+    provider: { request } as unknown as Eip1193DestinationProvider,
+    request,
+  };
+}
+
+describe("ViemInjectedEip7702DestinationTransport", () => {
+  it("submits a type-4 transaction from the exact active destination account", async () => {
+    const { provider, request } = injectedProvider({});
+    const transport = new ViemInjectedEip7702DestinationTransport(
+      xLayerMainnetConfig,
+      "https://rpc.xlayer.tech",
+      provider,
+      destinationAccount.address,
+    );
+
+    await expect(transport.submit({
+      purpose: "RESCUE_ACTION",
+      chainId: 196,
+      from: destinationAccount.address,
+      to: "0x1000000000000000000000000000000000000001",
+      value: 0n,
+      data: "0x1234",
+      authorizationList: [authorization],
+      actionIndex: 0,
+    })).resolves.toBe(transactionHash);
+
+    const sendCall = request.mock.calls.find(
+      ([args]) => args.method === "eth_sendTransaction",
+    );
+    expect(sendCall).toBeDefined();
+    expect(sendCall?.[0].params).toEqual([
+      expect.objectContaining({
+        from: destinationAccount.address,
+        to: "0x1000000000000000000000000000000000000001",
+        type: "0x4",
+        authorizationList: [expect.objectContaining({
+          address: authorization.address,
+        })],
+      }),
+    ]);
+  });
+
+  it("rejects when the active account is not the reviewed destination", async () => {
+    const { provider, request } = injectedProvider({
+      address: "0x9999999999999999999999999999999999999999",
+    });
+    const transport = new ViemInjectedEip7702DestinationTransport(
+      xLayerMainnetConfig,
+      "https://rpc.xlayer.tech",
+      provider,
+      destinationAccount.address,
+    );
+
+    await expect(transport.submit({
+      purpose: "CLEAR_DELEGATION",
+      chainId: 196,
+      from: destinationAccount.address,
+      to: "0x1000000000000000000000000000000000000001",
+      value: 0n,
+      data: "0x",
+      authorizationList: [authorization],
+    })).rejects.toMatchObject({ code: "DESTINATION_MISMATCH" });
+    expect(
+      request.mock.calls.some(([args]) => args.method === "eth_sendTransaction"),
+    ).toBe(false);
+  });
+
+  it("rejects when the wallet leaves X Layer", async () => {
+    const { provider, request } = injectedProvider({ chainId: "0x1" });
+    const transport = new ViemInjectedEip7702DestinationTransport(
+      xLayerMainnetConfig,
+      "https://rpc.xlayer.tech",
+      provider,
+      destinationAccount.address,
+    );
+
+    await expect(transport.submit({
+      purpose: "CLEAR_DELEGATION",
+      chainId: 196,
+      from: destinationAccount.address,
+      to: "0x1000000000000000000000000000000000000001",
+      value: 0n,
+      data: "0x",
+      authorizationList: [authorization],
+    })).rejects.toMatchObject({ code: "CHAIN_MISMATCH" });
+    expect(
+      request.mock.calls.some(([args]) => args.method === "eth_sendTransaction"),
+    ).toBe(false);
+  });
+
+  it("rejects a transaction request whose payer is not the safe destination", async () => {
+    const { provider, request } = injectedProvider({});
+    const transport = new ViemInjectedEip7702DestinationTransport(
+      xLayerMainnetConfig,
+      "https://rpc.xlayer.tech",
+      provider,
+      destinationAccount.address,
+    );
+
+    await expect(transport.submit({
+      purpose: "RESCUE_ACTION",
+      chainId: 196,
+      from: "0x9999999999999999999999999999999999999999",
+      to: "0x1000000000000000000000000000000000000001",
+      value: 0n,
+      data: "0x",
+      authorizationList: [authorization],
+      actionIndex: 0,
+    })).rejects.toMatchObject({ code: "DESTINATION_MISMATCH" });
+    expect(request).not.toHaveBeenCalled();
   });
 });

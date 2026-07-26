@@ -165,6 +165,13 @@ export const eip7702LocalSigningPackageSchema = z
         path: ["simulation", "resultIds"],
       });
     }
+    if (value.executionIndexes.length !== value.actions.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Every delegated action must be selected for execution",
+        path: ["executionIndexes"],
+      });
+    }
 
     let previous = -1;
     for (const [position, index] of value.executionIndexes.entries()) {
@@ -179,6 +186,13 @@ export const eip7702LocalSigningPackageSchema = z
         context.addIssue({
           code: "custom",
           message: "Delegated action indexes must be strictly increasing",
+          path: ["executionIndexes", position],
+        });
+      }
+      if (index !== position) {
+        context.addIssue({
+          code: "custom",
+          message: "Delegated action indexes must cover the complete plan in order",
           path: ["executionIndexes", position],
         });
       }

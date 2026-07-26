@@ -7,9 +7,15 @@ import {
   simulationResultSchema,
   walletScanSchema,
 } from "@safeexit/shared";
-import { getConfiguredPermitSettlementAddress } from "@safeexit/adapters";
+import {
+  getConfiguredPermitSettlementAddress,
+  toEip7702RescueActions,
+} from "@safeexit/adapters";
+import { eip7702LocalSigningPackageSchema } from "@safeexit/agent-service";
 import { isRescueMainnetChainId } from "@safeexit/chain";
 import { verifyPlanIntegrity } from "@safeexit/planner";
+
+import { EIP7702_SIMULATION_PROVIDER_ID } from "./eip7702-constants";
 
 export const rescueMainnetChainIdSchema = chainIdSchema.refine(
   isRescueMainnetChainId,
@@ -128,6 +134,13 @@ export const blockedGaslessActionSchema = z.strictObject({
   reason: z.string().min(1).max(500),
 });
 
+export const eip7702RescueRouteSchema = z.strictObject({
+  executionPath: z.literal("SAFEEXIT_EIP7702"),
+  authorizationStandard: z.literal("EIP7702"),
+  capabilityStatus: z.literal("VERIFIED"),
+  signingPackage: eip7702LocalSigningPackageSchema,
+});
+
 export const mainnetPreflightResponseSchema = z.strictObject({
   chainId: rescueMainnetChainIdSchema,
   scan: walletScanSchema,
@@ -135,6 +148,8 @@ export const mainnetPreflightResponseSchema = z.strictObject({
   simulations: z.array(simulationResultSchema),
   sourceFundedExecutionDisabled: z.literal(true),
   gaslessActions: z.array(gaslessRescueActionSchema),
+  eip7702Route: eip7702RescueRouteSchema.optional(),
+  eip7702UnavailableReason: z.string().min(1).max(500).optional(),
   blockedActions: z.array(blockedGaslessActionSchema),
 }).superRefine((response, context) => {
   const sameAddress = (left: string, right: string) =>
@@ -249,6 +264,86 @@ export const mainnetPreflightResponseSchema = z.strictObject({
     }
   });
 
+  const eip7702Package = response.eip7702Route?.signingPackage;
+  if (eip7702Package) {
+    const path = ["eip7702Route", "signingPackage"] as PropertyKey[];
+    if (
+      response.chainId !== 196 ||
+      eip7702Package.chainId !== response.chainId ||
+      eip7702Package.planId !== response.plan.id ||
+      eip7702Package.planHash.toLowerCase() !== response.plan.integrityHash.toLowerCase() ||
+      eip7702Package.incidentId !== response.plan.incidentId ||
+      eip7702Package.observedAtBlock !== response.plan.observedAtBlock ||
+      !sameAddress(eip7702Package.sourceAddress, response.plan.sourceAddress) ||
+      !sameAddress(eip7702Package.destinationAddress, response.plan.destinationAddress) ||
+      eip7702Package.simulation.providerId !== EIP7702_SIMULATION_PROVIDER_ID
+    ) {
+      addIssue("EIP-7702 package commitments do not match the reviewed preflight", path);
+    }
+
+    const selectedPlanActions = eip7702Package.actionIds.flatMap((actionId, actionIndex) => {
+      const action = planActions.get(actionId);
+      if (
+        !action ||
+        action.supportStatus !== "SUPPORTED" ||
+        !successfulSimulationActionIds.has(actionId)
+      ) {
+        addIssue(
+          "EIP-7702 route must reference one supported, successfully simulated action",
+          [...path, "actionIds", actionIndex],
+        );
+        return [];
+      }
+      const simulation = response.simulations.find(
+        (candidate) => candidate.actionId === actionId,
+      );
+      if (eip7702Package.simulation.resultIds[actionIndex] !== simulation?.id) {
+        addIssue(
+          "EIP-7702 route simulation commitment does not match its rescue action",
+          [...path, "simulation", "resultIds", actionIndex],
+        );
+      }
+      routedActionIds.add(actionId);
+      return [{
+        ...action,
+        simulationStatus: "PASSED" as const,
+      }];
+    });
+
+    try {
+      const expectedActions = toEip7702RescueActions(
+        selectedPlanActions,
+        response.plan.sourceAddress,
+        response.plan.destinationAddress,
+      );
+      if (
+        expectedActions.length !== eip7702Package.actions.length ||
+        eip7702Package.executionIndexes.length !== expectedActions.length
+      ) {
+        addIssue("EIP-7702 package does not execute every committed rescue action", path);
+      }
+      expectedActions.forEach((expected, actionIndex) => {
+        const packaged = eip7702Package.actions[actionIndex];
+        if (
+          !packaged ||
+          packaged.kind !== expected.kind ||
+          !sameAddress(packaged.asset, expected.asset) ||
+          !sameAddress(packaged.counterparty, expected.counterparty) ||
+          packaged.tokenId !== expected.tokenId.toString() ||
+          packaged.amount !== expected.amount.toString() ||
+          eip7702Package.executionIndexes[actionIndex] !== actionIndex
+        ) {
+          addIssue(
+            "EIP-7702 delegated call does not match its rescue-plan action",
+            [...path, "actions", actionIndex],
+          );
+        }
+      });
+    } catch {
+      addIssue("EIP-7702 package contains an unsupported rescue action", path);
+    }
+  }
+
   const blockedActionIds = new Set<string>();
   response.blockedActions.forEach((blocked, blockedIndex) => {
     if (
@@ -286,6 +381,7 @@ export type MainnetPreflightRequest = z.infer<typeof mainnetPreflightRequestSche
 export type MainnetPreflightResponse = z.infer<typeof mainnetPreflightResponseSchema>;
 export type Eip712Domain = z.infer<typeof eip712DomainSchema>;
 export type GaslessRescueAction = z.infer<typeof gaslessRescueActionSchema>;
+export type Eip7702RescueRoute = z.infer<typeof eip7702RescueRouteSchema>;
 export type Eip3009RescueAction = z.infer<typeof eip3009RescueActionSchema>;
 export type Erc2612RescueAction = z.infer<typeof erc2612RescueActionSchema>;
 export type DaiPermitRescueAction = z.infer<typeof daiPermitRescueActionSchema>;
@@ -334,6 +430,31 @@ export function requireReviewedGaslessRoute(
 ): GaslessRescueAction {
   const route = routes.find((candidate) => gaslessRouteKey(candidate) === reviewedRouteKey);
   if (!route) {
+    throw new Error(
+      "The selected recovery route changed during fresh preflight. Review the new result before signing.",
+    );
+  }
+  return route;
+}
+
+export function eip7702RouteKey(route: Eip7702RescueRoute): string {
+  const signingPackage = route.signingPackage;
+  return JSON.stringify({
+    executionPath: route.executionPath,
+    chainId: signingPackage.chainId,
+    sourceAddress: signingPackage.sourceAddress.toLowerCase(),
+    destinationAddress: signingPackage.destinationAddress.toLowerCase(),
+    factoryAddress: signingPackage.factoryAddress.toLowerCase(),
+    factoryRuntimeHash: signingPackage.factoryRuntimeHash.toLowerCase(),
+    delegatePlanHash: signingPackage.delegatePlanHash.toLowerCase(),
+  });
+}
+
+export function requireReviewedEip7702Route(
+  route: Eip7702RescueRoute | undefined,
+  reviewedRouteKey: string,
+): Eip7702RescueRoute {
+  if (!route || eip7702RouteKey(route) !== reviewedRouteKey) {
     throw new Error(
       "The selected recovery route changed during fresh preflight. Review the new result before signing.",
     );

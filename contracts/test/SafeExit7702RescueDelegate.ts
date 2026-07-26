@@ -217,7 +217,7 @@ describe("SafeExit7702RescueDelegate", async function () {
     );
   });
 
-  it("rejects a non-destination caller and direct implementation execution", async function () {
+  it("allows a separate gas payer but still rejects direct implementation execution", async function () {
     const source = wallets[4]!;
     const destination = wallets[5]!;
     const outsider = wallets[6]!;
@@ -237,17 +237,15 @@ describe("SafeExit7702RescueDelegate", async function () {
       source.account.address,
       destination.account.address,
       plan,
-      "destination-only",
+      "separate-gas-payer",
     );
 
-    await assert.rejects(
-      outsider.writeContract({
-        address: source.account.address,
-        abi: delegate.abi,
-        functionName: "execute",
-        args: [plan, [0n]],
-      }),
-    );
+    await outsider.writeContract({
+      address: source.account.address,
+      abi: delegate.abi,
+      functionName: "execute",
+      args: [plan, [0n]],
+    });
     await assert.rejects(
       destination.writeContract({
         address: delegate.address,
@@ -256,7 +254,9 @@ describe("SafeExit7702RescueDelegate", async function () {
         args: [plan, [0n]],
       }),
     );
-    assert.equal(await token.read.balanceOf([source.account.address]), amount);
+    assert.equal(await token.read.balanceOf([source.account.address]), 0n);
+    assert.equal(await token.read.balanceOf([destination.account.address]), amount);
+    assert.equal(await token.read.balanceOf([outsider.account.address]), 0n);
   });
 
   it("rejects substituted plans, expired plans, and action replay", async function () {

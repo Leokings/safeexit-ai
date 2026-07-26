@@ -1,0 +1,21 @@
+{
+  "name": "@safeexit/signer-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:dev": "node build.mjs --development",
+    "test": "vitest run --root ../.. --config vitest.config.ts apps/signer-extension/tests/factory-verifier.test.ts apps/signer-extension/tests/manifest.test.ts apps/signer-extension/tests/protocol.test.ts apps/signer-extension/tests/wdk-signer.test.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@safeexit/adapters": "*",
+    "@safeexit/agent-service": "*",
+    "@safeexit/buyer-runtime": "*",
+    "@tetherto/wdk-wallet-evm": "1.0.0-beta.16",
+    "sodium-javascript": "0.8.0",
+    "viem": "2.55.0",
+    "zod": "4.4.3"
+  }
+}
