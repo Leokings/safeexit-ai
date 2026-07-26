@@ -66,6 +66,14 @@
             <span>I am authorised to sign for the displayed source wallet.</span>
           </label>
 
+          <label class="check-row">
+            <input id="data-consent" type="checkbox" />
+            <span>
+              I understand the source key is processed locally for this signing
+              session and is never transmitted or stored.
+            </span>
+          </label>
+
           <label for="destination-confirmation">
             Destination suffix <strong id="destination-suffix"></strong>
           </label>
@@ -93,7 +101,10 @@
 
           <p class="key-note">
             Extension session only. Never sent to the page, SafeExit server, or
-            storage.
+            storage. Read the
+            <a href="https://safeexit.xyz/privacy" target="_blank" rel="noreferrer">
+              Source Signer privacy policy
+            </a>.
           </p>
 
           <button id="sign" type="submit">

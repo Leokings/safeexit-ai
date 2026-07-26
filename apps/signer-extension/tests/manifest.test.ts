@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
 
@@ -27,6 +27,15 @@ describe("source signer manifest", () => {
     ).not.toContain("'unsafe-eval'");
     expect(manifest.permissions).toEqual(["storage"]);
     expect(manifest).not.toHaveProperty("web_accessible_resources");
+    expect(manifest.icons).toEqual({
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png",
+    });
+    await expect(
+      stat(new URL("../public/icons/icon128.png", import.meta.url)),
+    ).resolves.toMatchObject({ size: expect.any(Number) });
 
     const productionMatches = (
       manifest.content_scripts as Array<{ matches?: string[] }>

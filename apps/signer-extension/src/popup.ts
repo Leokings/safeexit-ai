@@ -128,6 +128,7 @@ async function signActiveSession(event: SubmitEvent): Promise<void> {
   }
 
   const authorized = element<HTMLInputElement>("#authorized");
+  const dataConsent = element<HTMLInputElement>("#data-consent");
   const destinationConfirmation = element<HTMLInputElement>(
     "#destination-confirmation",
   );
@@ -135,11 +136,12 @@ async function signActiveSession(event: SubmitEvent): Promise<void> {
   const expectedSuffix = session.review.destinationAddress.slice(-6);
   if (
     !authorized.checked ||
+    !dataConsent.checked ||
     destinationConfirmation.value.toLowerCase() !==
       expectedSuffix.toLowerCase()
   ) {
     setNotice(
-      "Confirm authority and enter the displayed destination suffix before signing.",
+      "Confirm authority, acknowledge local key handling, and enter the displayed destination suffix before signing.",
     );
     return;
   }

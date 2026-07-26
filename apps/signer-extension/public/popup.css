@@ -174,7 +174,8 @@ input[type="password"] {
 }
 
 input:focus-visible,
-button:focus-visible {
+button:focus-visible,
+a:focus-visible {
   outline: 3px solid #6fd8bb;
   outline-offset: 1px;
 }
@@ -184,6 +185,11 @@ button:focus-visible {
   color: #4b524d;
   font-size: 10px;
   line-height: 1.4;
+}
+
+.key-note a {
+  color: #164d40;
+  font-weight: 700;
 }
 
 button {

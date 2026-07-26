@@ -29,6 +29,14 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </header>
       {children}
+      <footer className="border-t-2 border-border-strong bg-surface">
+        <div className="content-shell flex min-h-14 items-center justify-between gap-4 px-5 py-3 font-mono text-[10px] font-bold uppercase sm:px-8">
+          <span>SAFEEXIT / Non-custodial incident response</span>
+          <Link href="/privacy" className="underline decoration-2 underline-offset-4">
+            Privacy
+          </Link>
+        </div>
+      </footer>
     </div>
   );
 }
