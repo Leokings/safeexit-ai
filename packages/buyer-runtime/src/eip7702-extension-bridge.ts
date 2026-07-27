@@ -48,11 +48,23 @@ const extensionSigningResultSchema = z.strictObject({
   privateCredentialsIncluded: z.literal(false),
 });
 
+const extensionStatusResponseSchema = z.strictObject({
+  status: z.literal("OK"),
+  method: z.literal("PING"),
+  extensionVersion: z.string().min(1).max(32),
+  signerState: z.literal("READY_FOR_EPHEMERAL_KEY"),
+  supportedChainIds: z.tuple([z.literal(196)]),
+  privateCredentialsAccepted: z.literal(false),
+  extensionOnlyEphemeralKeyAccepted: z.literal(true),
+  destinationConnectsToExtension: z.literal(false),
+});
+
 const extensionResponseEnvelopeSchema = z.strictObject({
   source: z.literal(EXTENSION_SOURCE),
   channel: z.literal(CHANNEL),
   requestId: requestIdSchema,
   response: z.union([
+    extensionStatusResponseSchema,
     z.strictObject({
       status: z.literal("OK"),
       method: z.literal("REVIEW_EIP7702_PACKAGE"),
@@ -95,6 +107,16 @@ export type SourceSignerBridgeTransport = Readonly<{
     listener: (message: SourceSignerBridgeMessage) => void,
   ): () => void;
 }>;
+
+export type Eip7702SourceSignerAvailability =
+  | Readonly<{
+      status: "AVAILABLE";
+      extensionVersion: string;
+      supportedChainIds: readonly [196];
+    }>
+  | Readonly<{
+      status: "UNAVAILABLE";
+    }>;
 
 export class Eip7702ExtensionBridgeError extends Error {
   constructor(
@@ -275,6 +297,87 @@ export function createWindowSourceSignerTransport(
       targetWindow.addEventListener("message", handler);
       return () => targetWindow.removeEventListener("message", handler);
     },
+  });
+}
+
+export async function detectEip7702SourceSignerExtension(input: {
+  transport?: SourceSignerBridgeTransport;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  createRequestId?: () => string;
+} = {}): Promise<Eip7702SourceSignerAvailability> {
+  const transport = input.transport ?? createWindowSourceSignerTransport();
+  const requestId = requestIdSchema.parse(
+    (input.createRequestId ?? (() => crypto.randomUUID()))(),
+  );
+  const timeoutMs = Math.max(1, Math.min(input.timeoutMs ?? 1_000, 5_000));
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let unsubscribe: () => void = () => undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let onAbort: () => void = () => undefined;
+
+    const finish = (availability: Eip7702SourceSignerAvailability) => {
+      if (settled) return;
+      settled = true;
+      unsubscribe();
+      if (timeout) clearTimeout(timeout);
+      input.signal?.removeEventListener("abort", onAbort);
+      resolve(availability);
+    };
+    onAbort = () => finish({ status: "UNAVAILABLE" });
+
+    unsubscribe = transport.subscribe((message) => {
+      if (
+        settled ||
+        !message.sourceIsSelf ||
+        message.origin !== transport.origin
+      ) {
+        return;
+      }
+
+      const envelope = extensionResponseEnvelopeSchema.safeParse(message.data);
+      if (!envelope.success || envelope.data.requestId !== requestId) {
+        return;
+      }
+      if (envelope.data.response.status === "ERROR") {
+        finish({ status: "UNAVAILABLE" });
+        return;
+      }
+      if (envelope.data.response.method !== "PING") {
+        return;
+      }
+
+      finish({
+        status: "AVAILABLE",
+        extensionVersion: envelope.data.response.extensionVersion,
+        supportedChainIds: envelope.data.response.supportedChainIds,
+      });
+    });
+
+    timeout = setTimeout(
+      () => finish({ status: "UNAVAILABLE" }),
+      timeoutMs,
+    );
+    input.signal?.addEventListener("abort", onAbort, { once: true });
+    if (input.signal?.aborted) {
+      onAbort();
+      return;
+    }
+
+    try {
+      transport.postMessage({
+        source: WEB_SOURCE,
+        channel: CHANNEL,
+        request: {
+          requestId,
+          method: "PING",
+        },
+      });
+    } catch {
+      finish({ status: "UNAVAILABLE" });
+    }
   });
 }
 

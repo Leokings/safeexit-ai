@@ -11,11 +11,13 @@ import {
   TriangleAlert,
   Wallet,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPublicClient, getAddress, http, isAddress, type Hex } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
 import {
+  detectEip7702SourceSignerExtension,
   Eip7702RuntimeError,
   LocalEip7702RescueRuntime,
   requestEip7702SourceSignerFromExtension,
@@ -84,6 +86,11 @@ type ReceiptBinding = {
   actionId: string;
   packageId: string;
 };
+
+type SourceSignerAvailabilityState =
+  | Readonly<{ status: "CHECKING" }>
+  | Readonly<{ status: "AVAILABLE"; extensionVersion: string }>
+  | Readonly<{ status: "UNAVAILABLE" }>;
 
 function errorMessage(error: unknown): string {
   if (
@@ -254,6 +261,8 @@ export function MainnetRescueWorkspace({
   const [eip7702Result, setEip7702Result] = useState<Eip7702ExecutionResult>();
   const eip7702SignerRef =
     useRef<Eip7702ExtensionAuthorizationSigner | undefined>(undefined);
+  const [sourceSignerAvailability, setSourceSignerAvailability] =
+    useState<SourceSignerAvailabilityState>({ status: "CHECKING" });
   const [busy, setBusy] = useState<"CONNECT" | "PREFLIGHT" | "SIGN" | "SETTLE" | null>(null);
   const [error, setError] = useState<string>();
   const [transactions, setTransactions] = useState<SubmittedTransaction[]>([]);
@@ -261,13 +270,19 @@ export function MainnetRescueWorkspace({
 
   const sourceConnected = connectedAccount?.toLowerCase() === source.toLowerCase();
   const destinationConnected = connectedAccount?.toLowerCase() === destination.toLowerCase();
-  const selectedEip7702Route =
+  const selectedEip7702Candidate =
     preflight?.eip7702Route &&
     eip7702RouteKey(preflight.eip7702Route) === selectedRoute
       ? preflight.eip7702Route
       : undefined;
+  const sourceSignerAvailable =
+    sourceSignerAvailability.status === "AVAILABLE" ||
+    Boolean(signedEip7702Package);
+  const selectedEip7702Route = sourceSignerAvailable
+    ? selectedEip7702Candidate
+    : undefined;
   const nextGaslessAction =
-    selectedEip7702Route
+    selectedEip7702Candidate
       ? undefined
       : preflight?.gaslessActions.find(
           (route) => gaslessRouteKey(route) === selectedRoute,
@@ -285,6 +300,38 @@ export function MainnetRescueWorkspace({
           { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC" },
         )
       : undefined;
+
+  const refreshSourceSignerAvailability = useCallback(
+    async (signal?: AbortSignal) => {
+      if (chainId !== 196) {
+        setSourceSignerAvailability({ status: "UNAVAILABLE" });
+        return;
+      }
+      setSourceSignerAvailability({ status: "CHECKING" });
+      const availability = await detectEip7702SourceSignerExtension(
+        signal ? { signal } : {},
+      );
+      if (signal?.aborted) return;
+      if (
+        availability.status === "AVAILABLE" &&
+        availability.supportedChainIds.includes(196)
+      ) {
+        setSourceSignerAvailability({
+          status: "AVAILABLE",
+          extensionVersion: availability.extensionVersion,
+        });
+        return;
+      }
+      setSourceSignerAvailability({ status: "UNAVAILABLE" });
+    },
+    [chainId],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void refreshSourceSignerAvailability(controller.signal);
+    return () => controller.abort();
+  }, [refreshSourceSignerAvailability]);
 
   function clearSignedAuthorization(): void {
     setSigned(undefined);
@@ -343,15 +390,20 @@ export function MainnetRescueWorkspace({
       const delegatedRouteKey = result.eip7702Route
         ? eip7702RouteKey(result.eip7702Route)
         : undefined;
-      const currentIsAvailable =
-        current === delegatedRouteKey ||
-        result.gaslessActions.some((route) => gaslessRouteKey(route) === current);
-      return currentIsAvailable
-        ? current
-        : delegatedRouteKey ??
-            (result.gaslessActions[0]
-              ? gaslessRouteKey(result.gaslessActions[0])
-              : undefined);
+      const firstGaslessRouteKey = result.gaslessActions[0]
+        ? gaslessRouteKey(result.gaslessActions[0])
+        : undefined;
+      const currentIsGasless = result.gaslessActions.some(
+        (route) => gaslessRouteKey(route) === current,
+      );
+      const currentIsDelegated =
+        sourceSignerAvailable && current === delegatedRouteKey;
+      if (currentIsGasless || currentIsDelegated) {
+        return current;
+      }
+      return sourceSignerAvailable
+        ? delegatedRouteKey ?? firstGaslessRouteKey
+        : firstGaslessRouteKey ?? delegatedRouteKey;
     });
     return result;
   }
@@ -416,6 +468,12 @@ export function MainnetRescueWorkspace({
   async function signAuthorization() {
     if (!authorized) {
       setError("Authorization confirmation is required before signing.");
+      return;
+    }
+    if (selectedEip7702Candidate && !sourceSignerAvailable) {
+      setError(
+        "SafeExit Source Signer is not available. Install it, reload this page, and run fresh preflight before using EIP-7702.",
+      );
       return;
     }
     setBusy("SIGN");
@@ -873,27 +931,54 @@ export function MainnetRescueWorkspace({
               ) : (
                 <div className="mt-5 divide-y-2 divide-border-strong border-y-2 border-border-strong">
                   {preflight.plan.actions.map((action, index) => {
-                    const gasless = preflight.gaslessActions.find((item) => item.actionId === action.id);
-                    const delegated = preflight.eip7702Route?.signingPackage.actionIds.includes(
+                    const gaslessRouteCount = preflight.gaslessActions.filter(
+                      (item) => item.actionId === action.id,
+                    ).length;
+                    const delegatedDetected = preflight.eip7702Route?.signingPackage.actionIds.includes(
                       action.id,
                     ) ?? false;
-                    const recoverable = Boolean(gasless || delegated);
+                    const delegatedAvailable =
+                      delegatedDetected && sourceSignerAvailable;
+                    const recoverable =
+                      gaslessRouteCount > 0 || delegatedAvailable;
+                    const signerUnavailable =
+                      delegatedDetected && !sourceSignerAvailable;
+                    const signerChecking =
+                      signerUnavailable &&
+                      sourceSignerAvailability.status === "CHECKING";
                     const blocked = preflight.blockedActions.find((item) => item.actionId === action.id);
                     const simulation = preflight.simulations.find((item) => item.actionId === action.id);
                     const routeCount =
-                      preflight.gaslessActions.filter(
-                        (item) => item.actionId === action.id,
-                      ).length + (delegated ? 1 : 0);
+                      gaslessRouteCount + (delegatedAvailable ? 1 : 0);
+                    const routeDescription = recoverable
+                      ? signerUnavailable
+                        ? `${routeCount} destination-paid route(s) ready. EIP-7702 is also detected, but the Source Signer is not available.`
+                        : `${routeCount} destination-paid route(s) ready. Source authorization is local; destination submits.`
+                      : signerChecking
+                        ? "Checking for SafeExit Source Signer. EIP-7702 remains blocked until the extension responds."
+                        : signerUnavailable
+                          ? "SafeExit Source Signer was not detected. Install it, reload this page, and run preflight again to enable EIP-7702."
+                          : blocked?.reason;
                     return (
                       <div key={action.id} className="grid gap-3 py-4 sm:grid-cols-[40px_1fr_auto] sm:items-start">
                         <span className="font-mono text-xs text-dim">{String(index + 1).padStart(2, "0")}</span>
                         <div className="min-w-0">
                           <p className="text-sm font-extrabold capitalize">{actionLabel(action.actionType)}</p>
                           <div className="mt-1"><CopyAddress address={actionTarget(action)} compact /></div>
-                          <p className="mt-2 text-xs leading-5 text-muted">{recoverable ? `${routeCount} destination-paid route(s) detected. Source authorization is local; destination submits.` : blocked?.reason}</p>
+                          <p className="mt-2 text-xs leading-5 text-muted">{routeDescription}</p>
+                          {signerUnavailable && !signerChecking && (
+                            <Link
+                              href="/source-signer"
+                              className="mt-2 inline-flex font-mono text-[10px] font-bold uppercase text-info underline decoration-2 underline-offset-4"
+                            >
+                              Install Source Signer
+                            </Link>
+                          )}
                           <code className="mt-1 block truncate font-mono text-[11px] text-dim">State preflight: {simulation?.status ?? "NOT RUN"}</code>
                         </div>
-                        <Badge variant={recoverable ? "success" : "danger"}>{recoverable ? "AUTHORIZATION READY" : "BLOCKED"}</Badge>
+                        <Badge variant={recoverable ? "success" : signerChecking ? "info" : "danger"}>
+                          {recoverable ? "AUTHORIZATION READY" : signerChecking ? "CHECKING SIGNER" : "BLOCKED"}
+                        </Badge>
                       </div>
                     );
                   })}
@@ -910,9 +995,55 @@ export function MainnetRescueWorkspace({
                 <div className="window-panel">
                   <div className="window-bar"><span className="window-dot" /><span className="window-dot" /><span className="ml-auto">source.account</span></div>
                   <div className="p-4">
-                    <div className="flex items-center justify-between gap-3"><span className="text-sm font-extrabold">1. Source authorization</span><Badge variant={hasSignedAuthorization ? "success" : sourceConnected ? "info" : "neutral"}>{hasSignedAuthorization ? "SIGNED" : selectedEip7702Route ? "EXTENSION" : sourceConnected ? "ACTIVE" : "STEP 1"}</Badge></div>
-                    {selectedEip7702Route ? (
-                      <p className="mt-3 text-xs font-semibold leading-5 text-muted">The SafeExit Source Signer extension reviews the fixed batch and signs delegation plus clearing locally. The source pays no gas.</p>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-extrabold">1. Source authorization</span>
+                      <Badge
+                        variant={
+                          hasSignedAuthorization
+                            ? "success"
+                            : selectedEip7702Candidate
+                              ? sourceSignerAvailable
+                                ? "info"
+                                : sourceSignerAvailability.status === "CHECKING"
+                                  ? "info"
+                                  : "danger"
+                              : sourceConnected
+                                ? "info"
+                                : "neutral"
+                        }
+                      >
+                        {hasSignedAuthorization
+                          ? "SIGNED"
+                          : selectedEip7702Candidate
+                            ? sourceSignerAvailable
+                              ? "EXTENSION READY"
+                              : sourceSignerAvailability.status === "CHECKING"
+                                ? "CHECKING"
+                                : "NOT INSTALLED"
+                            : sourceConnected
+                              ? "ACTIVE"
+                              : "STEP 1"}
+                      </Badge>
+                    </div>
+                    {selectedEip7702Candidate ? (
+                      <>
+                        <p className="mt-3 text-xs font-semibold leading-5 text-muted">
+                          {sourceSignerAvailable
+                            ? "The SafeExit Source Signer extension reviews the fixed batch and signs delegation plus clearing locally. The source pays no gas."
+                            : sourceSignerAvailability.status === "CHECKING"
+                              ? "SafeExit is checking for the local Source Signer. EIP-7702 remains blocked until the extension responds."
+                              : "The SafeExit Source Signer is required for this EIP-7702 route. Other verified permit routes remain available without it."}
+                        </p>
+                        {!sourceSignerAvailable &&
+                          sourceSignerAvailability.status === "UNAVAILABLE" && (
+                            <Link
+                              href="/source-signer"
+                              className="mt-3 inline-flex font-mono text-[10px] font-bold uppercase text-info underline decoration-2 underline-offset-4"
+                            >
+                              Install Source Signer
+                            </Link>
+                          )}
+                      </>
                     ) : (
                       <>
                         <p className="mt-3 text-xs font-semibold leading-5 text-muted">Make the source active in OKX Wallet and sign typed data. It does not remain connected and pays no gas.</p>
@@ -939,23 +1070,53 @@ export function MainnetRescueWorkspace({
                   <p className="mb-2 font-mono text-[10px] uppercase text-dim">Recovery route</p>
                   <div className="grid gap-2">
                     {preflight.eip7702Route && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedRoute(eip7702RouteKey(preflight.eip7702Route!));
-                          clearSignedAuthorization();
-                          setEip7702Result(undefined);
-                        }}
-                        className={`flex items-center justify-between gap-4 border-2 border-border-strong px-3 py-3 text-left text-sm font-extrabold transition-colors ${selectedEip7702Route ? "bg-accent/35" : "bg-surface hover:bg-surface-raised"}`}
-                      >
-                        <span>
-                          <span className="block">SafeExit delegated batch</span>
-                          <span className="mt-1 block font-mono text-[10px] uppercase text-dim">
-                            EIP-7702 / {preflight.eip7702Route.signingPackage.actionIds.length} actions
+                      <div>
+                        <button
+                          type="button"
+                          disabled={!sourceSignerAvailable}
+                          onClick={() => {
+                            setSelectedRoute(eip7702RouteKey(preflight.eip7702Route!));
+                            clearSignedAuthorization();
+                            setEip7702Result(undefined);
+                          }}
+                          className={`flex w-full items-center justify-between gap-4 border-2 border-border-strong px-3 py-3 text-left text-sm font-extrabold transition-colors disabled:cursor-not-allowed disabled:opacity-65 ${selectedEip7702Candidate ? "bg-accent/35" : "bg-surface hover:bg-surface-raised"}`}
+                        >
+                          <span>
+                            <span className="block">SafeExit delegated batch</span>
+                            <span className="mt-1 block font-mono text-[10px] uppercase text-dim">
+                              EIP-7702 / {preflight.eip7702Route.signingPackage.actionIds.length} actions
+                            </span>
                           </span>
-                        </span>
-                        <Badge variant="success">VERIFIED</Badge>
-                      </button>
+                          <Badge
+                            variant={
+                              sourceSignerAvailable
+                                ? "success"
+                                : sourceSignerAvailability.status === "CHECKING"
+                                  ? "info"
+                                  : "danger"
+                            }
+                          >
+                            {sourceSignerAvailable
+                              ? "VERIFIED"
+                              : sourceSignerAvailability.status === "CHECKING"
+                                ? "CHECKING"
+                                : "BLOCKED"}
+                          </Badge>
+                        </button>
+                        {!sourceSignerAvailable &&
+                          sourceSignerAvailability.status === "UNAVAILABLE" && (
+                            <p className="border-x-2 border-b-2 border-border-strong bg-danger/10 px-3 py-2 text-xs font-semibold leading-5 text-muted">
+                              Source Signer not detected.{" "}
+                              <Link
+                                href="/source-signer"
+                                className="font-mono text-[10px] font-bold uppercase text-info underline decoration-2 underline-offset-4"
+                              >
+                                Install it
+                              </Link>
+                              , reload this page, then run fresh preflight.
+                            </p>
+                          )}
+                      </div>
                     )}
                     {preflight.gaslessActions.map((route) => (
                       <button
@@ -1034,15 +1195,37 @@ export function MainnetRescueWorkspace({
               <div className="flex justify-between gap-4"><span className="text-muted">Network</span><span>{chainConfig.chain.name}</span></div>
               <div className="space-y-2"><span className="block text-muted">Source signs</span><CopyAddress address={source} compact /></div>
               <div className="space-y-2"><span className="block text-muted">Destination receives and pays gas</span><CopyAddress address={destination} compact /></div>
-              <div className="flex justify-between gap-4"><span className="text-muted">Execution path</span><span className="text-right">{selectedEip7702Route ? "SafeExit delegated batch" : nextGaslessAction ? executionPathLabel(nextGaslessAction.executionPath) : "None verified"}</span></div>
-              {selectedEip7702Route && <div className="flex justify-between gap-4"><span className="text-muted">Authorization standard</span><span className="font-mono">EIP-7702</span></div>}
+              <div className="flex justify-between gap-4"><span className="text-muted">Execution path</span><span className="text-right">{selectedEip7702Candidate ? "SafeExit delegated batch" : nextGaslessAction ? executionPathLabel(nextGaslessAction.executionPath) : "None verified"}</span></div>
+              {selectedEip7702Candidate && <div className="flex justify-between gap-4"><span className="text-muted">Authorization standard</span><span className="font-mono">EIP-7702</span></div>}
+              {selectedEip7702Candidate && (
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted">Source Signer</span>
+                  <Badge
+                    variant={
+                      sourceSignerAvailable
+                        ? "success"
+                        : sourceSignerAvailability.status === "CHECKING"
+                          ? "info"
+                          : "danger"
+                    }
+                  >
+                    {sourceSignerAvailable
+                      ? sourceSignerAvailability.status === "AVAILABLE"
+                        ? `v${sourceSignerAvailability.extensionVersion}`
+                        : "READY"
+                      : sourceSignerAvailability.status === "CHECKING"
+                        ? "CHECKING"
+                        : "NOT DETECTED"}
+                  </Badge>
+                </div>
+              )}
               {nextGaslessAction && <div className="flex justify-between gap-4"><span className="text-muted">Authorization standard</span><span className="font-mono">{authorizationStandardLabel(nextGaslessAction.authorizationStandard)}</span></div>}
-              {selectedEip7702Route && <div className="flex justify-between gap-4"><span className="text-muted">Included actions</span><span className="font-mono">{selectedEip7702Route.signingPackage.actionIds.length}</span></div>}
-              {selectedEip7702Route && <div className="space-y-2"><span className="block text-muted">Incident delegate</span><CopyAddress address={selectedEip7702Route.signingPackage.delegateAddress} compact /></div>}
+              {selectedEip7702Candidate && <div className="flex justify-between gap-4"><span className="text-muted">Included actions</span><span className="font-mono">{selectedEip7702Candidate.signingPackage.actionIds.length}</span></div>}
+              {selectedEip7702Candidate && <div className="space-y-2"><span className="block text-muted">Incident delegate</span><CopyAddress address={selectedEip7702Candidate.signingPackage.delegateAddress} compact /></div>}
               {nextGaslessAction && <div className="space-y-2"><span className="block text-muted">Asset contract</span><CopyAddress address={routeContract(nextGaslessAction)} compact /></div>}
               {nextGaslessAction && nextGaslessAction.standard !== "ERC3009_RECEIVE_WITH_AUTHORIZATION" && <div className="space-y-2"><span className="block text-muted">Settlement contract</span><CopyAddress address={nextGaslessAction.settlementContract} compact /></div>}
               {nextGaslessAction?.standard === "ERC4494_PERMIT_SETTLEMENT" && <div className="flex justify-between gap-4"><span className="text-muted">Token ID</span><span className="font-mono">{nextGaslessAction.tokenId}</span></div>}
-              {selectedEip7702Route && <div className="flex justify-between gap-4"><span className="text-muted">Source authorizations</span><span className="font-mono">2</span></div>}
+              {selectedEip7702Candidate && <div className="flex justify-between gap-4"><span className="text-muted">Source authorizations</span><span className="font-mono">2</span></div>}
               {nextGaslessAction && nextGaslessAction.standard !== "ERC3009_RECEIVE_WITH_AUTHORIZATION" && <div className="flex justify-between gap-4"><span className="text-muted">Source signatures</span><span className="font-mono">{nextGaslessAction.requiredSignatures}</span></div>}
               <div className="flex justify-between gap-4"><span className="text-muted">Authorization</span><Badge variant={hasSignedAuthorization ? "success" : "neutral"}>{hasSignedAuthorization ? "SIGNED IN MEMORY" : "NOT SIGNED"}</Badge></div>
               {signedExpiresAt && <div className="flex justify-between gap-4"><span className="text-muted">Valid until</span><span className="font-mono">{signedExpiresAt} UTC</span></div>}
@@ -1051,13 +1234,38 @@ export function MainnetRescueWorkspace({
 
             {!hasSignedAuthorization ? (
               <>
+                {selectedEip7702Candidate && !sourceSignerAvailable && (
+                  <div className="paper-panel mt-5 bg-danger/10 p-3 text-xs font-semibold leading-5">
+                    <p>
+                      {sourceSignerAvailability.status === "CHECKING"
+                        ? "Checking for the SafeExit Source Signer. This EIP-7702 route remains blocked until the extension responds."
+                        : "SafeExit Source Signer was not detected. Install it, reload this page, and run fresh preflight. Permit-based routes are unaffected."}
+                    </p>
+                    {sourceSignerAvailability.status === "UNAVAILABLE" && (
+                      <Link
+                        href="/source-signer"
+                        className="mt-2 inline-flex font-mono text-[10px] font-bold uppercase text-info underline decoration-2 underline-offset-4"
+                      >
+                        Download and install Source Signer
+                      </Link>
+                    )}
+                  </div>
+                )}
                 <label className="mt-5 flex cursor-pointer items-start gap-3">
-                  <Checkbox checked={authorized} onChange={(event) => setAuthorized(event.target.checked)} />
+                  <Checkbox
+                    checked={authorized}
+                    disabled={Boolean(selectedEip7702Candidate && !sourceSignerAvailable)}
+                    onChange={(event) => setAuthorized(event.target.checked)}
+                  />
                   <span className="text-xs leading-5">I confirm I am authorised to control and sign for the displayed source wallet, and I understand this action uses {chainConfig.chain.name} with real assets.</span>
                 </label>
-                <Button type="button" className="mt-5 w-full" size="lg" onClick={() => void signAuthorization()} disabled={!selectedRecoveryRoute || !authorized || busy !== null || (!selectedEip7702Route && !sourceConnected)}>
+                <Button type="button" className="mt-5 w-full" size="lg" onClick={() => void signAuthorization()} disabled={!selectedRecoveryRoute || !authorized || busy !== null || (!selectedEip7702Candidate && !sourceConnected)}>
                   {busy === "SIGN" ? <LoaderCircle className="size-4 animate-spin" /> : <FileSignature className="size-4" />}
-                  {selectedEip7702Route ? "Authorize delegated rescue" : "Sign gasless authorization"}
+                  {selectedEip7702Candidate
+                    ? sourceSignerAvailable
+                      ? "Authorize delegated rescue"
+                      : "Source Signer required"
+                    : "Sign gasless authorization"}
                 </Button>
               </>
             ) : (

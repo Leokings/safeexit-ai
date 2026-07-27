@@ -13,6 +13,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it } from "vitest";
 
 import {
+  detectEip7702SourceSignerExtension,
   Eip7702ExtensionBridgeError,
   requestEip7702SourceSignerFromExtension,
   type SourceSignerBridgeMessage,
@@ -161,6 +162,101 @@ async function signedResult(value: Eip7702LocalSigningPackage) {
 }
 
 describe("EIP-7702 source-signer extension bridge", () => {
+  it("detects a valid, same-origin Source Signer PING response", async () => {
+    const transport = new FakeTransport();
+    transport.onPost = (message) => {
+      const request = (message as {
+        request: { requestId: string; method: string };
+      }).request;
+      expect(request.method).toBe("PING");
+      transport.emit({
+        source: "safeexit-source-signer",
+        channel: "safeexit-source-signer-v1",
+        requestId: request.requestId,
+        response: {
+          status: "OK",
+          method: "PING",
+          extensionVersion: "0.1.0",
+          signerState: "READY_FOR_EPHEMERAL_KEY",
+          supportedChainIds: [196],
+          privateCredentialsAccepted: false,
+          extensionOnlyEphemeralKeyAccepted: true,
+          destinationConnectsToExtension: false,
+        },
+      });
+    };
+
+    await expect(
+      detectEip7702SourceSignerExtension({
+        transport,
+        createRequestId: () => "request_ping_test",
+      }),
+    ).resolves.toEqual({
+      status: "AVAILABLE",
+      extensionVersion: "0.1.0",
+      supportedChainIds: [196],
+    });
+  });
+
+  it("reports unavailable when no Source Signer responds", async () => {
+    const transport = new FakeTransport();
+
+    await expect(
+      detectEip7702SourceSignerExtension({
+        transport,
+        timeoutMs: 5,
+        createRequestId: () => "request_absent_test",
+      }),
+    ).resolves.toEqual({ status: "UNAVAILABLE" });
+  });
+
+  it("ignores spoofed or malformed Source Signer status messages", async () => {
+    const transport = new FakeTransport();
+    transport.onPost = () => {
+      transport.emit(
+        {
+          source: "safeexit-source-signer",
+          channel: "safeexit-source-signer-v1",
+          requestId: "request_spoofed_test",
+          response: {
+            status: "OK",
+            method: "PING",
+            extensionVersion: "0.1.0",
+            signerState: "READY_FOR_EPHEMERAL_KEY",
+            supportedChainIds: [196],
+            privateCredentialsAccepted: false,
+            extensionOnlyEphemeralKeyAccepted: true,
+            destinationConnectsToExtension: false,
+          },
+        },
+        { origin: "https://attacker.invalid" },
+      );
+      transport.emit({
+        source: "safeexit-source-signer",
+        channel: "safeexit-source-signer-v1",
+        requestId: "request_spoofed_test",
+        response: {
+          status: "OK",
+          method: "PING",
+          extensionVersion: "0.1.0",
+          signerState: "READY_FOR_EPHEMERAL_KEY",
+          supportedChainIds: [1],
+          privateCredentialsAccepted: true,
+          extensionOnlyEphemeralKeyAccepted: false,
+          destinationConnectsToExtension: true,
+        },
+      });
+    };
+
+    await expect(
+      detectEip7702SourceSignerExtension({
+        transport,
+        timeoutMs: 5,
+        createRequestId: () => "request_spoofed_test",
+      }),
+    ).resolves.toEqual({ status: "UNAVAILABLE" });
+  });
+
   it("returns a non-serializable, one-use signer after verifying both signatures", async () => {
     const value = signingPackage();
     const signed = await signedResult(value);

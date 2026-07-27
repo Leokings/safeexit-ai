@@ -76,7 +76,13 @@ export default function SupportPage() {
           ))}
         </div>
 
-        <div className="border-t-2 border-border-strong px-5 py-6 sm:px-8 lg:px-10">
+        <div className="flex flex-wrap gap-5 border-t-2 border-border-strong px-5 py-6 sm:px-8 lg:px-10">
+          <Link
+            href="/source-signer"
+            className="font-mono text-xs font-bold uppercase underline decoration-2 underline-offset-4"
+          >
+            Download and install Source Signer
+          </Link>
           <Link
             href="/privacy"
             className="font-mono text-xs font-bold uppercase underline decoration-2 underline-offset-4"
