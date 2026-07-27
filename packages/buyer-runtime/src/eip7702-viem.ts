@@ -23,6 +23,7 @@ import {
   type LocalAccount,
   type SignedAuthorization,
 } from "viem";
+import { recoverAuthorizationAddress } from "viem/utils";
 
 import {
   Eip7702RuntimeError,
@@ -51,49 +52,52 @@ function asHex(value: string): Hex {
   return value as Hex;
 }
 
-function authorizationParity(
-  authorization: SignedAuthorization,
-): bigint | undefined {
-  if (authorization.yParity !== undefined) {
-    return BigInt(authorization.yParity);
-  }
-  if (authorization.v === undefined) {
-    return undefined;
-  }
-  const value = BigInt(authorization.v);
-  return value >= 27n ? value - 27n : value;
-}
-
-function sameAuthorization(
+function sameAuthorizationScope(
   actual: SignedAuthorization,
   expected: SignedAuthorization,
 ): boolean {
   return (
     actual.address.toLowerCase() === expected.address.toLowerCase() &&
     BigInt(actual.chainId) === BigInt(expected.chainId) &&
-    BigInt(actual.nonce) === BigInt(expected.nonce) &&
-    authorizationParity(actual) === authorizationParity(expected) &&
-    actual.r.toLowerCase() === expected.r.toLowerCase() &&
-    actual.s.toLowerCase() === expected.s.toLowerCase()
+    BigInt(actual.nonce) === BigInt(expected.nonce)
   );
 }
 
-function authorizationListMatches(
+async function authorizationListMatches(
   transaction: {
     type?: string | undefined;
     authorizationList?: readonly SignedAuthorization[] | undefined;
   },
   expected: readonly SignedAuthorization[],
-): boolean {
+): Promise<boolean> {
   const actual = transaction.authorizationList;
-  return (
-    transaction.type === "eip7702" &&
-    Boolean(actual) &&
-    actual!.length === expected.length &&
-    actual!.every((authorization, index) =>
-      sameAuthorization(authorization, expected[index]!),
-    )
-  );
+  if (
+    transaction.type !== "eip7702" ||
+    !actual ||
+    actual.length !== expected.length
+  ) {
+    return false;
+  }
+
+  for (const [index, authorization] of actual.entries()) {
+    const expectedAuthorization = expected[index]!;
+    if (!sameAuthorizationScope(authorization, expectedAuthorization)) {
+      return false;
+    }
+    try {
+      const [actualSigner, expectedSigner] = await Promise.all([
+        recoverAuthorizationAddress({ authorization }),
+        recoverAuthorizationAddress({ authorization: expectedAuthorization }),
+      ]);
+      if (actualSigner.toLowerCase() !== expectedSigner.toLowerCase()) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 async function wait(milliseconds: number): Promise<void> {
@@ -551,7 +555,7 @@ implements Eip7702DestinationTransportPort {
       for (let attempt = 1; attempt <= AUTHORIZATION_READ_ATTEMPTS; attempt += 1) {
         try {
           const transaction = await this.publicClient.getTransaction({ hash });
-          if (authorizationListMatches(transaction, expectedAuthorizations)) {
+          if (await authorizationListMatches(transaction, expectedAuthorizations)) {
             preserved = true;
             break;
           }

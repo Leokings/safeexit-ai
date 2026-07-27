@@ -27,10 +27,21 @@ const authorization: SignedAuthorization = {
   address: "0x2000000000000000000000000000000000000002",
   chainId: 196,
   nonce: 7,
-  r: `0x${"11".repeat(32)}`,
-  s: `0x${"22".repeat(32)}`,
+  r: "0xd01ce5bd25701cb4239e90045a3d5c618802c0bc48090f7097d334db62d05929",
+  s: "0x31e7b5c09d49b9ef3eaf43a368a64d900b32a3d8fe04cc7ba384900e9a264712",
   v: 28n,
   yParity: 1,
+};
+const equivalentAuthorization: SignedAuthorization = {
+  ...authorization,
+  s: "0xce184a3f62b64610c150bc5c9759b26eaf7c390db143d3c01c4dce7e360ffa2f",
+  v: 27n,
+  yParity: 0,
+};
+const wrongSignerAuthorization: SignedAuthorization = {
+  ...authorization,
+  r: "0x1252d5c03706e6bcc599ad8a60d503c205b8708a507948900cfd2f09febcfe61",
+  s: "0x3e9a88258d0fd74f2753324472309d013d938baa6ebb20d76e00493cde692a1a",
 };
 
 type PublicClientStub = {
@@ -128,6 +139,25 @@ describe("ViemLocalEip7702DestinationTransport", () => {
     expect(getTransaction).toHaveBeenCalledTimes(2);
   });
 
+  it("accepts a canonically equivalent authorization signature", async () => {
+    vi.useFakeTimers();
+    const { transport } = transportWith([
+      {
+        type: "eip7702",
+        authorizationList: [equivalentAuthorization],
+      },
+    ]);
+
+    const receiptPromise = transport.waitForReceipt(transactionHash);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(receiptPromise).resolves.toMatchObject({
+      status: "CONFIRMED",
+      transactionHashes: [transactionHash],
+      canonical: true,
+    });
+  });
+
   it("rejects after repeated authorization mismatches", async () => {
     vi.useFakeTimers();
     const mismatched = {
@@ -136,6 +166,25 @@ describe("ViemLocalEip7702DestinationTransport", () => {
     };
     const { transport, getTransaction } = transportWith(
       Array.from({ length: 5 }, () => mismatched),
+    );
+
+    const receiptPromise = transport.waitForReceipt(transactionHash);
+    const rejection = expect(receiptPromise).rejects.toThrow(
+      "after 5 observations",
+    );
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    await rejection;
+    expect(getTransaction).toHaveBeenCalledTimes(5);
+  });
+
+  it("rejects a matching authorization scope signed by another account", async () => {
+    vi.useFakeTimers();
+    const { transport, getTransaction } = transportWith(
+      Array.from({ length: 5 }, () => ({
+        type: "eip7702",
+        authorizationList: [wrongSignerAuthorization],
+      })),
     );
 
     const receiptPromise = transport.waitForReceipt(transactionHash);
