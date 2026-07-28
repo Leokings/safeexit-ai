@@ -971,7 +971,7 @@ export function MainnetRescueWorkspace({
                               href="/source-signer"
                               className="mt-2 inline-flex font-mono text-[10px] font-bold uppercase text-info underline decoration-2 underline-offset-4"
                             >
-                              Install Source Signer
+                              Get Source Signer
                             </Link>
                           )}
                           <code className="mt-1 block truncate font-mono text-[11px] text-dim">State preflight: {simulation?.status ?? "NOT RUN"}</code>
@@ -1040,7 +1040,7 @@ export function MainnetRescueWorkspace({
                               href="/source-signer"
                               className="mt-3 inline-flex font-mono text-[10px] font-bold uppercase text-info underline decoration-2 underline-offset-4"
                             >
-                              Install Source Signer
+                              Get Source Signer
                             </Link>
                           )}
                       </>
@@ -1111,7 +1111,7 @@ export function MainnetRescueWorkspace({
                                 href="/source-signer"
                                 className="font-mono text-[10px] font-bold uppercase text-info underline decoration-2 underline-offset-4"
                               >
-                                Install it
+                                Get it from Chrome Web Store
                               </Link>
                               , reload this page, then run fresh preflight.
                             </p>
@@ -1246,7 +1246,7 @@ export function MainnetRescueWorkspace({
                         href="/source-signer"
                         className="mt-2 inline-flex font-mono text-[10px] font-bold uppercase text-info underline decoration-2 underline-offset-4"
                       >
-                        Download and install Source Signer
+                        Get Source Signer on Chrome Web Store
                       </Link>
                     )}
                   </div>

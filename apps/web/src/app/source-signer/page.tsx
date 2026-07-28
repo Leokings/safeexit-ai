@@ -10,21 +10,19 @@ import {
 export const metadata: Metadata = {
   title: "Install Source Signer",
   description:
-    "Download and install the SafeExit Source Signer for X Layer EIP-7702 rescue.",
+    "Install the SafeExit Source Signer from the Chrome Web Store for X Layer EIP-7702 rescue.",
 };
 
-const archiveName = "safeexit-source-signer-0.1.0.zip";
-const archiveUrl = `/downloads/${archiveName}`;
-const sha256 =
-  "ECA3896663C10C8883E82A1A44A1C9510C60CFDCB7ECA579E97715EBBB885CC5";
+const chromeWebStoreUrl =
+  "https://chrome.google.com/webstore/detail/adgboaaoflpkecceingmfhfcnhbjmebe";
+const extensionId = "adgboaaoflpkecceingmfhfcnhbjmebe";
 
 const installSteps = [
-  "Download the ZIP only from this SafeExit page.",
-  "Verify the SHA-256 checksum shown below before opening the archive.",
-  "Extract the ZIP into a permanent folder. Do not select the ZIP itself in Chrome.",
-  "Open chrome://extensions in Chrome and enable Developer mode.",
-  "Select Load unpacked, then choose the extracted folder that contains manifest.json.",
-  "Pin SafeExit Source Signer, reload safeexit.xyz, and run a fresh incident preflight.",
+  "Open the official SafeExit Source Signer listing in the Chrome Web Store.",
+  "Select Add to Chrome and review the permissions shown by Chrome.",
+  "Confirm Add extension, then pin SafeExit Source Signer from Chrome's Extensions menu.",
+  "Open or reload safeexit.xyz after installation.",
+  "Run a fresh incident preflight. An eligible EIP-7702 route should change from blocked to ready when the extension responds.",
 ] as const;
 
 export default function SourceSignerPage() {
@@ -46,12 +44,13 @@ export default function SourceSignerPage() {
               source private key.
             </p>
             <a
-              href={archiveUrl}
-              download
-              className="mt-7 inline-flex min-h-12 items-center justify-center gap-2 border-2 border-border-strong bg-accent px-5 text-sm font-black hover:bg-accent/75"
+              href={chromeWebStoreUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-7 inline-flex min-h-12 w-full max-w-full items-center justify-center gap-2 border-2 border-border-strong bg-accent px-5 py-3 text-center text-sm font-black leading-5 hover:bg-accent/75 sm:w-auto"
             >
               <Download className="size-4" />
-              Download Source Signer 0.1.0
+              Download Source Signer on Chrome Web Store
             </a>
           </div>
 
@@ -61,12 +60,14 @@ export default function SourceSignerPage() {
             </p>
             <div className="mt-3 flex items-center gap-2">
               <span className="status-dot" />
-              <span className="text-sm font-black">Chrome review pending</span>
+              <span className="text-sm font-black">
+                Published on Chrome Web Store
+              </span>
             </div>
             <p className="mt-4 text-sm font-medium leading-6 text-muted">
-              This is the same signed-off build submitted to the Chrome Web
-              Store, but Google has not reviewed or approved it yet. Manual
-              installations do not update automatically.
+              Install from the official Store listing so Chrome can verify the
+              package source and deliver future Source Signer updates
+              automatically.
             </p>
             <div className="mt-5 border-t-2 border-border-strong pt-4 font-mono text-[10px] font-bold uppercase leading-5 text-dim">
               <p>Chrome 127 or newer</p>
@@ -79,32 +80,33 @@ export default function SourceSignerPage() {
         <section className="grid border-b-2 border-border-strong lg:grid-cols-[220px_minmax(0,1fr)]">
           <div className="border-b-2 border-border-strong px-5 py-7 sm:px-8 lg:border-b-0 lg:border-r-2 lg:px-10">
             <p className="font-mono text-[10px] font-bold text-dim">01</p>
-            <h2 className="mt-2 text-xl font-black">Verify the archive</h2>
+            <h2 className="mt-2 text-xl font-black">Official distribution</h2>
           </div>
-          <div className="min-w-0 px-5 py-7 sm:px-8 lg:px-10">
+          <div className="min-w-0 space-y-4 px-5 py-7 sm:px-8 lg:px-10">
             <p className="text-sm font-semibold leading-6 text-muted">
-              File: <span className="font-mono text-foreground">{archiveName}</span>
+              Install only from the official Chrome Web Store listing linked
+              on this page. Do not install ZIP files or copies shared through
+              chat, email, or support messages.
             </p>
-            <p className="mt-3 break-all border-2 border-border-strong bg-surface-muted p-3 font-mono text-xs font-bold leading-5">
-              SHA-256 {sha256}
-            </p>
-            <div className="mt-4 grid gap-3 xl:grid-cols-2">
-              <div>
-                <p className="mb-2 font-mono text-[10px] font-bold uppercase text-dim">
-                  Windows PowerShell
-                </p>
-                <code className="block overflow-x-auto border-2 border-border-strong bg-surface-muted p-3 font-mono text-xs">
-                  Get-FileHash .\{archiveName} -Algorithm SHA256
-                </code>
-              </div>
-              <div>
-                <p className="mb-2 font-mono text-[10px] font-bold uppercase text-dim">
-                  macOS or Linux
-                </p>
-                <code className="block overflow-x-auto border-2 border-border-strong bg-surface-muted p-3 font-mono text-xs">
-                  shasum -a 256 {archiveName}
-                </code>
-              </div>
+            <div className="grid gap-3 sm:grid-cols-[160px_minmax(0,1fr)]">
+              <span className="font-mono text-[10px] font-bold uppercase text-dim">
+                Extension ID
+              </span>
+              <code className="break-all font-mono text-xs font-bold">
+                {extensionId}
+              </code>
+              <span className="font-mono text-[10px] font-bold uppercase text-dim">
+                Listing
+              </span>
+              <a
+                href={chromeWebStoreUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex w-fit items-center gap-2 break-all font-mono text-xs font-bold underline decoration-2 underline-offset-4"
+              >
+                Chrome Web Store
+                <ExternalLink className="size-3.5 shrink-0" />
+              </a>
             </div>
           </div>
         </section>
@@ -112,7 +114,7 @@ export default function SourceSignerPage() {
         <section className="grid border-b-2 border-border-strong lg:grid-cols-[220px_minmax(0,1fr)]">
           <div className="border-b-2 border-border-strong px-5 py-7 sm:px-8 lg:border-b-0 lg:border-r-2 lg:px-10">
             <p className="font-mono text-[10px] font-bold text-dim">02</p>
-            <h2 className="mt-2 text-xl font-black">Install unpacked</h2>
+            <h2 className="mt-2 text-xl font-black">Install from Chrome</h2>
           </div>
           <ol className="divide-y-2 divide-border-strong px-5 sm:px-8 lg:px-10">
             {installSteps.map((step, index) => (
@@ -153,22 +155,21 @@ export default function SourceSignerPage() {
               submission, and relies on beta wallet tooling.
             </p>
             <p className="flex items-start gap-3 text-sm font-semibold leading-6">
-              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-danger" />
-              Once the Chrome Web Store version is approved, remove this
-              unpacked build and install the Store version to receive reviewed
-              updates.
+              <ShieldCheck className="mt-0.5 size-4 shrink-0 text-info" />
+              Confirm that Chrome shows extension ID {extensionId}. Remove any
+              unpacked or unofficial copy before using the Store release.
             </p>
           </div>
         </section>
 
         <div className="flex flex-wrap items-center gap-5 px-5 py-6 sm:px-8 lg:px-10">
           <a
-            href="https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked"
+            href={chromeWebStoreUrl}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-2 font-mono text-xs font-bold uppercase underline decoration-2 underline-offset-4"
           >
-            Chrome load-unpacked guide
+            Chrome Web Store listing
             <ExternalLink className="size-3.5" />
           </a>
           <Link

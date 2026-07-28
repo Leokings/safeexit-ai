@@ -81,7 +81,7 @@ export default function SupportPage() {
             href="/source-signer"
             className="font-mono text-xs font-bold uppercase underline decoration-2 underline-offset-4"
           >
-            Download and install Source Signer
+            Get Source Signer on Chrome Web Store
           </Link>
           <Link
             href="/privacy"
