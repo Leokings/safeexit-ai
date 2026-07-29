@@ -1,6 +1,7 @@
 import type {
   AgentServiceJob,
   BuyerExecutionReport,
+  Eip7702LocalSigningPackage,
   SigningPackage,
 } from "@safeexit/agent-service";
 import type { Incident } from "@safeexit/shared";
@@ -20,4 +21,8 @@ export interface SafeExitAgentLifecyclePort {
     jobId: string,
     report: BuyerExecutionReport,
   ): Promise<AgentServiceJob>;
+}
+
+export interface Eip7702SigningPackageBuilderPort {
+  build(job: AgentServiceJob): Promise<Eip7702LocalSigningPackage>;
 }

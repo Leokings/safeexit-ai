@@ -249,6 +249,7 @@ export function createSafeExitServiceManifest(
       executionPaths: [
         "DIRECT_AUTHORIZATION",
         "SAFEEXIT_SETTLEMENT",
+        "SAFEEXIT_EIP7702",
       ],
       supportedChains: rescueMainnetChainConfigs.map(({ chain }) => ({
         chainId: chain.id,
@@ -259,6 +260,7 @@ export function createSafeExitServiceManifest(
         "DETERMINISTIC_RESCUE_PLAN",
         "SIMULATION_RESULTS",
         "ORDERED_SIGNING_PACKAGES",
+        "EIP7702_SOURCE_SIGNER_PACKAGE",
         "OPTIONAL_DASHBOARD_URL",
       ],
     },
@@ -305,6 +307,7 @@ export function createSafeExitServiceManifest(
       "Send only public wallet addresses, explicit asset identifiers, and the exact authorization statement.",
       "Never request or transmit a seed phrase, private key, keystore, or raw wallet credential.",
       "Present the returned source, destination, routes, and simulations before requesting local signatures.",
+      "When an X Layer result uses SAFEEXIT_EIP7702, open its dashboardUrl and use the SafeExit Source Signer extension for local source authorization; the destination account submits the transaction and pays gas.",
     ],
     request: {
       schemaUrl: requestSchemaUrl,

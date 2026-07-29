@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   authorizationStandardSchema,
   buyerExecutionReportSchema,
+  eip7702LocalSigningPackageSchema,
   recoveryExecutionPathSchema,
   signingPackageExecutionMetadata,
   signingPackageSchema,
@@ -98,7 +99,7 @@ export const okxX402RefreshRequestSchema = z.strictObject({
   continuationToken: z.string().min(64).max(2_048),
 });
 
-export const okxSigningPackageEnvelopeSchema = z.strictObject({
+export const okxPermitSigningPackageEnvelopeSchema = z.strictObject({
   executionPath: recoveryExecutionPathSchema,
   authorizationStandard: authorizationStandardSchema,
   signingPackage: signingPackageSchema,
@@ -119,6 +120,17 @@ export const okxSigningPackageEnvelopeSchema = z.strictObject({
     });
   }
 });
+
+export const okxEip7702SigningPackageEnvelopeSchema = z.strictObject({
+  executionPath: z.literal("SAFEEXIT_EIP7702"),
+  authorizationStandard: z.literal("EIP7702"),
+  signingPackage: eip7702LocalSigningPackageSchema,
+});
+
+export const okxSigningPackageEnvelopeSchema = z.union([
+  okxPermitSigningPackageEnvelopeSchema,
+  okxEip7702SigningPackageEnvelopeSchema,
+]);
 
 const signingPackageCoverageSchema = z.strictObject({
   issuedActionIds: z.array(identifierSchema).min(1),
@@ -211,6 +223,7 @@ export const okxA2ACompletionDeliverableSchema = z.strictObject({
 
 export type OkxA2ATaskRequest = z.infer<typeof okxA2ATaskRequestSchema>;
 export type OkxA2AAssetManifest = z.infer<typeof okxA2AAssetManifestSchema>;
+export type OkxSigningPackageEnvelope = z.infer<typeof okxSigningPackageEnvelopeSchema>;
 export type OkxA2ASigningDeliverable = z.infer<typeof okxA2ASigningDeliverableSchema>;
 export type OkxX402PrepareRequest = z.infer<typeof okxX402PrepareRequestSchema>;
 export type OkxX402RefreshRequest = z.infer<typeof okxX402RefreshRequestSchema>;

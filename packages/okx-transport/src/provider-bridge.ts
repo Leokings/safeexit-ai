@@ -2,13 +2,22 @@ import { createHash, randomUUID } from "node:crypto";
 
 import {
   agentServiceJobSchema,
+  eip7702LocalSigningPackageSchema,
   signingPackageExecutionMetadata,
   signingPackageListSchema,
+  type Eip7702LocalSigningPackage,
   type SigningPackage,
   type AgentServiceJob,
 } from "@safeexit/agent-service";
+import {
+  EIP7702_ACTION_KIND,
+  toEip7702RescueActions,
+} from "@safeexit/adapters";
 import { RESCUE_MAINNET_CHAIN_IDS } from "@safeexit/chain";
-import { incidentSchema } from "@safeexit/shared";
+import {
+  incidentSchema,
+  type RescueAction,
+} from "@safeexit/shared";
 
 import {
   okxA2ABuyerReportRequestSchema,
@@ -18,15 +27,20 @@ import {
   okxX402PrepareRequestSchema,
   okxX402RefreshRequestSchema,
   okxX402SigningDeliverableSchema,
+  SAFEEXIT_AUTHORIZATION_STATEMENT,
   type OkxA2ABuyerReportRequest,
   type OkxA2ACompletionDeliverable,
   type OkxA2ASigningDeliverable,
   type OkxA2ATaskRequest,
+  type OkxSigningPackageEnvelope,
   type OkxX402PrepareRequest,
   type OkxX402RefreshRequest,
   type OkxX402SigningDeliverable,
 } from "./contracts";
-import type { SafeExitAgentLifecyclePort } from "./ports";
+import type {
+  Eip7702SigningPackageBuilderPort,
+  SafeExitAgentLifecyclePort,
+} from "./ports";
 
 function sameAddress(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
@@ -140,6 +154,192 @@ function assertPersistedSigningScope(
   }
 }
 
+function isRequestedEip7702Asset(
+  request: OkxA2ATaskRequest,
+  action: Eip7702LocalSigningPackage["actions"][number],
+): boolean {
+  switch (action.kind) {
+    case EIP7702_ACTION_KIND.TRANSFER_ERC20:
+    case EIP7702_ACTION_KIND.REVOKE_ERC20_APPROVAL:
+      return request.assetManifest.erc20TokenAddresses.some((address) =>
+        sameAddress(address, action.asset));
+    case EIP7702_ACTION_KIND.TRANSFER_ERC721:
+      return request.assetManifest.erc721Assets.some(
+        (asset) =>
+          sameAddress(asset.collectionAddress, action.asset) &&
+          asset.tokenId === action.tokenId,
+      );
+    case EIP7702_ACTION_KIND.TRANSFER_ERC1155:
+      return request.assetManifest.erc1155Assets.some(
+        (asset) =>
+          sameAddress(asset.collectionAddress, action.asset) &&
+          asset.tokenId === action.tokenId,
+      );
+    case EIP7702_ACTION_KIND.REVOKE_NFT_OPERATOR:
+      return [...request.assetManifest.erc721Assets, ...request.assetManifest.erc1155Assets]
+        .some((asset) => sameAddress(asset.collectionAddress, action.asset));
+    case EIP7702_ACTION_KIND.TRANSFER_NATIVE:
+      return false;
+  }
+}
+
+function assertEip7702ActionMatchesPlan(
+  job: AgentServiceJob,
+  signingPackage: Eip7702LocalSigningPackage,
+  index: number,
+): void {
+  const actionId = signingPackage.actionIds[index];
+  const packagedAction = signingPackage.actions[index];
+  const planAction = job.plan?.actions.find((action) => action.id === actionId);
+  if (!actionId || !packagedAction || !planAction) {
+    throw new OkxProviderBridgeError(
+      "HANDOFF_SCOPE_MISMATCH",
+      "EIP-7702 signing package contains an action outside the deterministic plan",
+    );
+  }
+  const expected = toEip7702RescueActions(
+    [{
+      ...planAction,
+      simulationStatus: "PASSED",
+    } as RescueAction],
+    signingPackage.sourceAddress,
+    signingPackage.destinationAddress,
+  )[0];
+  if (
+    !expected ||
+    packagedAction.kind !== expected.kind ||
+    !sameAddress(packagedAction.asset, expected.asset) ||
+    !sameAddress(packagedAction.counterparty, expected.counterparty) ||
+    packagedAction.tokenId !== expected.tokenId.toString() ||
+    packagedAction.amount !== expected.amount.toString()
+  ) {
+    throw new OkxProviderBridgeError(
+      "HANDOFF_SCOPE_MISMATCH",
+      "EIP-7702 signing package action does not match the deterministic rescue plan",
+    );
+  }
+}
+
+function assertEip7702SigningScope(
+  request: OkxA2ATaskRequest,
+  job: AgentServiceJob,
+  value: Eip7702LocalSigningPackage,
+  now: Date,
+): void {
+  const signingPackage = eip7702LocalSigningPackageSchema.parse(value);
+  if (
+    !job.incident ||
+    !job.plan ||
+    !job.simulation ||
+    signingPackage.jobId !== job.id ||
+    signingPackage.incidentId !== job.incident.id ||
+    signingPackage.planId !== job.plan.id ||
+    signingPackage.planHash.toLowerCase() !== job.plan.integrityHash.toLowerCase() ||
+    signingPackage.observedAtBlock !== job.plan.observedAtBlock ||
+    signingPackage.chainId !== request.walletContext.chainId ||
+    !sameAddress(signingPackage.sourceAddress, request.walletContext.sourceAddress) ||
+    !sameAddress(signingPackage.destinationAddress, request.walletContext.destinationAddress) ||
+    signingPackage.simulation.providerId !== job.simulation.providerId ||
+    Date.parse(signingPackage.expiresAt) <= now.getTime()
+  ) {
+    throw new OkxProviderBridgeError(
+      "HANDOFF_SCOPE_MISMATCH",
+      "EIP-7702 signing package does not match the paid rescue scope",
+    );
+  }
+  signingPackage.actionIds.forEach((actionId, index) => {
+    const action = signingPackage.actions[index];
+    if (
+      !action ||
+      !job.simulation?.executableActionIds.includes(actionId) ||
+      !isRequestedEip7702Asset(request, action)
+    ) {
+      throw new OkxProviderBridgeError(
+        "HANDOFF_SCOPE_MISMATCH",
+        "EIP-7702 signing package includes an undeclared or unverified rescue action",
+      );
+    }
+    assertEip7702ActionMatchesPlan(job, signingPackage, index);
+    const simulation = job.simulation.results.find(
+      (result) => result.actionId === actionId,
+    );
+    if (
+      !simulation ||
+      simulation.status !== "SUCCEEDED" ||
+      simulation.providerId !== signingPackage.simulation.providerId ||
+      signingPackage.simulation.resultIds[index] !== simulation.id
+    ) {
+      throw new OkxProviderBridgeError(
+        "HANDOFF_SCOPE_MISMATCH",
+        "EIP-7702 signing package simulation does not match the verified action result",
+      );
+    }
+  });
+  const committedSimulationExpiry = Math.min(
+    ...signingPackage.actionIds.map((actionId) =>
+      Date.parse(
+        job.simulation!.results.find((result) => result.actionId === actionId)!.expiresAt,
+      )),
+  );
+  if (
+    Date.parse(signingPackage.simulation.expiresAt) !== committedSimulationExpiry
+  ) {
+    throw new OkxProviderBridgeError(
+      "HANDOFF_SCOPE_MISMATCH",
+      "EIP-7702 signing package does not preserve the verified simulation expiry",
+    );
+  }
+}
+
+function assertPersistedEip7702SigningScope(
+  job: AgentServiceJob,
+  signingPackage: Eip7702LocalSigningPackage,
+  now: Date,
+): void {
+  if (!job.incident?.assetManifest) {
+    throw new OkxProviderBridgeError(
+      "HANDOFF_SCOPE_MISMATCH",
+      "The paid incident does not contain a refreshable asset manifest",
+    );
+  }
+  assertEip7702SigningScope({
+    schemaVersion: "safeexit-okx-a2a-v1",
+    transportMode: "SAFEEXIT_NORMALIZED",
+    okxJobId: "persisted-paid-job",
+    providerAgentId: "0",
+    service: "compromised-wallet-rescue",
+    walletContext: {
+      chainId: job.incident.chainId,
+      sourceAddress: job.incident.sourceAddress,
+      destinationAddress: job.incident.destinationAddress,
+    },
+    assetManifest: job.incident.assetManifest,
+    authorization: {
+      statement: SAFEEXIT_AUTHORIZATION_STATEMENT,
+      confirmedAt: job.incident.ownershipAttestation.attestedAt,
+    },
+  }, job, signingPackage, now);
+}
+
+function permitEnvelopes(
+  signingPackages: readonly SigningPackage[],
+): OkxSigningPackageEnvelope[] {
+  return signingPackages.map((signingPackage) => ({
+    ...signingPackageExecutionMetadata(signingPackage),
+    signingPackage,
+  }));
+}
+
+function eip7702Envelope(
+  signingPackage: Eip7702LocalSigningPackage,
+): OkxSigningPackageEnvelope {
+  return {
+    executionPath: "SAFEEXIT_EIP7702",
+    authorizationStandard: "EIP7702",
+    signingPackage,
+  };
+}
+
 export class OkxA2AProviderBridge {
   private readonly supportedChainIds: ReadonlySet<number>;
 
@@ -148,6 +348,7 @@ export class OkxA2AProviderBridge {
     private readonly clock: () => Date = () => new Date(),
     private readonly incidentIdFactory: () => string = () => `incident_${randomUUID()}`,
     supportedChainIds: readonly number[] = RESCUE_MAINNET_CHAIN_IDS,
+    private readonly eip7702SigningPackages?: Eip7702SigningPackageBuilderPort,
   ) {
     if (!/^\d{1,32}$/.test(providerAgentId)) {
       throw new Error("SAFEEXIT OKX provider agent ID is invalid");
@@ -158,10 +359,10 @@ export class OkxA2AProviderBridge {
     this.supportedChainIds = new Set(supportedChainIds);
   }
 
-  async prepareSigningDeliverable(
+  private async prepareJob(
     lifecycle: SafeExitAgentLifecyclePort,
     value: OkxA2ATaskRequest,
-  ): Promise<OkxA2ASigningDeliverable> {
+  ): Promise<{ request: OkxA2ATaskRequest; job: AgentServiceJob }> {
     const request = okxA2ATaskRequestSchema.parse(value);
     assertProvider(this.providerAgentId, request.providerAgentId);
     if (!this.supportedChainIds.has(request.walletContext.chainId)) {
@@ -198,10 +399,20 @@ export class OkxA2AProviderBridge {
       updatedAt: now,
     });
 
+    const expectedRequestId = requestIdFor(
+      request.providerAgentId,
+      request.okxJobId,
+    );
     let job = agentServiceJobSchema.parse(await lifecycle.createIncident({
-      requestId: requestIdFor(request.providerAgentId, request.okxJobId),
+      requestId: expectedRequestId,
       incident,
     }));
+    if (job.requestId !== expectedRequestId) {
+      throw new OkxProviderBridgeError(
+        "HANDOFF_SCOPE_MISMATCH",
+        "SAFEEXIT returned a job bound to a different marketplace request",
+      );
+    }
     if (job.status === "RECEIVED" || job.status === "WAITING_FOR_SOURCE") {
       job = agentServiceJobSchema.parse(await lifecycle.analyseIncident(job.id, incident));
     }
@@ -217,6 +428,14 @@ export class OkxA2AProviderBridge {
         `SAFEEXIT cannot prepare a signing package while the job is ${job.status}`,
       );
     }
+    return { request, job };
+  }
+
+  async prepareSigningDeliverable(
+    lifecycle: SafeExitAgentLifecyclePort,
+    value: OkxA2ATaskRequest,
+  ): Promise<OkxA2ASigningDeliverable> {
+    const { request, job } = await this.prepareJob(lifecycle, value);
 
     const signingPackages = signingPackageListSchema.parse(
       await lifecycle.getSigningPackages(job.id),
@@ -237,10 +456,7 @@ export class OkxA2AProviderBridge {
       status: "SIGNING_PACKAGES_READY",
       createdAt: this.clock().toISOString(),
       walletContext: request.walletContext,
-      signingPackages: signingPackages.map((signingPackage) => ({
-        ...signingPackageExecutionMetadata(signingPackage),
-        signingPackage,
-      })),
+      signingPackages: permitEnvelopes(signingPackages),
       coverage: {
         issuedActionIds,
         unavailableActionIds,
@@ -255,12 +471,54 @@ export class OkxA2AProviderBridge {
     });
   }
 
+  private async preparePaidSigningEnvelopes(
+    lifecycle: SafeExitAgentLifecyclePort,
+    request: OkxA2ATaskRequest,
+    job: AgentServiceJob,
+  ): Promise<{
+    signingPackages: OkxSigningPackageEnvelope[];
+    issuedActionIds: string[];
+  }> {
+    let eip7702Failure: unknown;
+    if (this.eip7702SigningPackages) {
+      try {
+        const signingPackage = eip7702LocalSigningPackageSchema.parse(
+          await this.eip7702SigningPackages.build(job),
+        );
+        assertEip7702SigningScope(request, job, signingPackage, this.clock());
+        return {
+          signingPackages: [eip7702Envelope(signingPackage)],
+          issuedActionIds: [...signingPackage.actionIds],
+        };
+      } catch (error) {
+        eip7702Failure = error;
+      }
+    }
+
+    try {
+      const signingPackages = signingPackageListSchema.parse(
+        await lifecycle.getSigningPackages(job.id),
+      );
+      signingPackages.forEach((signingPackage) =>
+        assertSigningScope(request, job, signingPackage));
+      return {
+        signingPackages: permitEnvelopes(signingPackages),
+        issuedActionIds: signingPackages.map((signingPackage) => signingPackage.actionId),
+      };
+    } catch (permitFailure) {
+      if (eip7702Failure instanceof OkxProviderBridgeError) {
+        throw eip7702Failure;
+      }
+      throw permitFailure;
+    }
+  }
+
   async preparePaidSigningDeliverable(
     lifecycle: SafeExitAgentLifecyclePort,
     value: OkxX402PrepareRequest,
   ): Promise<OkxX402SigningDeliverable> {
     const request = okxX402PrepareRequestSchema.parse(value);
-    const deliverable = await this.prepareSigningDeliverable(lifecycle, {
+    const normalizedRequest = okxA2ATaskRequestSchema.parse({
       schemaVersion: "safeexit-okx-a2a-v1",
       transportMode: "SAFEEXIT_NORMALIZED",
       okxJobId: `x402:${request.requestId}`,
@@ -271,19 +529,85 @@ export class OkxA2AProviderBridge {
       assetManifest: request.assetManifest,
       authorization: request.authorization,
     });
+    const { job } = await this.prepareJob(lifecycle, normalizedRequest);
+    const prepared = await this.preparePaidSigningEnvelopes(
+      lifecycle,
+      normalizedRequest,
+      job,
+    );
+    const issuedActionIdSet = new Set(prepared.issuedActionIds);
     return okxX402SigningDeliverableSchema.parse({
       schemaVersion: "safeexit-okx-x402-deliverable-v2",
       transportMode: "OKX_X402",
       requestId: request.requestId,
-      providerAgentId: deliverable.providerAgentId,
-      safeExitJobId: deliverable.safeExitJobId,
-      status: deliverable.status,
-      createdAt: deliverable.createdAt,
-      walletContext: deliverable.walletContext,
-      signingPackages: deliverable.signingPackages,
-      coverage: deliverable.coverage,
-      executionRequirements: deliverable.executionRequirements,
+      providerAgentId: this.providerAgentId,
+      safeExitJobId: job.id,
+      status: "SIGNING_PACKAGES_READY",
+      createdAt: this.clock().toISOString(),
+      walletContext: normalizedRequest.walletContext,
+      signingPackages: prepared.signingPackages,
+      coverage: {
+        issuedActionIds: prepared.issuedActionIds,
+        unavailableActionIds: job.plan?.actions
+          .map((action) => action.id)
+          .filter((actionId) => !issuedActionIdSet.has(actionId)) ?? [],
+      },
+      executionRequirements: {
+        sourceSignerMustRemainLocal: true,
+        destinationPaysSettlementGas: true,
+        postSignatureSimulationRequired: true,
+        sourceSignaturesMustNotBeReturned: true,
+        receiptOnlyReportSchema: "safeexit-buyer-report-v1",
+      },
     });
+  }
+
+  private async refreshPaidSigningEnvelopes(
+    lifecycle: SafeExitAgentLifecyclePort,
+    job: AgentServiceJob,
+  ): Promise<{
+    signingPackages: OkxSigningPackageEnvelope[];
+    issuedActionIds: string[];
+  }> {
+    let eip7702Failure: unknown;
+    if (this.eip7702SigningPackages) {
+      try {
+        const signingPackage = eip7702LocalSigningPackageSchema.parse(
+          await this.eip7702SigningPackages.build(job),
+        );
+        assertPersistedEip7702SigningScope(job, signingPackage, this.clock());
+        return {
+          signingPackages: [eip7702Envelope(signingPackage)],
+          issuedActionIds: [...signingPackage.actionIds],
+        };
+      } catch (error) {
+        eip7702Failure = error;
+      }
+    }
+
+    try {
+      const signingPackages = signingPackageListSchema.parse(
+        await lifecycle.getSigningPackages(job.id),
+      );
+      signingPackages.forEach((signingPackage) => {
+        assertPersistedSigningScope(job, signingPackage);
+        if (Date.parse(signingPackage.expiresAt) <= this.clock().getTime()) {
+          throw new OkxProviderBridgeError(
+            "JOB_NOT_READY",
+            "SAFEEXIT did not issue a fresh signing package",
+          );
+        }
+      });
+      return {
+        signingPackages: permitEnvelopes(signingPackages),
+        issuedActionIds: signingPackages.map((signingPackage) => signingPackage.actionId),
+      };
+    } catch (permitFailure) {
+      if (eip7702Failure instanceof OkxProviderBridgeError) {
+        throw eip7702Failure;
+      }
+      throw permitFailure;
+    }
   }
 
   async refreshPaidSigningDeliverable(
@@ -304,20 +628,8 @@ export class OkxA2AProviderBridge {
         "The continuation does not match a refreshable paid SAFEEXIT job",
       );
     }
-    const signingPackages = signingPackageListSchema.parse(
-      await lifecycle.getSigningPackages(job.id),
-    );
-    signingPackages.forEach((signingPackage) => {
-      assertPersistedSigningScope(job, signingPackage);
-      if (Date.parse(signingPackage.expiresAt) <= this.clock().getTime()) {
-        throw new OkxProviderBridgeError(
-          "JOB_NOT_READY",
-          "SAFEEXIT did not issue a fresh signing package",
-        );
-      }
-    });
-    const issuedActionIds = signingPackages.map((signingPackage) => signingPackage.actionId);
-    const issuedActionIdSet = new Set(issuedActionIds);
+    const prepared = await this.refreshPaidSigningEnvelopes(lifecycle, job);
+    const issuedActionIdSet = new Set(prepared.issuedActionIds);
     return okxX402SigningDeliverableSchema.parse({
       schemaVersion: "safeexit-okx-x402-deliverable-v2",
       transportMode: "OKX_X402",
@@ -331,12 +643,9 @@ export class OkxA2AProviderBridge {
         sourceAddress: job.incident.sourceAddress,
         destinationAddress: job.incident.destinationAddress,
       },
-      signingPackages: signingPackages.map((signingPackage) => ({
-        ...signingPackageExecutionMetadata(signingPackage),
-        signingPackage,
-      })),
+      signingPackages: prepared.signingPackages,
       coverage: {
-        issuedActionIds,
+        issuedActionIds: prepared.issuedActionIds,
         unavailableActionIds: job.plan.actions
           .map((action) => action.id)
           .filter((actionId) => !issuedActionIdSet.has(actionId)),

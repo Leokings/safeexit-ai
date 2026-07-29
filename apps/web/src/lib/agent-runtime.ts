@@ -85,6 +85,7 @@ import {
   getDeploymentRpcUrl,
   parseDeploymentEnvironment,
 } from "./deployment-env";
+import { EIP7702_SIMULATION_PROVIDER_ID } from "./live-eip7702-signing-package-builder";
 import { LivePermitSigningPackageBuilder } from "./live-signing-package-builder";
 import { LiveBuyerExecutionVerifier } from "./live-buyer-report-verifier";
 
@@ -384,7 +385,9 @@ class LiveRpcSimulator implements RescuePlanSimulatorPort {
       publicClient,
     );
     const provider = new LocalSimulationProvider({
-      id: `${this.chain.id}-rpc-preflight-v1`,
+      id: this.chain.chain.id === xLayerMainnetConfig.chain.id
+        ? EIP7702_SIMULATION_PROVIDER_ID
+        : `${this.chain.id}-rpc-preflight-v1`,
       kind: this.chain.environment === "MAINNET" ? "PRODUCTION_RPC" : "TEST_RPC",
       client,
       ttlMs: 300_000,

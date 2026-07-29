@@ -1,14 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  eip7702LocalSigningPackageSchema,
   SIGNING_PACKAGE_EIP712_TYPES,
   signingPackageSchema,
   type AgentServiceJob,
   type BuyerExecutionReport,
+  type Eip7702LocalSigningPackage,
   type SigningPackage,
 } from "@safeexit/agent-service";
 import {
+  EIP7702_ACTION_KIND,
   getConfiguredPermitSettlementAddress,
+  hashEip7702RescuePlan,
   PERMIT_KIND_ERC2612,
   PERMIT_SETTLEMENT_NAME,
   PERMIT_SETTLEMENT_VERSION,
@@ -35,6 +39,7 @@ import {
 const source = evmAddressSchema.parse("0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
 const destination = evmAddressSchema.parse("0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65");
 const token = evmAddressSchema.parse("0x5FbDB2315678afecb367f032d93F642f64180aa3");
+const secondToken = evmAddressSchema.parse("0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512");
 const settlementContract = getConfiguredPermitSettlementAddress(196)!;
 const now = "2026-07-13T06:00:00.000Z";
 const planHash = `0x${"3".repeat(64)}`;
@@ -106,7 +111,7 @@ const plan: RescuePlan = {
     }],
     riskLevel: "MEDIUM",
     supportStatus: "SUPPORTED",
-    simulationStatus: "PASSED",
+    simulationStatus: "NOT_SIMULATED",
     actionType: "TRANSFER_ERC20",
     parameters: { tokenAddress: token, recipient: destination, amount: "100" },
   }],
@@ -291,6 +296,59 @@ const completedJob: AgentServiceJob = {
   revision: 6,
 };
 
+const eip7702Action = {
+  kind: EIP7702_ACTION_KIND.TRANSFER_ERC20,
+  asset: token,
+  counterparty: destination,
+  tokenId: 0n,
+  amount: 100n,
+} as const;
+
+const eip7702SigningPackage: Eip7702LocalSigningPackage =
+  eip7702LocalSigningPackageSchema.parse({
+    schemaVersion: "safeexit-eip7702-signing-package-v1",
+    packageId: "eip7702-package:test",
+    jobId: waitingJob.id,
+    incidentId: incident.id,
+    planId: plan.id,
+    planHash,
+    delegatePlanHash: hashEip7702RescuePlan([eip7702Action]),
+    route: "EIP7702_DELEGATED_RESCUE",
+    chainId: incident.chainId,
+    sourceAddress: source,
+    destinationAddress: destination,
+    observedAtBlock: plan.observedAtBlock,
+    expiresAt: "2026-07-13T06:05:00.000Z",
+    deadline: Math.floor(Date.parse("2026-07-13T06:05:00.000Z") / 1_000),
+    sourceNonce: 0,
+    rescueNonce: `0x${"7".repeat(64)}`,
+    factoryAddress: "0x1000000000000000000000000000000000000001",
+    factoryRuntimeHash: `0x${"4".repeat(64)}`,
+    delegateAddress: "0x2000000000000000000000000000000000000002",
+    actionIds: ["action:transfer"],
+    actions: [{
+      ...eip7702Action,
+      tokenId: eip7702Action.tokenId.toString(),
+      amount: eip7702Action.amount.toString(),
+    }],
+    executionIndexes: [0],
+    simulation: {
+      resultIds: ["simulation:test"],
+      providerId: "test-simulator",
+      status: "SUCCEEDED",
+      expiresAt: "2026-07-13T06:06:00.000Z",
+    },
+    policy: {
+      sourceSignsLocally: true,
+      destinationPaysAllGas: true,
+      privateCredentialsAccepted: false,
+      authorizationsReturnedToSafeExit: false,
+      arbitraryCallsAllowed: false,
+      postAuthorizationSimulationRequired: true,
+      delegationClearRequired: true,
+    },
+  });
+
 const request: OkxA2ATaskRequest = {
   schemaVersion: "safeexit-okx-a2a-v1",
   transportMode: "SAFEEXIT_NORMALIZED",
@@ -316,7 +374,7 @@ function lifecycle(
   job: AgentServiceJob = waitingJob,
 ): SafeExitAgentLifecyclePort {
   return {
-    createIncident: vi.fn(async () => job),
+    createIncident: vi.fn(async ({ requestId }) => ({ ...job, requestId })),
     analyseIncident: vi.fn(async () => job),
     generatePlan: vi.fn(async () => job),
     simulatePlan: vi.fn(async () => job),
@@ -459,6 +517,205 @@ describe("OKX A2A provider bridge", () => {
     );
   });
 
+  it("prefers one scoped EIP-7702 package for a paid X Layer rescue", async () => {
+    const eip7702Builder = {
+      build: vi.fn(async () => eip7702SigningPackage),
+    };
+    const bridge = new OkxA2AProviderBridge(
+      "5196",
+      () => new Date(now),
+      undefined,
+      undefined,
+      eip7702Builder,
+    );
+    const service = lifecycle();
+    const paidRequest = okxX402PrepareRequestSchema.parse({
+      schemaVersion: "safeexit-okx-x402-v1",
+      transportMode: "OKX_X402",
+      requestId: "paid-eip7702-request",
+      buyerAgentId: "100",
+      service: "compromised-wallet-rescue",
+      walletContext: request.walletContext,
+      assetManifest: request.assetManifest,
+      authorization: request.authorization,
+    });
+
+    const result = await bridge.preparePaidSigningDeliverable(service, paidRequest);
+
+    expect(result.signingPackages).toHaveLength(1);
+    expect(result.signingPackages[0]).toMatchObject({
+      executionPath: "SAFEEXIT_EIP7702",
+      authorizationStandard: "EIP7702",
+      signingPackage: {
+        route: "EIP7702_DELEGATED_RESCUE",
+        actionIds: ["action:transfer"],
+      },
+    });
+    expect(result.coverage).toEqual({
+      issuedActionIds: ["action:transfer"],
+      unavailableActionIds: [],
+    });
+    expect(eip7702Builder.build).toHaveBeenCalledWith(expect.objectContaining({
+      id: waitingJob.id,
+      requestId: "okx:5196:x402:paid-eip7702-request",
+    }));
+    expect(service.getSigningPackages).not.toHaveBeenCalled();
+  });
+
+  it("returns both requested ERC-20 rescues in one paid EIP-7702 envelope", async () => {
+    const secondAction = {
+      ...plan.actions[0]!,
+      id: "action:second-transfer",
+      evidenceIds: ["asset:second"],
+      parameters: {
+        tokenAddress: secondToken,
+        recipient: destination,
+        amount: "250",
+      },
+    };
+    const mixedPlan = {
+      ...plan,
+      actions: [...plan.actions, secondAction],
+    };
+    const firstSimulation = waitingJob.simulation!.results[0]!;
+    const mixedJob: AgentServiceJob = {
+      ...waitingJob,
+      plan: mixedPlan,
+      simulation: {
+        ...waitingJob.simulation!,
+        results: [
+          firstSimulation,
+          {
+            ...firstSimulation,
+            id: "simulation:second",
+            actionId: secondAction.id,
+            expectedEffects: secondAction.expectedEffects,
+          },
+        ],
+        executableActionIds: ["action:transfer", secondAction.id],
+      },
+    };
+    const secondEip7702Action = {
+      kind: EIP7702_ACTION_KIND.TRANSFER_ERC20,
+      asset: secondToken,
+      counterparty: destination,
+      tokenId: 0n,
+      amount: 250n,
+    } as const;
+    const mixedPackage = eip7702LocalSigningPackageSchema.parse({
+      ...eip7702SigningPackage,
+      packageId: "eip7702-package:mixed",
+      delegatePlanHash: hashEip7702RescuePlan([
+        eip7702Action,
+        secondEip7702Action,
+      ]),
+      actionIds: ["action:transfer", secondAction.id],
+      actions: [eip7702Action, secondEip7702Action].map((action) => ({
+        ...action,
+        tokenId: action.tokenId.toString(),
+        amount: action.amount.toString(),
+      })),
+      executionIndexes: [0, 1],
+      simulation: {
+        ...eip7702SigningPackage.simulation,
+        resultIds: ["simulation:test", "simulation:second"],
+      },
+    });
+    const bridge = new OkxA2AProviderBridge(
+      "5196",
+      () => new Date(now),
+      undefined,
+      undefined,
+      { build: vi.fn(async () => mixedPackage) },
+    );
+    const service = lifecycle([], mixedJob);
+
+    const result = await bridge.preparePaidSigningDeliverable(service, {
+      schemaVersion: "safeexit-okx-x402-v1",
+      transportMode: "OKX_X402",
+      requestId: "paid-multi-asset-eip7702",
+      buyerAgentId: "100",
+      service: "compromised-wallet-rescue",
+      walletContext: request.walletContext,
+      assetManifest: {
+        erc20TokenAddresses: [token, secondToken],
+        erc721Assets: [],
+        erc1155Assets: [],
+      },
+      authorization: request.authorization,
+    });
+
+    expect(result.signingPackages).toHaveLength(1);
+    expect(result.signingPackages[0]?.signingPackage).toMatchObject({
+      route: "EIP7702_DELEGATED_RESCUE",
+      actionIds: ["action:transfer", "action:second-transfer"],
+    });
+    expect(result.coverage).toEqual({
+      issuedActionIds: ["action:transfer", "action:second-transfer"],
+      unavailableActionIds: [],
+    });
+  });
+
+  it("rejects an EIP-7702 package outside the paid asset manifest", async () => {
+    const bridge = new OkxA2AProviderBridge(
+      "5196",
+      () => new Date(now),
+      undefined,
+      undefined,
+      { build: vi.fn(async () => eip7702SigningPackage) },
+    );
+    const service = lifecycle();
+
+    await expect(bridge.preparePaidSigningDeliverable(service, {
+      schemaVersion: "safeexit-okx-x402-v1",
+      transportMode: "OKX_X402",
+      requestId: "paid-eip7702-scope-mismatch",
+      buyerAgentId: "100",
+      service: "compromised-wallet-rescue",
+      walletContext: request.walletContext,
+      assetManifest: {
+        erc20TokenAddresses: [destination],
+        erc721Assets: [],
+        erc1155Assets: [],
+      },
+      authorization: request.authorization,
+    })).rejects.toMatchObject({
+      code: "HANDOFF_SCOPE_MISMATCH",
+      message: "EIP-7702 signing package includes an undeclared or unverified rescue action",
+    });
+  });
+
+  it("falls back to permit packages when EIP-7702 is unavailable", async () => {
+    const bridge = new OkxA2AProviderBridge(
+      "5196",
+      () => new Date(now),
+      undefined,
+      undefined,
+      { build: vi.fn(async () => {
+        throw new Error("EIP-7702 is unavailable on this chain");
+      }) },
+    );
+    const service = lifecycle();
+
+    const result = await bridge.preparePaidSigningDeliverable(service, {
+      schemaVersion: "safeexit-okx-x402-v1",
+      transportMode: "OKX_X402",
+      requestId: "paid-permit-fallback",
+      buyerAgentId: "100",
+      service: "compromised-wallet-rescue",
+      walletContext: request.walletContext,
+      assetManifest: request.assetManifest,
+      authorization: request.authorization,
+    });
+
+    expect(result.signingPackages[0]).toMatchObject({
+      executionPath: "SAFEEXIT_SETTLEMENT",
+      authorizationStandard: "ERC2612",
+      signingPackage: { route: "ERC2612_PERMIT_SETTLEMENT" },
+    });
+    expect(service.getSigningPackages).toHaveBeenCalledWith(waitingJob.id);
+  });
+
   it("refreshes only the exact persisted paid job scope", async () => {
     const bridge = new OkxA2AProviderBridge("5196", () => new Date(now));
     const paidJob: AgentServiceJob = {
@@ -489,6 +746,47 @@ describe("OKX A2A provider bridge", () => {
       ...refreshRequest,
       requestId: "another-paid-request",
     })).rejects.toMatchObject({ code: "HANDOFF_SCOPE_MISMATCH" });
+  });
+
+  it("refreshes a paid X Layer job with a fresh EIP-7702 package", async () => {
+    const refreshedPackage = eip7702LocalSigningPackageSchema.parse({
+      ...eip7702SigningPackage,
+      packageId: "eip7702-package:refreshed",
+    });
+    const eip7702Builder = {
+      build: vi.fn(async () => refreshedPackage),
+    };
+    const bridge = new OkxA2AProviderBridge(
+      "5196",
+      () => new Date(now),
+      undefined,
+      undefined,
+      eip7702Builder,
+    );
+    const paidJob: AgentServiceJob = {
+      ...waitingJob,
+      requestId: "okx:5196:x402:paid-request-1",
+      incident: { ...incident, assetManifest: request.assetManifest },
+    };
+    const service = lifecycle([signingPackage], paidJob);
+
+    const refreshed = await bridge.refreshPaidSigningDeliverable(service, {
+      schemaVersion: "safeexit-okx-x402-refresh-v1",
+      transportMode: "OKX_X402",
+      requestId: "paid-request-1",
+      safeExitJobId: paidJob.id,
+      continuationToken: "a".repeat(64),
+    });
+
+    expect(refreshed.signingPackages[0]).toMatchObject({
+      executionPath: "SAFEEXIT_EIP7702",
+      signingPackage: { packageId: "eip7702-package:refreshed" },
+    });
+    expect(eip7702Builder.build).toHaveBeenCalledWith(expect.objectContaining({
+      id: paidJob.id,
+      requestId: paidJob.requestId,
+    }));
+    expect(service.getSigningPackages).not.toHaveBeenCalled();
   });
 
   it("returns one deliverable containing every package in a mixed rescue plan", async () => {
