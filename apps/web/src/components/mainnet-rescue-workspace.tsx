@@ -160,6 +160,22 @@ function actionLabel(actionType: string): string {
   return actionType.toLowerCase().replaceAll("_", " ");
 }
 
+function delegatedOutcomeMessage(
+  outcome: Eip7702ExecutionResult["outcomes"][number],
+): string | undefined {
+  if (outcome.status === "COMPLETED") {
+    return undefined;
+  }
+  const reason = outcome.failureReason?.toLowerCase() ?? "";
+  if (reason.includes("expired") || reason.includes("deadline")) {
+    return "The signed rescue package expired before this asset could be submitted. Run fresh preflight before retrying the remaining asset.";
+  }
+  if (outcome.status === "SIMULATION_FAILED") {
+    return "The exact delegated call failed its final local simulation, so no transaction was submitted for this asset.";
+  }
+  return "The delegated transaction reverted and this asset was not moved.";
+}
+
 function executionPathLabel(
   executionPath: MainnetPreflightResponse["gaslessActions"][number]["executionPath"],
 ): string {
@@ -724,7 +740,7 @@ export function MainnetRescueWorkspace({
         const completionWarnings = [
           ...(result.status !== "COMPLETED"
             ? [
-                "The delegated rescue finished without completing every action. Review the per-transaction status before retrying.",
+                `${result.outcomes.filter((outcome) => outcome.status !== "COMPLETED").length} of ${result.outcomes.length} delegated actions did not complete. The source delegation was cleared; review each asset outcome below before starting a fresh rescue for anything still present.`,
               ]
             : []),
           ...(refundError
@@ -1153,11 +1169,45 @@ export function MainnetRescueWorkspace({
               <section>
                 <div className="section-rule"><p className="font-mono text-[10px] font-bold uppercase text-info">Execution status</p><h2 className="mt-2 text-xl font-black sm:text-2xl">Destination-paid execution</h2></div>
                 {eip7702Result && (
-                  <div className="paper-panel mt-5 flex items-center justify-between gap-4 bg-surface-muted p-3">
-                    <span className="text-xs font-bold">Delegated batch and canonical clearing</span>
-                    <Badge variant={eip7702Result.status === "COMPLETED" ? "success" : eip7702Result.status === "FAILED" ? "danger" : "info"}>
-                      {eip7702Result.status}
-                    </Badge>
+                  <div className="mt-5">
+                    <div className="paper-panel flex items-center justify-between gap-4 bg-surface-muted p-3">
+                      <span className="text-xs font-bold">Delegated batch and canonical clearing</span>
+                      <Badge variant={eip7702Result.status === "COMPLETED" ? "success" : eip7702Result.status === "FAILED" ? "danger" : "info"}>
+                        {eip7702Result.status}
+                      </Badge>
+                    </div>
+                    <div className="divide-y-2 divide-border-strong border-x-2 border-b-2 border-border-strong bg-surface">
+                      {eip7702Result.outcomes.map((outcome) => {
+                        const plannedAction = preflight?.plan.actions.find(
+                          (action) => action.id === outcome.actionId,
+                        );
+                        const failure = delegatedOutcomeMessage(outcome);
+                        return (
+                          <div key={`${outcome.actionId}:${outcome.actionIndex}`} className="p-3">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <span className="text-xs font-extrabold">
+                                {plannedAction
+                                  ? actionLabel(plannedAction.actionType)
+                                  : `Rescue action ${outcome.actionIndex + 1}`}
+                              </span>
+                              <Badge variant={outcome.status === "COMPLETED" ? "success" : "danger"}>
+                                {outcome.status === "COMPLETED" ? "MOVED" : "NOT MOVED"}
+                              </Badge>
+                            </div>
+                            {plannedAction && (
+                              <div className="mt-2">
+                                <CopyAddress address={actionTarget(plannedAction)} compact />
+                              </div>
+                            )}
+                            {failure && (
+                              <p className="mt-2 text-xs font-semibold leading-5 text-danger">
+                                {failure}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
                 <div className="mt-5 space-y-4">

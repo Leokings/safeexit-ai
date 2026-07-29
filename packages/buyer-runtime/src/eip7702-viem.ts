@@ -485,10 +485,12 @@ implements Eip7702DestinationTransportPort {
     });
   }
 
-  async waitForReceipt(hash: Hex): Promise<DestinationReceipt> {
-    const policy = getRescueFinalityPolicy(this.chain.chain.id);
+  private async waitForCanonicalReceipt(
+    hash: Hex,
+    minimumConfirmations: number,
+  ): Promise<DestinationReceipt> {
     const requiredConfirmationOffset = BigInt(
-      Math.max(1, policy.minimumConfirmations) - 1,
+      Math.max(1, minimumConfirmations) - 1,
     );
     const deadline = Date.now() + RECEIPT_TIMEOUT_MS;
     let receipt:
@@ -528,7 +530,7 @@ implements Eip7702DestinationTransportPort {
     ) {
       throw new Eip7702RuntimeError(
         "SUBMISSION_FAILED",
-        `The transaction did not reach ${policy.minimumConfirmations} canonical ` +
+        `The transaction did not reach ${minimumConfirmations} canonical ` +
           `confirmations before timeout (${lastObservation})`,
         [hash],
       );
@@ -583,10 +585,10 @@ implements Eip7702DestinationTransportPort {
     const confirmations = latestBlock >= receipt.blockNumber
       ? latestBlock - receipt.blockNumber + 1n
       : 0n;
-    if (confirmations < BigInt(policy.minimumConfirmations)) {
+    if (confirmations < BigInt(minimumConfirmations)) {
       throw new Eip7702RuntimeError(
         "SUBMISSION_FAILED",
-        `The EIP-7702 transaction has fewer than ${policy.minimumConfirmations} confirmations`,
+        `The EIP-7702 transaction has fewer than ${minimumConfirmations} confirmations`,
         [hash],
       );
     }
@@ -604,6 +606,15 @@ implements Eip7702DestinationTransportPort {
         ? {}
         : { failureReason: "EIP-7702 destination-paid transaction reverted" }),
     });
+  }
+
+  async waitForInclusion(hash: Hex): Promise<DestinationReceipt> {
+    return this.waitForCanonicalReceipt(hash, 1);
+  }
+
+  async waitForReceipt(hash: Hex): Promise<DestinationReceipt> {
+    const policy = getRescueFinalityPolicy(this.chain.chain.id);
+    return this.waitForCanonicalReceipt(hash, policy.minimumConfirmations);
   }
 }
 

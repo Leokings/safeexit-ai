@@ -90,6 +90,24 @@ afterEach(() => {
 });
 
 describe("ViemLocalEip7702DestinationTransport", () => {
+  it("returns after canonical inclusion without waiting for finality", async () => {
+    const { transport } = transportWith([
+      {
+        type: "eip7702",
+        authorizationList: [authorization],
+      },
+    ]);
+    const internals = transport as unknown as TransportInternals;
+    internals.publicClient.getBlockNumber.mockReset().mockResolvedValue(100n);
+
+    await expect(transport.waitForInclusion(transactionHash)).resolves.toMatchObject({
+      status: "CONFIRMED",
+      confirmations: 1,
+      canonical: true,
+    });
+    expect(internals.publicClient.getBlockNumber).toHaveBeenCalledTimes(1);
+  });
+
   it("polls receipt and block state until the confirmation policy is met", async () => {
     vi.useFakeTimers();
     const { transport } = transportWith([

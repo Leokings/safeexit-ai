@@ -105,6 +105,7 @@ export interface Eip7702DestinationTransportPort {
     request: Eip7702LocalTransactionRequest,
   ): Promise<Eip7702LocalSimulation>;
   submit(request: Eip7702LocalTransactionRequest): Promise<Hex>;
+  waitForInclusion(hash: Hex): Promise<DestinationReceipt>;
   waitForReceipt(hash: Hex): Promise<DestinationReceipt>;
 }
 
@@ -431,7 +432,7 @@ export class LocalEip7702RescueRuntime {
     if (!inspection.delegateState) {
       const deploymentHash = await destination.deployDelegate(signingPackage);
       const receipt = receiptForHash(
-        await destination.waitForReceipt(deploymentHash),
+        await destination.waitForInclusion(deploymentHash),
         deploymentHash,
       );
       if (receipt.status !== "CONFIRMED") {
@@ -597,7 +598,7 @@ export class LocalEip7702RescueRuntime {
           delegationSubmitted = true;
         }
         const receipt = receiptForHash(
-          await destination.waitForReceipt(transactionHash),
+          await destination.waitForInclusion(transactionHash),
           transactionHash,
         );
         outcomes.push({

@@ -127,15 +127,18 @@ function delegationCode(address: string): Hex {
   return `0xef0100${address.slice(2).toLowerCase()}` as Hex;
 }
 
-function confirmedReceipt(hash: Hex, status: "CONFIRMED" | "FAILED" = "CONFIRMED"):
-DestinationReceipt {
+function confirmedReceipt(
+  hash: Hex,
+  status: "CONFIRMED" | "FAILED" = "CONFIRMED",
+  confirmations = 64,
+): DestinationReceipt {
   return status === "CONFIRMED"
     ? {
         status,
         transactionHashes: [hash],
         blockNumber: "101",
         blockHash,
-        confirmations: 64,
+        confirmations,
         canonical: true,
         observedAt: now.toISOString(),
       }
@@ -144,27 +147,29 @@ DestinationReceipt {
         transactionHashes: [hash],
         blockNumber: "101",
         blockHash,
-        confirmations: 64,
+        confirmations,
         canonical: true,
         observedAt: now.toISOString(),
         failureReason: "execution reverted",
       };
 }
 
-function localRuntime(): LocalEip7702RescueRuntime {
+function localRuntime(clock: () => Date = () => now): LocalEip7702RescueRuntime {
   return new LocalEip7702RescueRuntime({
     trustedFactory: {
       chainId: 196,
       address: factoryAddress,
       runtimeHash: factoryRuntimeHash,
     },
-    clock: () => now,
+    clock,
   });
 }
 
 class MockDestinationTransport implements Eip7702DestinationTransportPort {
   readonly requests: Eip7702LocalTransactionRequest[] = [];
   readonly signedAuthorizations: SignedAuthorization[] = [];
+  readonly inclusionHashes: Hex[] = [];
+  readonly finalityHashes: Hex[] = [];
   sourceNonce = 7;
   sourceCode: Hex = "0x";
   delegateDeployed = false;
@@ -175,6 +180,7 @@ class MockDestinationTransport implements Eip7702DestinationTransportPort {
   clearSucceeds = true;
   clearReceiptFailsAfterClearing = false;
   throwOnFirstRescueReceipt = false;
+  onFinalityWait?: () => void;
   private rescueCount = 0;
 
   constructor(
@@ -252,7 +258,10 @@ class MockDestinationTransport implements Eip7702DestinationTransportPort {
     return this.rescueCount === 1 ? rescueHashOne : rescueHashTwo;
   }
 
-  async waitForReceipt(hash: Hex): Promise<DestinationReceipt> {
+  private receiptFor(
+    hash: Hex,
+    confirmations: number,
+  ): DestinationReceipt {
     if (hash === rescueHashOne && this.throwOnFirstRescueReceipt) {
       throw new Error("mock receipt polling failure");
     }
@@ -260,24 +269,35 @@ class MockDestinationTransport implements Eip7702DestinationTransportPort {
       hash === clearHash &&
       (!this.clearSucceeds || this.clearReceiptFailsAfterClearing)
     ) {
-      return confirmedReceipt(hash, "FAILED");
+      return confirmedReceipt(hash, "FAILED", confirmations);
     }
     const request = this.requests.find((candidate, index) => {
       const requestHash = index === 0 ? rescueHashOne : rescueHashTwo;
       return requestHash === hash && candidate.purpose === "RESCUE_ACTION";
     });
     if (request && this.revertIndexes.has(request.actionIndex ?? -1)) {
-      return confirmedReceipt(hash, "FAILED");
+      return confirmedReceipt(hash, "FAILED", confirmations);
     }
-    return confirmedReceipt(hash);
+    return confirmedReceipt(hash, "CONFIRMED", confirmations);
+  }
+
+  async waitForInclusion(hash: Hex): Promise<DestinationReceipt> {
+    this.inclusionHashes.push(hash);
+    return this.receiptFor(hash, 1);
+  }
+
+  async waitForReceipt(hash: Hex): Promise<DestinationReceipt> {
+    this.finalityHashes.push(hash);
+    this.onFinalityWait?.();
+    return this.receiptFor(hash, 64);
   }
 }
 
 async function authorizedRuntime(
   transport: MockDestinationTransport,
   signingPackage = packageValue(),
+  runtime = localRuntime(),
 ) {
-  const runtime = localRuntime();
   const provisioned = await runtime.provision(
     signingPackage,
     confirmation(signingPackage),
@@ -350,8 +370,39 @@ describe("local destination-paid EIP-7702 runtime", () => {
       to: sourceAccount.address,
       data: "0x",
     });
+    expect(transport.inclusionHashes).toEqual([
+      deploymentHash,
+      rescueHashOne,
+      rescueHashTwo,
+    ]);
+    expect(transport.finalityHashes).toEqual([clearHash]);
     expect(transport.sourceCode).toBe("0x");
     expect(transport.sourceNonce).toBe(9);
+  });
+
+  it("finishes every action before waiting for canonical finality", async () => {
+    let currentTime = now;
+    const runtime = localRuntime(() => currentTime);
+    const transport = new MockDestinationTransport(otherAccount.address);
+    transport.onFinalityWait = () => {
+      currentTime = new Date(Date.parse(expiresAt) + 60_000);
+    };
+    const { authorized } = await authorizedRuntime(
+      transport,
+      packageValue(),
+      runtime,
+    );
+
+    const result = await runtime.execute(authorized);
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.outcomes).toHaveLength(2);
+    expect(transport.inclusionHashes).toEqual([
+      deploymentHash,
+      rescueHashOne,
+      rescueHashTwo,
+    ]);
+    expect(transport.finalityHashes).toEqual([clearHash]);
   });
 
   it("skips a failed simulation, rescues the remaining asset, and still clears", async () => {
