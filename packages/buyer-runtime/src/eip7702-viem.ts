@@ -505,16 +505,32 @@ implements Eip7702DestinationTransportPort {
         const observedLatestBlock = await this.publicClient.getBlockNumber({
           cacheTime: 0,
         });
-        receipt = candidate;
-        latestBlock = observedLatestBlock;
         const requiredBlock =
           candidate.blockNumber + requiredConfirmationOffset;
         if (observedLatestBlock >= requiredBlock) {
-          break;
+          const [canonicalBlock, refreshedReceipt] = await Promise.all([
+            this.publicClient.getBlock({ blockNumber: candidate.blockNumber }),
+            this.publicClient.getTransactionReceipt({ hash }),
+          ]);
+          if (
+            canonicalBlock.hash.toLowerCase() ===
+              candidate.blockHash.toLowerCase() &&
+            refreshedReceipt.blockHash.toLowerCase() ===
+              candidate.blockHash.toLowerCase() &&
+            refreshedReceipt.blockNumber === candidate.blockNumber
+          ) {
+            receipt = refreshedReceipt;
+            latestBlock = observedLatestBlock;
+            break;
+          }
+          lastObservation =
+            `receipt block ${candidate.blockNumber} did not match the ` +
+            "refreshed canonical RPC view";
+        } else {
+          lastObservation =
+            `receipt block ${candidate.blockNumber} has latest block ` +
+            `${observedLatestBlock}`;
         }
-        lastObservation =
-          `receipt block ${candidate.blockNumber} has latest block ` +
-          `${observedLatestBlock}`;
       } catch (error) {
         lastObservation = safeMessage(error);
       }
@@ -536,21 +552,6 @@ implements Eip7702DestinationTransportPort {
       );
     }
     const expectedAuthorizations = this.submittedAuthorizations.get(hash);
-    const [canonicalBlock, refreshedReceipt] = await Promise.all([
-      this.publicClient.getBlock({ blockNumber: receipt.blockNumber }),
-      this.publicClient.getTransactionReceipt({ hash }),
-    ]);
-    if (
-      canonicalBlock.hash.toLowerCase() !== receipt.blockHash.toLowerCase() ||
-      refreshedReceipt.blockHash.toLowerCase() !== receipt.blockHash.toLowerCase() ||
-      refreshedReceipt.blockNumber !== receipt.blockNumber
-    ) {
-      throw new Eip7702RuntimeError(
-        "SUBMISSION_FAILED",
-        "The EIP-7702 receipt block is no longer canonical",
-        [hash],
-      );
-    }
     if (expectedAuthorizations) {
       let preserved = false;
       let lastObservation = "transaction data was unavailable";

@@ -136,6 +136,75 @@ describe("ViemLocalEip7702DestinationTransport", () => {
     ).not.toHaveBeenCalled();
   });
 
+  it("retries a transient canonical block mismatch", async () => {
+    vi.useFakeTimers();
+    const { transport } = transportWith([
+      {
+        type: "eip7702",
+        authorizationList: [authorization],
+      },
+    ]);
+    const internals = transport as unknown as TransportInternals;
+    internals.publicClient.getBlock
+      .mockReset()
+      .mockResolvedValueOnce({ hash: `0x${"99".repeat(32)}` })
+      .mockResolvedValueOnce({ hash: blockHash });
+
+    const receiptPromise = transport.waitForInclusion(transactionHash);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(receiptPromise).resolves.toMatchObject({
+      status: "CONFIRMED",
+      blockNumber: "100",
+      canonical: true,
+    });
+    expect(internals.publicClient.getBlock).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts a transaction re-included in a new canonical block", async () => {
+    vi.useFakeTimers();
+    const replacementBlockHash = `0x${"a1".repeat(32)}` as Hex;
+    const { transport } = transportWith([
+      {
+        type: "eip7702",
+        authorizationList: [authorization],
+      },
+    ]);
+    const internals = transport as unknown as TransportInternals;
+    internals.publicClient.getTransactionReceipt
+      .mockReset()
+      .mockResolvedValueOnce({
+        status: "success",
+        blockNumber: 100n,
+        blockHash,
+      })
+      .mockResolvedValueOnce({
+        status: "success",
+        blockNumber: 101n,
+        blockHash: replacementBlockHash,
+      })
+      .mockResolvedValue({
+        status: "success",
+        blockNumber: 101n,
+        blockHash: replacementBlockHash,
+      });
+    internals.publicClient.getBlock
+      .mockReset()
+      .mockResolvedValueOnce({ hash: blockHash })
+      .mockResolvedValueOnce({ hash: replacementBlockHash });
+
+    const receiptPromise = transport.waitForInclusion(transactionHash);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(receiptPromise).resolves.toMatchObject({
+      status: "CONFIRMED",
+      blockNumber: "101",
+      blockHash: replacementBlockHash,
+      canonical: true,
+    });
+    expect(internals.publicClient.getBlock).toHaveBeenCalledTimes(2);
+  });
+
   it("accepts an exact authorization after a transient incomplete RPC read", async () => {
     vi.useFakeTimers();
     const { transport, getTransaction } = transportWith([
